@@ -103,7 +103,7 @@ const Navbar = () => {
             href="https://wa.me/34614159462"
             target="_blank"
             rel="noopener noreferrer"
-            className="primary-button text-xs sm:text-sm uppercase tracking-widest font-semibold hidden xs:block"
+            className="primary-button text-sm sm:text-sm uppercase tracking-widest font-semibold hidden xs:block"
           >
             {t.nav.book}
           </a>
@@ -189,7 +189,7 @@ const Hero = ({ onOpenBooking }: { onOpenBooking: () => void }) => {
               referrerPolicy="no-referrer"
             />
             <div className="absolute -bottom-4 -left-8 bg-white p-5 rounded-2xl shadow-xl max-w-[200px]">
-              <p className="text-base sm:text-base font-serif italic text-primary leading-relaxed">{t.hero.quote}</p>
+              <p className="text-lg sm:text-base font-serif italic text-primary leading-relaxed">{t.hero.quote}</p>
             </div>
           </div>
         </motion.div>
@@ -234,8 +234,8 @@ const ServiceCard = ({
         />
         <div className="absolute inset-0 bg-black/40 group-hover:bg-black/20 transition-colors duration-500" />
         <div className="absolute inset-0 p-4 sm:p-6 flex flex-col items-center justify-center text-center">
-          <h3 className="text-white text-lg sm:text-lg md:text-xl lg:text-2xl font-serif leading-tight drop-shadow-lg">{title}</h3>
-          <div className="mt-4 bg-white/20 backdrop-blur-md px-4 py-1 rounded-full text-white text-xs font-bold uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity">
+          <h3 className="text-white text-xl sm:text-lg md:text-xl lg:text-2xl font-serif leading-tight drop-shadow-lg">{title}</h3>
+          <div className="mt-4 bg-white/20 backdrop-blur-md px-4 py-1 rounded-full text-white text-sm font-bold uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity">
             {lang === 'fr' ? 'Détails' : lang === 'es' ? 'Detalles' : 'Details'}
           </div>
         </div>
@@ -274,10 +274,10 @@ const ServiceCard = ({
                   <X size={20} className="text-gray-400" />
                 </button>
               </div>
-              {intro && <p className="text-gray-600 mb-6 text-xs sm:text-sm leading-relaxed italic border-l-2 border-primary/20 pl-4">{intro}</p>}
+              {intro && <p className="text-gray-600 mb-6 text-sm sm:text-sm leading-relaxed italic border-l-2 border-primary/20 pl-4">{intro}</p>}
               <ul className="space-y-2 sm:space-y-3 mb-6">
                 {items.map((item, i) => (
-                  <li key={i} className="flex items-start gap-2 sm:gap-3 text-gray-700 text-xs sm:text-sm">
+                  <li key={i} className="flex items-start gap-2 sm:gap-3 text-gray-700 text-sm sm:text-sm">
                     <Check size={14} className="text-primary mt-1 shrink-0" />
                     <span>{item}</span>
                   </li>
@@ -329,10 +329,10 @@ const Services = () => {
             extraContent={
               <div className="space-y-4 sm:space-y-6">
                 <div>
-                  <h4 className="font-semibold text-primary mb-2 sm:mb-3 uppercase tracking-wider text-[11px] sm:text-xs">{t.services.athletesSeniors.athletes.title}</h4>
+                  <h4 className="font-semibold text-primary mb-2 sm:mb-3 uppercase tracking-wider text-sm sm:text-xs">{t.services.athletesSeniors.athletes.title}</h4>
                   <ul className="space-y-1 sm:space-y-2">
                     {t.services.athletesSeniors.athletes.items.map((item, i) => (
-                      <li key={i} className="flex items-start gap-2 sm:gap-3 text-gray-700 text-xs sm:text-sm">
+                      <li key={i} className="flex items-start gap-2 sm:gap-3 text-gray-700 text-sm sm:text-sm">
                         <Check size={12} className="text-primary mt-1 shrink-0" />
                         <span>{item}</span>
                       </li>
@@ -340,10 +340,10 @@ const Services = () => {
                   </ul>
                 </div>
                 <div>
-                  <h4 className="font-semibold text-primary mb-2 sm:mb-3 uppercase tracking-wider text-[11px] sm:text-xs">{t.services.athletesSeniors.seniors.title}</h4>
+                  <h4 className="font-semibold text-primary mb-2 sm:mb-3 uppercase tracking-wider text-sm sm:text-xs">{t.services.athletesSeniors.seniors.title}</h4>
                   <ul className="space-y-1 sm:space-y-2">
                     {t.services.athletesSeniors.seniors.items.map((item, i) => (
-                      <li key={i} className="flex items-start gap-2 sm:gap-3 text-gray-700 text-xs sm:text-sm">
+                      <li key={i} className="flex items-start gap-2 sm:gap-3 text-gray-700 text-sm sm:text-sm">
                         <Check size={12} className="text-primary mt-1 shrink-0" />
                         <span>{item}</span>
                       </li>
@@ -382,7 +382,7 @@ const About = () => {
               <p>{t.about.p2}</p>
               <p>{t.about.p3}</p>
               <div className="pt-4 border-t border-primary/10">
-                <p className="font-serif italic text-primary">{t.about.languages}</p>
+                <p className="font-serif italic text-primary text-lg sm:text-base">{t.about.languages}</p>
               </div>
             </div>
           </motion.div>
