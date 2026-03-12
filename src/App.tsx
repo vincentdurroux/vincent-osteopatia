@@ -180,16 +180,18 @@ const Hero = () => {
           initial={{ opacity: 0, scale: 0.9 }}
           animate={{ opacity: 1, scale: 1 }}
           transition={{ duration: 1, delay: 0.2 }}
-          className="relative hidden lg:block"
+          className="relative flex justify-center items-center mt-12 lg:mt-0"
         >
-          <img 
-            src="https://images.unsplash.com/photo-1512351735230-a07ebdf5b5e1?auto=format&fit=crop&q=80&w=1200" 
-            alt="Valencia - Ciudad de las Artes y las Ciencias" 
-            className="pill-image w-full shadow-2xl"
-            referrerPolicy="no-referrer"
-          />
-          <div className="absolute -bottom-6 -left-6 bg-white p-6 rounded-2xl shadow-xl max-w-[200px]">
-            <p className="text-sm font-serif italic text-primary">{t.hero.quote}</p>
+          <div className="relative">
+            <img 
+              src="/palm-tree.JPG" 
+              alt="Vincent Osteopatía" 
+              className="w-64 h-64 xl:w-80 xl:h-80 rounded-full object-cover shadow-2xl border-4 border-white"
+              referrerPolicy="no-referrer"
+            />
+            <div className="absolute -bottom-4 -left-8 bg-white p-4 rounded-2xl shadow-xl max-w-[180px]">
+              <p className="text-xs font-serif italic text-primary">{t.hero.quote}</p>
+            </div>
           </div>
         </motion.div>
       </div>
@@ -247,7 +249,7 @@ const ServiceCard = ({
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              className="fixed inset-0 bg-black/40 backdrop-blur-sm z-40 lg:hidden"
+              className="fixed inset-0 bg-black/40 backdrop-blur-sm z-40"
               onClick={(e) => {
                 e.stopPropagation();
                 setIsOpen(false);
@@ -257,14 +259,17 @@ const ServiceCard = ({
               initial={{ opacity: 0, scale: 0.9, y: 20 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.9, y: 20 }}
-              className="fixed inset-4 m-auto h-fit max-h-[80vh] w-[calc(100%-2rem)] max-w-[400px] z-50 bg-white rounded-3xl shadow-2xl p-6 sm:p-8 border border-primary/20 flex flex-col overflow-y-auto lg:absolute lg:inset-auto lg:top-0 lg:left-0 lg:w-[350px] lg:z-20 lg:max-h-[400px] origin-center lg:origin-top-left"
+              className="fixed inset-4 m-auto h-fit max-h-[80vh] w-[calc(100%-2rem)] max-w-[400px] z-50 bg-white rounded-3xl shadow-2xl p-6 sm:p-8 border border-primary/20 flex flex-col overflow-y-auto origin-center"
               onClick={(e) => e.stopPropagation()}
             >
               <div className="flex justify-between items-start mb-4">
                 <h3 className="text-lg sm:text-2xl font-serif text-primary">{title}</h3>
                 <button 
-                  onClick={() => setIsOpen(false)}
-                  className="lg:hidden p-1 hover:bg-gray-100 rounded-full transition-colors"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setIsOpen(false);
+                  }}
+                  className="p-1 hover:bg-gray-100 rounded-full transition-colors"
                 >
                   <X size={20} className="text-gray-400" />
                 </button>
@@ -456,7 +461,7 @@ const Location = () => {
               </div>
               <div className="flex-1">
                 <h4 className="font-semibold mb-1">{t.location.address}</h4>
-                <p className="text-gray-500 mb-4 text-sm sm:text-base">Calle General Pastor, 25, 46183 La Eliana, Valencia</p>
+                <p className="text-gray-500 mb-4 text-sm sm:text-base">{t.location.fullAddress}</p>
                 <div className="w-full h-40 sm:h-48 rounded-2xl overflow-hidden shadow-inner border border-primary/10">
                   <iframe 
                     src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3075.760775820469!2d-0.5312344!3d39.5650222!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0xd60596384000001%3A0x6d9a9d9a9d9a9d9a!2sC.%20Gral.%20Pastor%2C%2025%2C%2046183%20L'Eliana%2C%20Valencia%2C%20Spain!5e0!3m2!1sen!2sfr!4v1710245000000!5m2!1sen!2sfr" 
