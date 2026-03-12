@@ -186,7 +186,7 @@ export const translations = {
     },
     about: {
       title: 'My Background',
-      p1: 'A French osteopath with over 10 years of international experience, I practiced in Canada and France before moving to Spain.',
+      p1: 'French osteopath with over 10 years of international experience, I practiced in Canada and France before moving to Spain.',
       p2: 'After graduating from the prestigious Institut des Hautes Études Ostéopathiques in Nantes following five years of intensive full-time study, I have dedicated my career to personalized patient care.',
       p3: 'From infants to seniors, I tailor my approach — whether structural, cranial, or visceral — to the unique requirements of each individual.',
       languages: 'I am pleased to offer consultations in English🇬🇧, French🇫🇷, and Spanish🇪🇸',
