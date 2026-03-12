@@ -96,6 +96,10 @@ export const translations = {
       direct: 'Contact Direct',
       rights: 'Tous droits réservés',
       note: '⚠️ Note : L\'ostéopathie en Espagne n\'est pas une profession médicale. Je ne fournis pas de diagnostics médicaux, mais j\'aide à soulager les tensions et à favoriser le bien-être, en toute sécurité et en complément de vos soins médicaux.',
+    },
+    booking: {
+      subtitle: 'Choisissez votre mode de contact',
+      call: 'Appel Direct',
     }
   },
   en: {
@@ -193,6 +197,10 @@ export const translations = {
       direct: 'Direct Contact',
       rights: 'All rights reserved',
       note: '⚠️ Note: Osteopathy in Spain is not a medical profession. I don’t provide medical diagnoses, but I help relieve tension and support well-being, safely and alongside your medical care.',
+    },
+    booking: {
+      subtitle: 'Choose your contact method',
+      call: 'Direct Call',
     }
   },
   es: {
@@ -289,7 +297,11 @@ export const translations = {
       links: 'Enlaces Rápidos',
       direct: 'Contacto Directo',
       rights: 'Todos los derechos reservados',
-      note: '⚠️ Nota: La osteopatía en España no es una profesión médica. No proporciono diagnósticos médicos, sino que ayudo a aliviar la tensión y a fomentar el bienestar, de forma segura y en complemento de su atención médica.',
+      note: '⚠️ Nota: La osteopatía en España no es una profession médica. No proporciono diagnósticos médicos, sino que ayudo a aliviar la tensión y a fomentar el bienestar, de forma segura y en complemento de su atención médica.',
+    },
+    booking: {
+      subtitle: 'Elija su método de contacto',
+      call: 'Llamada Directa',
     }
   }
 };

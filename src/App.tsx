@@ -21,9 +21,9 @@ const LanguageSelector = () => {
   const [isOpen, setIsOpen] = useState(false);
 
   const languages: { code: Language; label: string; flag: string }[] = [
-    { code: 'fr', label: 'Français', flag: '🇫🇷' },
     { code: 'en', label: 'English', flag: '🇬🇧' },
     { code: 'es', label: 'Español', flag: '🇪🇸' },
+    { code: 'fr', label: 'Français', flag: '🇫🇷' },
   ];
 
   return (
@@ -188,8 +188,8 @@ const Hero = ({ onOpenBooking }: { onOpenBooking: () => void }) => {
               className="w-64 h-64 xl:w-80 xl:h-80 rounded-full object-cover shadow-2xl border-4 border-white"
               referrerPolicy="no-referrer"
             />
-            <div className="absolute -bottom-4 -left-8 bg-white p-4 rounded-2xl shadow-xl max-w-[180px]">
-              <p className="text-xs font-serif italic text-primary">{t.hero.quote}</p>
+            <div className="absolute -bottom-4 -left-8 bg-white p-5 rounded-2xl shadow-xl max-w-[200px]">
+              <p className="text-sm sm:text-base font-serif italic text-primary leading-relaxed">{t.hero.quote}</p>
             </div>
           </div>
         </motion.div>
@@ -582,7 +582,7 @@ const BookingModal = ({ isOpen, onClose }: { isOpen: boolean; onClose: () => voi
                 <Calendar size={32} />
               </div>
               <h3 className="text-2xl font-serif font-semibold">{t.nav.book}</h3>
-              <p className="text-gray-600 mt-2">Choisissez votre mode de contact</p>
+              <p className="text-gray-600 mt-2">{t.booking.subtitle}</p>
             </div>
 
             <div className="flex flex-col gap-4">
@@ -603,7 +603,7 @@ const BookingModal = ({ isOpen, onClose }: { isOpen: boolean; onClose: () => voi
                 className="w-full py-4 bg-primary text-white rounded-2xl font-semibold uppercase tracking-widest text-sm hover:bg-primary/90 transition-colors flex items-center justify-center gap-3 shadow-lg shadow-primary/20"
               >
                 <Phone size={20} />
-                Appel Direct
+                {t.booking.call}
               </a>
 
               <a 
