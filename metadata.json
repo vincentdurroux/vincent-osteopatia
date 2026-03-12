@@ -1,0 +1,7 @@
+{
+  "name": "Vincent Osteopatía",
+  "description": "Site web professionnel pour le cabinet Vincent Osteopatía situé à L'Eliana, Valencia. Soins personnalisés pour tous âges.",
+  "requestFramePermissions": [
+    "geolocation"
+  ]
+}

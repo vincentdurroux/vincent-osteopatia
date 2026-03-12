@@ -1,0 +1,32 @@
+import React from 'react';
+
+interface SpineLogoProps {
+  size?: number;
+  className?: string;
+}
+
+const SpineLogo: React.FC<SpineLogoProps> = ({ size = 24, className = "" }) => {
+  return (
+    <svg 
+      width={size} 
+      height={size} 
+      viewBox="0 0 24 24" 
+      fill="none" 
+      stroke="currentColor" 
+      strokeWidth="3" 
+      strokeLinecap="round" 
+      strokeLinejoin="round" 
+      className={className}
+    >
+      {/* Main curved spine path - very bold */}
+      <path d="M12 4c1.5 2 1.5 5 0 8s-1.5 6 0 8" />
+      
+      {/* Solid vertebrae blocks */}
+      <path d="M8 7h8" />
+      <path d="M7.5 12h9" />
+      <path d="M8 17h8" />
+    </svg>
+  );
+};
+
+export default SpineLogo;
