@@ -395,7 +395,7 @@ const About = () => {
           >
             <div className="aspect-[4/5] w-full max-w-[220px] sm:max-w-[280px] rounded-[30px] lg:rounded-[40px] overflow-hidden shadow-2xl relative">
               <img 
-                src="https://images.unsplash.com/photo-1612349317150-e413f6a5b16d?auto=format&fit=crop&q=80&w=600" 
+                src="" 
                 alt="Vincent - Osteopath" 
                 className="w-full h-full object-cover"
                 referrerPolicy="no-referrer"
