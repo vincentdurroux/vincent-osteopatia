@@ -223,7 +223,7 @@ const ServiceCard = ({
         initial={{ opacity: 0, y: 20 }}
         whileInView={{ opacity: 1, y: 0 }}
         viewport={{ once: true }}
-        className="card aspect-square relative overflow-hidden cursor-pointer transition-all duration-500 group-hover:shadow-2xl lg:group-hover:-translate-y-2 border border-transparent group-hover:border-primary/10"
+        className="card aspect-[4/3] sm:aspect-square relative overflow-hidden cursor-pointer transition-all duration-500 group-hover:shadow-2xl lg:group-hover:-translate-y-2 border border-transparent group-hover:border-primary/10"
       >
         <img 
           src={image} 
@@ -233,8 +233,8 @@ const ServiceCard = ({
           loading="lazy"
         />
         <div className="absolute inset-0 bg-black/40 group-hover:bg-black/20 transition-colors duration-500" />
-        <div className="absolute inset-0 p-4 sm:p-6 flex flex-col items-center justify-center text-center">
-          <h3 className="text-white text-xl sm:text-lg md:text-xl lg:text-2xl font-serif leading-tight drop-shadow-lg">{title}</h3>
+        <div className="absolute inset-0 p-3 sm:p-6 flex flex-col items-center justify-center text-center">
+          <h3 className="text-white text-base sm:text-lg md:text-xl lg:text-2xl font-serif leading-tight drop-shadow-lg">{title}</h3>
           <div className="mt-4 bg-white/20 backdrop-blur-md px-4 py-1 rounded-full text-white text-sm font-bold uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity">
             {lang === 'fr' ? 'Détails' : lang === 'es' ? 'Detalles' : 'Details'}
           </div>
@@ -303,7 +303,7 @@ const Services = () => {
           <div className="w-16 sm:w-20 h-1 bg-primary/20 mx-auto"></div>
         </div>
         
-        <div className="grid grid-cols-1 xs:grid-cols-2 md:grid-cols-4 gap-4 sm:gap-6">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-6">
           <ServiceCard 
             image="https://images.unsplash.com/photo-1519824145371-296894a0daa9?auto=format&fit=crop&q=80&w=600"
             title={t.services.musculoskeletal.title}
@@ -395,7 +395,7 @@ const About = () => {
           >
             <div className="aspect-[4/5] w-full max-w-[220px] sm:max-w-[280px] rounded-[30px] lg:rounded-[40px] overflow-hidden shadow-2xl relative">
               <img 
-                src="/photo-vincent.jpg" 
+                src="/photo-profile.jpg" 
                 alt="Vincent - Osteopath" 
                 className="w-full h-full object-cover"
                 referrerPolicy="no-referrer"
