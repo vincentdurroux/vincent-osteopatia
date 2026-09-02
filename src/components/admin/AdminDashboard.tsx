@@ -768,22 +768,25 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
 
     try {
       setIsDownloading(true);
-      // Give UI a moment to update if needed
-      await new Promise(resolve => setTimeout(resolve, 100));
+      // Ensure UI is ready
+      await new Promise(resolve => setTimeout(resolve, 200));
 
       const canvas = await html2canvas(element, {
         scale: 2,
         backgroundColor: '#ffffff',
         logging: false,
         useCORS: true,
-        allowTaint: true,
+        // Removed allowTaint as it often breaks toDataURL in production
         scrollX: 0,
-        scrollY: 0,
-        windowWidth: element.scrollWidth,
-        windowHeight: element.scrollHeight
+        scrollY: -window.scrollY, // Correct for scrolled pages
+        onclone: (clonedDoc) => {
+          // Ensure elements are visible in the clone
+          const el = clonedDoc.getElementById('receipt-print-area');
+          if (el) el.style.display = 'block';
+        }
       });
       
-      const image = canvas.toDataURL('image/jpeg', 0.9);
+      const image = canvas.toDataURL('image/jpeg', 0.95);
       const link = document.createElement('a');
       link.href = image;
       link.download = `Facture_${selectedInvoiceForPrint.invoiceNumber}.jpg`;
@@ -792,7 +795,10 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
       document.body.removeChild(link);
     } catch (err) {
       console.error('Failed to generate image:', err);
-      alert(lang === 'fr' ? 'Erreur lors du téléchargement. Veuillez réessayer.' : 'Download failed. Please try again.');
+      // Fallback for production
+      alert(lang === 'fr' 
+        ? 'Erreur lors du téléchargement. Si le problème persiste, vous pouvez faire une capture d\'écran de la facture.' 
+        : 'Download failed. If this persists, please take a screenshot.');
     } finally {
       setIsDownloading(false);
     }
@@ -805,21 +811,22 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
 
     try {
       setIsDownloading(true);
-      await new Promise(resolve => setTimeout(resolve, 100));
+      await new Promise(resolve => setTimeout(resolve, 200));
 
       const canvas = await html2canvas(element, {
         scale: 2,
         backgroundColor: '#ffffff',
         logging: false,
         useCORS: true,
-        allowTaint: true,
         scrollX: 0,
-        scrollY: 0,
-        windowWidth: element.scrollWidth,
-        windowHeight: element.scrollHeight
+        scrollY: -window.scrollY,
+        onclone: (clonedDoc) => {
+          const el = clonedDoc.getElementById('recap-print-area');
+          if (el) el.style.display = 'block';
+        }
       });
       
-      const image = canvas.toDataURL('image/jpeg', 0.9);
+      const image = canvas.toDataURL('image/jpeg', 0.95);
       const link = document.createElement('a');
       link.href = image;
       const period = selectedRecapForPrint.periodType === 'annual' 
@@ -831,7 +838,9 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
       document.body.removeChild(link);
     } catch (err) {
       console.error('Failed to generate recap image:', err);
-      alert(lang === 'fr' ? 'Erreur lors du téléchargement. Veuillez réessayer.' : 'Download failed. Please try again.');
+      alert(lang === 'fr' 
+        ? 'Erreur lors du téléchargement. Si le problème persiste, vous pouvez faire une capture d\'écran du récapitulatif.' 
+        : 'Download failed. If this persists, please take a screenshot.');
     } finally {
       setIsDownloading(false);
     }
