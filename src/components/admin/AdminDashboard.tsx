@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { 
   Users, Calendar, FileText, TrendingUp, Plus, Search, Trash2, 
   Download, LogOut, ArrowLeft, Check, RefreshCw, Calendar as CalendarIcon, 
-  CreditCard, Shield, Clock, MapPin, Phone, Mail, FileCheck, Printer,
+  CreditCard, Shield, Clock, MapPin, Phone, Mail, FileCheck,
   ChevronRight, Pencil, ChevronLeft, LayoutGrid, List, ArrowRight,
   Copy, CheckCircle2, XCircle, AlertTriangle, Database, Server, UserPlus, User
 } from 'lucide-react';
@@ -12,6 +12,7 @@ import { api, isSupabaseConfigured, SUPABASE_SQL_SETUP } from '../../lib/supabas
 import SpineLogo from '../SpineLogo';
 import { useTranslation } from '../../App';
 import { Language, translations } from '../../translations';
+import html2canvas from 'html2canvas';
 
 // Recharts imports for beautiful financial analytics
 import { 
@@ -756,6 +757,53 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
     c.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
     c.phone.includes(searchQuery)
   );
+
+  const handleDownloadInvoiceImage = async () => {
+    const element = document.getElementById('receipt-print-area');
+    if (!element || !selectedInvoiceForPrint) return;
+
+    try {
+      const canvas = await html2canvas(element, {
+        scale: 2, // High resolution
+        backgroundColor: '#ffffff',
+        logging: false,
+        useCORS: true
+      });
+      
+      const image = canvas.toDataURL('image/jpeg', 0.9);
+      const link = document.createElement('a');
+      link.href = image;
+      link.download = `Facture_${selectedInvoiceForPrint.invoiceNumber}.jpg`;
+      link.click();
+    } catch (err) {
+      console.error('Failed to generate image:', err);
+    }
+  };
+
+  const handleDownloadRecapImage = async () => {
+    const element = document.getElementById('recap-print-area');
+    if (!element || !selectedRecapForPrint) return;
+
+    try {
+      const canvas = await html2canvas(element, {
+        scale: 2,
+        backgroundColor: '#ffffff',
+        logging: false,
+        useCORS: true
+      });
+      
+      const image = canvas.toDataURL('image/jpeg', 0.9);
+      const link = document.createElement('a');
+      link.href = image;
+      const period = selectedRecapForPrint.periodType === 'annual' 
+        ? selectedRecapForPrint.year 
+        : `${selectedRecapForPrint.month + 1}_${selectedRecapForPrint.year}`;
+      link.download = `Recap_Comptable_${period}.jpg`;
+      link.click();
+    } catch (err) {
+      console.error('Failed to generate recap image:', err);
+    }
+  };
 
   return (
     <div id="admin-dashboard-layout" className="fixed inset-0 z-[80] bg-[#fdfdfb] text-gray-800 flex flex-col md:flex-row overflow-hidden print:relative print:inset-auto print:overflow-visible print:bg-white">
@@ -1651,8 +1699,8 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                     onClick={() => setSelectedInvoiceForPrint(associatedInvoice)}
                                     className="flex items-center gap-1.5 px-3 py-1.5 bg-primary/10 hover:bg-primary text-primary hover:text-white rounded-xl text-[10px] font-bold uppercase tracking-wider transition-all"
                                   >
-                                    <Printer size={12} />
-                                    <span>{lang === 'fr' ? 'Reçu' : lang === 'es' ? 'Recibo' : 'Receipt'}</span>
+                                    <Download size={12} />
+                                    <span>{lang === 'fr' ? 'Reçu JPG' : lang === 'es' ? 'Recibo JPG' : 'Receipt JPG'}</span>
                                   </button>
                                 </div>
                               ) : (
@@ -2368,10 +2416,10 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                             });
                           }}
                           disabled={count === 0}
-                          className="w-full flex items-center justify-center gap-2 py-2.5 bg-primary hover:bg-primary/95 disabled:opacity-50 text-white rounded-2xl text-xs font-bold uppercase tracking-wider transition-all shadow-sm"
+                          className="w-full flex items-center justify-center gap-2 py-2.5 bg-emerald-700 hover:bg-emerald-800 disabled:opacity-50 text-white rounded-2xl text-xs font-bold uppercase tracking-wider transition-all shadow-sm"
                         >
-                          <Printer size={14} />
-                          <span>{lang === 'fr' ? 'Imprimer le récapitulatif' : lang === 'es' ? 'Imprimir resumen' : 'Print summary'}</span>
+                          <Download size={14} />
+                          <span>{lang === 'fr' ? 'Télécharger le récapitulatif (JPG)' : lang === 'es' ? 'Descargar resumen (JPG)' : 'Download summary (JPG)'}</span>
                         </button>
                       </div>
                     );
@@ -2379,11 +2427,11 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                 </div>
 
                 <div className="bg-[#f4f4ec] p-6 rounded-3xl border border-black/5 space-y-3">
-                  <h4 className="text-xs font-bold uppercase tracking-wider text-primary">
-                    {lang === 'fr' ? "Impression Directe" : lang === 'es' ? "Impresión Directa" : "Direct Printing"}
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-emerald-800">
+                    {lang === 'fr' ? "Téléchargement Image" : lang === 'es' ? "Descargar Imagen" : "Image Download"}
                   </h4>
                   <p className="text-[11px] text-gray-500 leading-relaxed">
-                    {lang === 'fr' ? "Cliquez sur l'icône d'imprimante à droite de n'importe quelle facture dans la liste pour ouvrir la fiche de reçu imprimable épurée, idéale à remettre directement aux patients pour leurs remboursements mutuelle." : lang === 'es' ? "Haga clic en el icono de la impresora a la derecha de cualquier factura de la lista para abrir el recibo imprimible simplificado, ideal para entregar directamente a los pacientes para los reembolsos de sus seguros." : "Click on the printer icon to the right of any invoice in the list to open the clean printable receipt sheet, ideal to give directly to patients for their health insurance reimbursements."}
+                    {lang === 'fr' ? "Cliquez sur l'icône de téléchargement à droite de n'importe quelle facture dans la liste pour générer un fichier JPG épuré, idéal à envoyer aux patients pour leurs remboursements mutuelle." : lang === 'es' ? "Haga clic en el icono de descarga a la derecha de cualquier factura de la lista para generar un archivo JPG simplificado, ideal para enviar a los pacientes para sus reembolsos." : "Click on the download icon to the right of any invoice in the list to generate a clean JPG file, ideal to send to patients for their reimbursements."}
                   </p>
                 </div>
               </div>
@@ -2435,10 +2483,10 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                             </button>
                             <button
                               onClick={() => setSelectedInvoiceForPrint(inv)}
-                              className="p-1.5 hover:bg-primary/10 text-primary rounded-lg transition-colors inline-flex items-center gap-1.5"
-                              title={lang === 'fr' ? "Imprimer" : lang === 'es' ? "Imprimir" : "Print"}
+                              className="p-1.5 hover:bg-emerald-50 text-emerald-700 rounded-lg transition-colors inline-flex items-center gap-1.5"
+                              title={lang === 'fr' ? "Télécharger JPG" : lang === 'es' ? "Descargar JPG" : "Download JPG"}
                             >
-                              <Printer size={13} />
+                              <Download size={13} />
                               <span className="text-[10px] uppercase font-bold tracking-wider">
                                 {lang === 'fr' ? "Reçu" : lang === 'es' ? "Recibo" : "Receipt"}
                               </span>
@@ -3401,14 +3449,10 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
 
                 <div className="flex items-center gap-3">
                   <button
-                    onClick={() => {
-                      setTimeout(() => {
-                        window.print();
-                      }, 50);
-                    }}
-                    className="flex items-center gap-2 px-4 py-2 bg-primary text-white rounded-xl text-xs font-bold uppercase tracking-wider hover:bg-primary/95 transition-all shadow-sm active:scale-95"
+                    onClick={handleDownloadInvoiceImage}
+                    className="flex items-center gap-2 px-4 py-2 bg-emerald-700 text-white rounded-xl text-xs font-bold uppercase tracking-wider hover:bg-emerald-800 transition-all shadow-sm active:scale-95"
                   >
-                    <Printer size={14} /> {translations[receiptLang]?.invoice?.printButton || (lang === 'fr' ? 'Imprimer' : 'Print')}
+                    <Download size={14} /> {lang === 'fr' ? 'Télécharger JPG' : lang === 'es' ? 'Descargar JPG' : 'Download JPG'}
                   </button>
                   <button
                     onClick={() => setSelectedInvoiceForPrint(null)}
@@ -3539,10 +3583,10 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
 
                 <div className="flex items-center gap-3">
                   <button
-                    onClick={() => window.print()}
-                    className="flex items-center gap-2 px-4 py-2 bg-primary text-white rounded-xl text-xs font-bold uppercase tracking-wider hover:bg-primary/95 transition-all shadow"
+                    onClick={handleDownloadRecapImage}
+                    className="flex items-center gap-2 px-4 py-2 bg-emerald-700 text-white rounded-xl text-xs font-bold uppercase tracking-wider hover:bg-emerald-800 transition-all shadow shadow-emerald-900/10"
                   >
-                    <Printer size={14} /> {lang === 'fr' ? 'Imprimer' : lang === 'es' ? 'Imprimir' : 'Print'}
+                    <Download size={14} /> {lang === 'fr' ? 'Télécharger JPG' : lang === 'es' ? 'Descargar JPG' : 'Download JPG'}
                   </button>
                   <button
                     onClick={() => setSelectedRecapForPrint(null)}
