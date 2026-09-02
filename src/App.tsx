@@ -1,10 +1,11 @@
-import React, { useState, createContext, useContext } from 'react';
+import React, { useState, createContext, useContext, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { MapPin, Phone, Mail, Clock, Calendar, ChevronRight, Heart, User, Activity, Baby, Globe, Check, CreditCard, Bone, Zap, Trophy, Menu, X } from 'lucide-react';
+import { MapPin, Phone, Mail, Clock, Calendar, ChevronRight, Heart, User, Activity, Baby, Globe, Check, CreditCard, Bone, Zap, Trophy, Menu, X, Shield } from 'lucide-react';
 import SpineLogo from './components/SpineLogo';
 import { translations, Language } from './translations';
+import AdminDashboard from './components/admin/AdminDashboard';
 
-const LanguageContext = createContext<{
+export const LanguageContext = createContext<{
   lang: Language;
   setLang: (l: Language) => void;
   t: typeof translations['fr'];
@@ -14,7 +15,7 @@ const LanguageContext = createContext<{
   t: translations.fr,
 });
 
-const useTranslation = () => useContext(LanguageContext);
+export const useTranslation = () => useContext(LanguageContext);
 
 const LanguageSelector = () => {
   const { lang, setLang } = useTranslation();
@@ -498,7 +499,7 @@ const Location = () => {
   );
 };
 
-const Footer = () => {
+const Footer = ({ onOpenAdmin, isAdminAuthorized }: { onOpenAdmin: () => void; isAdminAuthorized: boolean }) => {
   const { t } = useTranslation();
   return (
     <footer id="contact" className="bg-primary text-white py-20 px-6">
@@ -536,15 +537,27 @@ const Footer = () => {
             </svg>
             WhatsApp
           </a>
+
         </div>
       </div>
-      <div className="max-w-7xl mx-auto mt-20 pt-8 border-t border-white/10 text-center">
+      <div className="max-w-7xl mx-auto mt-20 pt-8 border-t border-white/10 text-center flex flex-col items-center">
         <p className="text-white/60 text-sm mb-6 max-w-3xl mx-auto leading-relaxed italic hover:scale-[1.02] transition-transform duration-300 cursor-default">
           {t.footer.note}
         </p>
         <div className="text-white/40 text-xs uppercase tracking-widest">
           © 2026 Vincent Osteopatía — {t.footer.rights}
         </div>
+        
+        {/* Subtle, premium cabinet/admin space entry point */}
+        {isAdminAuthorized && (
+          <button 
+            onClick={onOpenAdmin} 
+            className="mt-6 inline-flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-white/30 hover:text-white/80 transition-colors bg-white/5 hover:bg-white/10 px-4 py-2 rounded-full cursor-pointer border border-white/10"
+          >
+            <Shield size={12} />
+            Espace Praticien / Gestion Cabinet
+          </button>
+        )}
       </div>
     </footer>
   );
@@ -621,9 +634,153 @@ const BookingModal = ({ isOpen, onClose }: { isOpen: boolean; onClose: () => voi
   );
 };
 
+const PasscodeModal = ({ isOpen, onClose, onSuccess }: { isOpen: boolean; onClose: () => void; onSuccess: () => void }) => {
+  const [pin, setPin] = useState('');
+  const [error, setError] = useState(false);
+  const correctPin = '46183'; // L'Eliana Postal Code, secure, personal and highly memorable
+
+  const handleKeyPress = (num: string) => {
+    if (pin.length < 5) {
+      setError(false);
+      const newPin = pin + num;
+      setPin(newPin);
+      if (newPin === correctPin) {
+        setTimeout(() => {
+          onSuccess();
+          setPin('');
+        }, 300);
+      } else if (newPin.length === 5) {
+        setTimeout(() => {
+          setError(true);
+          setPin('');
+        }, 300);
+      }
+    }
+  };
+
+  const handleBackspace = () => {
+    setPin(prev => prev.slice(0, -1));
+    setError(false);
+  };
+
+  return (
+    <AnimatePresence>
+      {isOpen && (
+        <div className="fixed inset-0 z-[150] flex items-center justify-center p-4">
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={onClose}
+            className="absolute inset-0 bg-black/60 backdrop-blur-md"
+          />
+          
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95, y: 20 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.95, y: 20 }}
+            className="relative w-full max-w-sm bg-[#f5f5f0] rounded-3xl shadow-2xl p-8 border border-black/5 flex flex-col items-center"
+          >
+            <button 
+              onClick={onClose}
+              className="absolute top-6 right-6 p-2 rounded-full hover:bg-black/5 transition-colors"
+            >
+              <X size={20} />
+            </button>
+
+            <div className="text-center mb-8">
+              <div className="w-12 h-12 bg-primary/10 text-primary rounded-full flex items-center justify-center mx-auto mb-4">
+                <Shield size={24} />
+              </div>
+              <h3 className="text-xl font-serif font-semibold">Accès Praticien</h3>
+              <p className="text-xs text-gray-500 mt-2">Saisissez votre code d'accès de sécurité</p>
+            </div>
+
+            {/* PIN Dots indicator */}
+            <div className="flex gap-4 mb-8">
+              {[0, 1, 2, 3, 4].map((index) => (
+                <div
+                  key={index}
+                  className={`w-4 h-4 rounded-full border-2 transition-all duration-150 ${
+                    error 
+                      ? 'border-red-500 bg-red-500/20 animate-bounce' 
+                      : index < pin.length 
+                        ? 'border-primary bg-primary' 
+                        : 'border-primary/20 bg-transparent'
+                  }`}
+                />
+              ))}
+            </div>
+
+            {error && (
+              <motion.p 
+                initial={{ opacity: 0, y: -10 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="text-red-500 text-xs font-bold uppercase tracking-wider mb-6"
+              >
+                Code d'accès incorrect
+              </motion.p>
+            )}
+
+            {/* Numeric Keypad */}
+            <div className="grid grid-cols-3 gap-4 w-full max-w-[240px] mb-4">
+              {['1', '2', '3', '4', '5', '6', '7', '8', '9'].map((num) => (
+                <button
+                  key={num}
+                  onClick={() => handleKeyPress(num)}
+                  className="w-16 h-16 rounded-full bg-white hover:bg-primary hover:text-white border border-black/5 text-lg font-bold transition-all active:scale-95 shadow-sm text-primary flex items-center justify-center mx-auto cursor-pointer"
+                >
+                  {num}
+                </button>
+              ))}
+              <div />
+              <button
+                onClick={() => handleKeyPress('0')}
+                className="w-16 h-16 rounded-full bg-white hover:bg-primary hover:text-white border border-black/5 text-lg font-bold transition-all active:scale-95 shadow-sm text-primary flex items-center justify-center mx-auto cursor-pointer"
+              >
+                0
+              </button>
+              <button
+                onClick={handleBackspace}
+                className="w-16 h-16 rounded-full hover:bg-black/5 text-sm font-bold transition-all active:scale-95 text-gray-500 flex items-center justify-center mx-auto cursor-pointer"
+              >
+                ⌫
+              </button>
+            </div>
+          </motion.div>
+        </div>
+      )}
+    </AnimatePresence>
+  );
+};
+
 export default function App() {
   const [lang, setLang] = useState<Language>('fr');
   const [isBookingModalOpen, setIsBookingModalOpen] = useState(false);
+  const [isAdminOpen, setIsAdminOpen] = useState(false);
+  const [isPasscodeOpen, setIsPasscodeOpen] = useState(false);
+
+  const [isAdminAuthorized, setIsAdminAuthorized] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('vincent-osteopatia-admin') === 'true' || window.location.search.includes('admin=true');
+    }
+    return false;
+  });
+
+  useEffect(() => {
+    if (typeof window !== 'undefined' && window.location.search.includes('admin=true')) {
+      localStorage.setItem('vincent-osteopatia-admin', 'true');
+      setIsAdminAuthorized(true);
+      // Clean up search params from the URL address bar seamlessly
+      try {
+        const url = new URL(window.location.href);
+        url.searchParams.delete('admin');
+        window.history.replaceState({}, '', url.pathname + url.search);
+      } catch (e) {
+        console.error(e);
+      }
+    }
+  }, []);
 
   return (
     <LanguageContext.Provider value={{ lang, setLang, t: translations[lang] }}>
@@ -633,8 +790,31 @@ export default function App() {
         <Services />
         <About />
         <Location />
-        <Footer />
+        <Footer onOpenAdmin={() => setIsPasscodeOpen(true)} isAdminAuthorized={isAdminAuthorized} />
         <BookingModal isOpen={isBookingModalOpen} onClose={() => setIsBookingModalOpen(false)} />
+        <PasscodeModal 
+          isOpen={isPasscodeOpen} 
+          onClose={() => setIsPasscodeOpen(false)} 
+          onSuccess={() => {
+            setIsPasscodeOpen(false);
+            setIsAdminOpen(true);
+          }} 
+        />
+        
+        {/* Full screen Espace Cabinet admin overlay */}
+        <AnimatePresence>
+          {isAdminOpen && (
+            <motion.div
+              initial={{ opacity: 0, y: 30 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 30 }}
+              transition={{ duration: 0.4, ease: 'easeInOut' }}
+              className="fixed inset-0 z-[120]"
+            >
+              <AdminDashboard onClose={() => setIsAdminOpen(false)} />
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
     </LanguageContext.Provider>
   );
