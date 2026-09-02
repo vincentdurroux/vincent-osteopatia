@@ -22,69 +22,77 @@
     margin: 0 !important;
     padding: 0 !important;
     height: 100% !important;
-    overflow: hidden !important; /* Prevent scrolling/extra pages */
+    overflow: visible !important;
     background: white !important;
     width: 100% !important;
+    visibility: hidden !important; /* Hide everything by default */
   }
 
-  /* 3. Hide EVERYTHING by default */
-  body * {
-    display: none !important;
-  }
-
-  /* 4. Re-enable ONLY the printable path */
-  /* This ensures NO other elements interfere with layout */
-  html, body, #root, #root > div,
+  /* 3. Re-enable the printable path hierarchy */
+  /* We use visibility: visible to show only this specific branch */
+  #root, 
+  #root > div,
   #admin-dashboard-layout,
   .print-modal-container,
-  .print-modal-container *,
+  .print-modal-container > div:last-child,
   #receipt-print-area, 
   #receipt-print-area *,
   #recap-print-area, 
   #recap-print-area * {
-    display: block !important;
     visibility: visible !important;
-    opacity: 1 !important;
-    transform: none !important;
-    animation: none !important;
-    transition: none !important;
+    display: block !important; /* Force block layout for containers */
   }
 
-  /* 5. Force the container to fill the page */
+  /* Specific fix for text elements and small components */
+  #receipt-print-area *,
+  #recap-print-area * {
+    display: inline-block !important; /* Let content flow naturally */
+  }
+  
+  #receipt-print-area p, #receipt-print-area div, #receipt-print-area h1, #receipt-print-area h2, #receipt-print-area h3, #receipt-print-area h4,
+  #recap-print-area p, #recap-print-area div, #recap-print-area h1, #recap-print-area h2, #recap-print-area h3, #recap-print-area h4 {
+    display: block !important;
+  }
+
+  /* 4. Position the container at the very top of the page */
   .print-modal-container {
-    position: fixed !important;
+    position: absolute !important;
     left: 0 !important;
     top: 0 !important;
-    width: 210mm !important; /* Exact A4 width */
-    height: 297mm !important; /* Exact A4 height */
+    width: 100% !important;
+    height: auto !important;
     background: white !important;
     z-index: 99999 !important;
     margin: 0 !important;
     padding: 0 !important;
+    overflow: visible !important;
   }
 
-  /* The actual invoice card reset */
+  /* Target the specific modal card inside */
   .print-modal-container > div:last-child {
     position: static !important;
     width: 100% !important;
-    height: 100% !important;
+    max-width: none !important;
     margin: 0 !important;
     padding: 0 !important;
     box-shadow: none !important;
     border: none !important;
+    opacity: 1 !important;
+    transform: none !important;
+    animation: none !important;
   }
 
-  /* 6. Content Area - Apply paper margins */
+  /* 5. Content Area - Apply paper margins here */
   #receipt-print-area,
   #recap-print-area {
-    padding: 15mm !important; /* Slightly smaller margin to be safe */
+    padding: 20mm !important;
     box-sizing: border-box !important;
     background: white !important;
     width: 100% !important;
-    height: 100% !important;
+    min-height: 297mm !important;
   }
 
-  /* 7. Hide UI specific elements */
+  /* 6. Hide UI specific elements */
   button, 
   .print\:hidden,
   .bg-black\/60,
@@ -92,7 +100,7 @@
     display: none !important;
   }
 
-  /* 8. Colors and Typography */
+  /* 7. Colors and Typography */
   * {
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;
@@ -103,12 +111,16 @@
     background-color: #f4f4ec !important;
   }
 
-  .space-y-8 { gap: 1.25rem !important; }
-  .space-y-6 { gap: 0.75rem !important; }
-  .space-y-4 { gap: 0.5rem !important; }
+  .space-y-8 { gap: 1.5rem !important; }
+  .space-y-6 { gap: 1rem !important; }
+  .space-y-4 { gap: 0.75rem !important; }
   
-  table { width: 100% !important; font-size: 10pt !important; border-collapse: collapse !important; }
-  th, td { padding: 6px 0 !important; border-bottom: 1px solid #f0f0f0 !important; }
+  table { width: 100% !important; font-size: 10pt !important; border-collapse: collapse !important; visibility: visible !important; display: table !important; }
+  thead, tbody, tr { visibility: visible !important; display: table-header-group !important; }
+  tbody { display: table-row-group !important; }
+  tr { display: table-row !important; }
+  th, td { padding: 8px 0 !important; border-bottom: 1px solid #f0f0f0 !important; visibility: visible !important; display: table-cell !important; }
+  
   .rounded-3xl, .rounded-2xl { border-radius: 0 !important; }
 }
 
