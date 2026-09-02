@@ -126,6 +126,9 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
   } | null>(null);
 
   const [selectedInvoiceForPrint, setSelectedInvoiceForPrint] = useState<Invoice | null>(null);
+  const [isDownloading, setIsDownloading] = useState(false);
+  const invoiceRef = useRef<HTMLDivElement>(null);
+  const recapRef = useRef<HTMLDivElement>(null);
 
   // Edit states
   const [isEditClientOpen, setIsEditClientOpen] = useState(false);
@@ -759,37 +762,61 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
   );
 
   const handleDownloadInvoiceImage = async () => {
-    const element = document.getElementById('receipt-print-area');
+    if (isDownloading) return;
+    const element = invoiceRef.current;
     if (!element || !selectedInvoiceForPrint) return;
 
     try {
+      setIsDownloading(true);
+      // Give UI a moment to update if needed
+      await new Promise(resolve => setTimeout(resolve, 100));
+
       const canvas = await html2canvas(element, {
-        scale: 2, // High resolution
+        scale: 2,
         backgroundColor: '#ffffff',
         logging: false,
-        useCORS: true
+        useCORS: true,
+        allowTaint: true,
+        scrollX: 0,
+        scrollY: 0,
+        windowWidth: element.scrollWidth,
+        windowHeight: element.scrollHeight
       });
       
       const image = canvas.toDataURL('image/jpeg', 0.9);
       const link = document.createElement('a');
       link.href = image;
       link.download = `Facture_${selectedInvoiceForPrint.invoiceNumber}.jpg`;
+      document.body.appendChild(link);
       link.click();
+      document.body.removeChild(link);
     } catch (err) {
       console.error('Failed to generate image:', err);
+      alert(lang === 'fr' ? 'Erreur lors du téléchargement. Veuillez réessayer.' : 'Download failed. Please try again.');
+    } finally {
+      setIsDownloading(false);
     }
   };
 
   const handleDownloadRecapImage = async () => {
-    const element = document.getElementById('recap-print-area');
+    if (isDownloading) return;
+    const element = recapRef.current;
     if (!element || !selectedRecapForPrint) return;
 
     try {
+      setIsDownloading(true);
+      await new Promise(resolve => setTimeout(resolve, 100));
+
       const canvas = await html2canvas(element, {
         scale: 2,
         backgroundColor: '#ffffff',
         logging: false,
-        useCORS: true
+        useCORS: true,
+        allowTaint: true,
+        scrollX: 0,
+        scrollY: 0,
+        windowWidth: element.scrollWidth,
+        windowHeight: element.scrollHeight
       });
       
       const image = canvas.toDataURL('image/jpeg', 0.9);
@@ -799,9 +826,14 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
         ? selectedRecapForPrint.year 
         : `${selectedRecapForPrint.month + 1}_${selectedRecapForPrint.year}`;
       link.download = `Recap_Comptable_${period}.jpg`;
+      document.body.appendChild(link);
       link.click();
+      document.body.removeChild(link);
     } catch (err) {
       console.error('Failed to generate recap image:', err);
+      alert(lang === 'fr' ? 'Erreur lors du téléchargement. Veuillez réessayer.' : 'Download failed. Please try again.');
+    } finally {
+      setIsDownloading(false);
     }
   };
 
@@ -3450,9 +3482,20 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                 <div className="flex items-center gap-3">
                   <button
                     onClick={handleDownloadInvoiceImage}
-                    className="flex items-center gap-2 px-4 py-2 bg-emerald-700 text-white rounded-xl text-xs font-bold uppercase tracking-wider hover:bg-emerald-800 transition-all shadow-sm active:scale-95"
+                    disabled={isDownloading}
+                    className="flex items-center gap-2 px-4 py-2 bg-emerald-700 disabled:bg-emerald-700/50 text-white rounded-xl text-xs font-bold uppercase tracking-wider hover:bg-emerald-800 transition-all shadow-sm active:scale-95"
                   >
-                    <Download size={14} /> {lang === 'fr' ? 'Télécharger JPG' : lang === 'es' ? 'Descargar JPG' : 'Download JPG'}
+                    {isDownloading ? (
+                      <>
+                        <RefreshCw size={14} className="animate-spin" />
+                        {lang === 'fr' ? 'Génération...' : 'Generating...'}
+                      </>
+                    ) : (
+                      <>
+                        <Download size={14} /> 
+                        {lang === 'fr' ? 'Télécharger JPG' : lang === 'es' ? 'Descargar JPG' : 'Download JPG'}
+                      </>
+                    )}
                   </button>
                   <button
                     onClick={() => setSelectedInvoiceForPrint(null)}
@@ -3464,7 +3507,11 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
               </div>
 
               {/* PRINTABLE RECEIPT CORE (Can be styled specifically for printing) */}
-              <div id="receipt-print-area" className="space-y-6 text-xs font-sans print:p-0 print:space-y-4 print:text-[10pt]">
+              <div 
+                ref={invoiceRef}
+                id="receipt-print-area" 
+                className="space-y-6 text-xs font-sans print:p-0 print:space-y-4 print:text-[10pt] bg-white"
+              >
                 {/* Header Section */}
                 <div className="flex justify-between items-start">
                   <div>
@@ -3584,21 +3631,36 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                 <div className="flex items-center gap-3">
                   <button
                     onClick={handleDownloadRecapImage}
-                    className="flex items-center gap-2 px-4 py-2 bg-emerald-700 text-white rounded-xl text-xs font-bold uppercase tracking-wider hover:bg-emerald-800 transition-all shadow shadow-emerald-900/10"
+                    disabled={isDownloading}
+                    className="flex items-center gap-2 px-4 py-2 bg-emerald-700 disabled:bg-emerald-700/50 text-white rounded-xl text-xs font-bold uppercase tracking-wider hover:bg-emerald-800 transition-all shadow shadow-emerald-900/10 active:scale-95"
                   >
-                    <Download size={14} /> {lang === 'fr' ? 'Télécharger JPG' : lang === 'es' ? 'Descargar JPG' : 'Download JPG'}
+                    {isDownloading ? (
+                      <>
+                        <RefreshCw size={14} className="animate-spin" />
+                        {lang === 'fr' ? 'Génération...' : 'Generating...'}
+                      </>
+                    ) : (
+                      <>
+                        <Download size={14} /> 
+                        {lang === 'fr' ? 'Télécharger JPG' : lang === 'es' ? 'Descargar JPG' : 'Download JPG'}
+                      </>
+                    )}
                   </button>
                   <button
                     onClick={() => setSelectedRecapForPrint(null)}
-                    className="px-4 py-2 bg-secondary text-gray-600 rounded-xl text-xs font-bold uppercase tracking-wider hover:bg-black/5 transition-all"
+                    className="px-4 py-2 bg-secondary text-gray-600 rounded-xl text-xs font-bold uppercase tracking-wider hover:bg-black/5 transition-all shadow-sm active:scale-95"
                   >
-                    {lang === 'fr' ? 'Fermer' : lang === 'es' ? 'Cerrar' : 'Close'}
+                    {lang === 'fr' ? 'Fermer' : 'Close'}
                   </button>
                 </div>
               </div>
 
-              {/* PRINTABLE AREA */}
-              <div id="recap-print-area" className="space-y-6 text-xs font-sans print:p-0 text-left print:space-y-4 print:text-[10pt]">
+              {/* ACCOUNTING RECAP CORE CONTENT */}
+              <div 
+                ref={recapRef}
+                id="recap-print-area" 
+                className="space-y-8 bg-white"
+              >
                 {/* Header */}
                 <div className="flex justify-between items-start border-b border-black/5 pb-6">
                   <div>
