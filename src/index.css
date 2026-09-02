@@ -18,98 +18,97 @@
   }
   
   /* 2. Global Print Reset */
-  html, body, #root {
+  html, body {
     margin: 0 !important;
     padding: 0 !important;
-    height: auto !important;
-    min-height: 0 !important;
-    overflow: visible !important;
+    height: 100% !important;
+    overflow: hidden !important; /* Prevent scrolling/extra pages */
     background: white !important;
     width: 100% !important;
   }
 
-  /* 3. Hide ALL landing page and UI components */
-  nav, 
-  footer, 
-  section, 
-  aside, 
-  main, 
-  button, 
-  .print\:hidden {
+  /* 3. Hide EVERYTHING by default */
+  body * {
     display: none !important;
   }
 
-  /* 4. Isolate the Modal/Print Overlay */
-  /* Target any fixed inset divs that are not the print container */
-  .fixed.inset-0:not(.print-modal-container) {
-    display: none !important;
-  }
-
-  .print-modal-container {
+  /* 4. Re-enable ONLY the printable path */
+  /* This ensures NO other elements interfere with layout */
+  html, body, #root, #root > div,
+  #admin-dashboard-layout,
+  .print-modal-container,
+  .print-modal-container *,
+  #receipt-print-area, 
+  #receipt-print-area *,
+  #recap-print-area, 
+  #recap-print-area * {
     display: block !important;
-    position: absolute !important;
-    top: 0 !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+    transform: none !important;
+    animation: none !important;
+    transition: none !important;
+  }
+
+  /* 5. Force the container to fill the page */
+  .print-modal-container {
+    position: fixed !important;
     left: 0 !important;
-    width: 100% !important;
-    height: auto !important;
+    top: 0 !important;
+    width: 210mm !important; /* Exact A4 width */
+    height: 297mm !important; /* Exact A4 height */
     background: white !important;
     z-index: 99999 !important;
     margin: 0 !important;
     padding: 0 !important;
-    overflow: visible !important;
   }
 
-  /* Hide backdrop and shadows */
-  .print-modal-container > div:first-child,
-  .shadow-2xl, .shadow-xl, .shadow-lg, .shadow {
-    display: none !important;
-    box-shadow: none !important;
-  }
-
-  /* 5. The Invoice Card Reset */
+  /* The actual invoice card reset */
   .print-modal-container > div:last-child {
-    display: block !important;
     position: static !important;
     width: 100% !important;
-    max-width: none !important;
+    height: 100% !important;
     margin: 0 !important;
     padding: 0 !important;
-    background: white !important;
+    box-shadow: none !important;
     border: none !important;
-    transform: none !important;
-    opacity: 1 !important;
-    animation: none !important;
   }
 
   /* 6. Content Area - Apply paper margins */
   #receipt-print-area,
   #recap-print-area {
-    display: block !important;
-    width: 100% !important;
-    padding: 20mm !important;
+    padding: 15mm !important; /* Slightly smaller margin to be safe */
     box-sizing: border-box !important;
     background: white !important;
-    min-height: 297mm !important;
+    width: 100% !important;
+    height: 100% !important;
   }
 
-  /* Ensure colors and backgrounds are kept */
+  /* 7. Hide UI specific elements */
+  button, 
+  .print\:hidden,
+  .bg-black\/60,
+  [role="dialog"] > div:first-child {
+    display: none !important;
+  }
+
+  /* 8. Colors and Typography */
   * {
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;
-    color-adjust: exact !important;
+    color: black !important;
   }
   
   .bg-\[\#f4f4ec\] {
     background-color: #f4f4ec !important;
   }
 
-  /* Typography and Tables */
-  .space-y-8 { gap: 1.5rem !important; }
-  .space-y-6 { gap: 1rem !important; }
+  .space-y-8 { gap: 1.25rem !important; }
+  .space-y-6 { gap: 0.75rem !important; }
   .space-y-4 { gap: 0.5rem !important; }
-
+  
   table { width: 100% !important; font-size: 10pt !important; border-collapse: collapse !important; }
-  th, td { padding: 8px 0 !important; border-bottom: 1px solid #f0f0f0 !important; }
+  th, td { padding: 6px 0 !important; border-bottom: 1px solid #f0f0f0 !important; }
   .rounded-3xl, .rounded-2xl { border-radius: 0 !important; }
 }
 
