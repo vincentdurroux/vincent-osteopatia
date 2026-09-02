@@ -762,15 +762,14 @@ export default function App() {
 
   const [isAdminAuthorized, setIsAdminAuthorized] = useState(() => {
     if (typeof window !== 'undefined') {
-      return localStorage.getItem('vincent-osteopatia-admin') === 'true' || window.location.search.includes('admin=true');
+      return window.location.search.includes('admin=true');
     }
     return false;
   });
 
   useEffect(() => {
-    if (typeof window !== 'undefined' && window.location.search.includes('admin=true')) {
-      localStorage.setItem('vincent-osteopatia-admin', 'true');
-      setIsAdminAuthorized(true);
+    if (typeof window !== 'undefined') {
+      setIsAdminAuthorized(window.location.search.includes('admin=true'));
     }
   }, []);
 
