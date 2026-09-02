@@ -2,8 +2,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Users, Calendar, FileText, TrendingUp, Plus, Search, Trash2, 
-  Download, LogOut, ArrowLeft, Check, RefreshCw, Calendar as CalendarIcon, 
-  CreditCard, Shield, Clock, MapPin, Phone, Mail, FileCheck,
+  LogOut, ArrowLeft, Check, RefreshCw, Calendar as CalendarIcon, 
+  CreditCard, Shield, Clock, MapPin, Phone, Mail, FileCheck, Printer,
   ChevronRight, Pencil, ChevronLeft, LayoutGrid, List, ArrowRight,
   Copy, CheckCircle2, XCircle, AlertTriangle, Database, Server, UserPlus, User
 } from 'lucide-react';
@@ -12,7 +12,6 @@ import { api, isSupabaseConfigured, SUPABASE_SQL_SETUP } from '../../lib/supabas
 import SpineLogo from '../SpineLogo';
 import { useTranslation } from '../../App';
 import { Language, translations } from '../../translations';
-import html2canvas from 'html2canvas';
 
 // Recharts imports for beautiful financial analytics
 import { 
@@ -126,7 +125,6 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
   } | null>(null);
 
   const [selectedInvoiceForPrint, setSelectedInvoiceForPrint] = useState<Invoice | null>(null);
-  const [isDownloading, setIsDownloading] = useState(false);
   const invoiceRef = useRef<HTMLDivElement>(null);
   const recapRef = useRef<HTMLDivElement>(null);
 
@@ -150,13 +148,17 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
   const [editingInvoice, setEditingInvoice] = useState<Invoice | null>(null);
 
   // Accounting recap states
-  const [recapPeriodType, setRecapPeriodType] = useState<'monthly' | 'annual'>('monthly');
+  const [recapPeriodType, setRecapPeriodType] = useState<'monthly' | 'annual' | 'custom'>('monthly');
   const [recapYear, setRecapYear] = useState<number>(new Date().getFullYear());
   const [recapMonth, setRecapMonth] = useState<number>(new Date().getMonth());
+  const [recapStartDate, setRecapStartDate] = useState<string>(new Date().toISOString().split('T')[0]);
+  const [recapEndDate, setRecapEndDate] = useState<string>(new Date().toISOString().split('T')[0]);
   const [selectedRecapForPrint, setSelectedRecapForPrint] = useState<{
-    periodType: 'monthly' | 'annual';
-    year: number;
-    month: number;
+    periodType: 'monthly' | 'annual' | 'custom';
+    year?: number;
+    month?: number;
+    startDate?: string;
+    endDate?: string;
     invoices: Invoice[];
     total: number;
     breakdown: { card: number; cash: number; transfer: number };
@@ -832,9 +834,15 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
       })
       .join('');
 
-    const period = selectedRecapForPrint.periodType === 'annual' 
-      ? selectedRecapForPrint.year 
-      : `${selectedRecapForPrint.month + 1}/${selectedRecapForPrint.year}`;
+    let period = '';
+    if (selectedRecapForPrint.periodType === 'annual') {
+      period = `${selectedRecapForPrint.year}`;
+    } else if (selectedRecapForPrint.periodType === 'monthly') {
+      period = `${(selectedRecapForPrint.month !== undefined ? selectedRecapForPrint.month : 0) + 1}/${selectedRecapForPrint.year}`;
+    } else {
+      const toLabel = lang === 'fr' ? 'au' : lang === 'es' ? 'al' : 'to';
+      period = `${selectedRecapForPrint.startDate} ${toLabel} ${selectedRecapForPrint.endDate}`;
+    }
 
     printWindow.document.write(`
       <html>
@@ -1757,8 +1765,8 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                     onClick={() => setSelectedInvoiceForPrint(associatedInvoice)}
                                     className="flex items-center gap-1.5 px-3 py-1.5 bg-primary/10 hover:bg-primary text-primary hover:text-white rounded-xl text-[10px] font-bold uppercase tracking-wider transition-all"
                                   >
-                                    <Download size={12} />
-                                    <span>{lang === 'fr' ? 'Reçu JPG' : lang === 'es' ? 'Recibo JPG' : 'Receipt JPG'}</span>
+                                    <Printer size={12} />
+                                    <span>{translations[lang].admin.billing.receipt}</span>
                                   </button>
                                 </div>
                               ) : (
@@ -1768,7 +1776,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                       <div className="flex items-center justify-between">
                                         <span className="text-[11px] font-bold text-primary flex items-center gap-1.5">
                                           <CreditCard size={13} />
-                                          {lang === 'fr' ? 'Créer une facture' : lang === 'es' ? 'Crear factura' : 'Create invoice'}
+                                          {translations[lang].admin.billing.addInvoice}
                                         </span>
                                         <button
                                           type="button"
@@ -2331,7 +2339,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                 {/* Accounting Period Recap & Print Card */}
                 <div className="bg-white p-6 rounded-3xl border border-black/5 shadow-sm space-y-4">
                   <h4 className="text-xs font-bold uppercase tracking-wider text-primary">
-                    {lang === 'fr' ? 'Récapitulatif Comptable' : lang === 'es' ? 'Resumen Contable' : 'Accounting Recap'}
+                    {translations[lang].admin.billing.accountingRecap}
                   </h4>
 
                   {/* Toggle Period Type */}
@@ -2345,7 +2353,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                           : 'text-gray-500 hover:bg-black/5'
                       }`}
                     >
-                      {lang === 'fr' ? 'Mensuel' : lang === 'es' ? 'Mensual' : 'Monthly'}
+                      {translations[lang].admin.billing.monthly}
                     </button>
                     <button
                       type="button"
@@ -2356,53 +2364,93 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                           : 'text-gray-500 hover:bg-black/5'
                       }`}
                     >
-                      {lang === 'fr' ? 'Annuel' : lang === 'es' ? 'Anual' : 'Annual'}
+                      {translations[lang].admin.billing.annual}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setRecapPeriodType('custom')}
+                      className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-all ${
+                        recapPeriodType === 'custom'
+                          ? 'bg-primary text-white shadow-sm'
+                          : 'text-gray-500 hover:bg-black/5'
+                      }`}
+                    >
+                      {translations[lang].admin.billing.custom}
                     </button>
                   </div>
 
                   {/* Selectors */}
                   <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="text-[9px] uppercase tracking-wider font-bold text-gray-400 block mb-1">
-                        {lang === 'fr' ? 'Année' : lang === 'es' ? 'Año' : 'Year'}
-                      </label>
-                      <select
-                        value={recapYear}
-                        onChange={(e) => setRecapYear(Number(e.target.value))}
-                        className="w-full p-2 bg-[#f4f4ec] rounded-xl border border-black/5 text-xs focus:outline-none focus:ring-1 focus:ring-primary focus:bg-white"
-                      >
-                        {(() => {
-                          const yearNums: number[] = invoices.map(inv => {
-                            try {
-                              return new Date(inv.date).getFullYear();
-                            } catch {
-                              return new Date().getFullYear();
-                            }
-                          });
-                          const invoiceYears = Array.from(new Set<number>(yearNums)).sort((a: number, b: number) => b - a);
-                          const displayYears = invoiceYears.length > 0 ? invoiceYears : [new Date().getFullYear()];
-                          return displayYears.map(yr => (
-                            <option key={yr} value={yr}>{yr}</option>
-                          ));
-                        })()}
-                      </select>
-                    </div>
+                    {recapPeriodType !== 'custom' ? (
+                      <>
+                        <div>
+                          <label className="text-[9px] uppercase tracking-wider font-bold text-gray-400 block mb-1">
+                            {lang === 'fr' ? 'Année' : lang === 'es' ? 'Año' : 'Year'}
+                          </label>
+                          <select
+                            value={recapYear}
+                            onChange={(e) => setRecapYear(Number(e.target.value))}
+                            className="w-full p-2 bg-[#f4f4ec] rounded-xl border border-black/5 text-xs focus:outline-none focus:ring-1 focus:ring-primary focus:bg-white"
+                          >
+                            {(() => {
+                              const yearNums: number[] = invoices.map(inv => {
+                                try {
+                                  return new Date(inv.date).getFullYear();
+                                } catch {
+                                  return new Date().getFullYear();
+                                }
+                              });
+                              const invoiceYears = Array.from(new Set<number>(yearNums)).sort((a: number, b: number) => b - a);
+                              const displayYears = invoiceYears.length > 0 ? invoiceYears : [new Date().getFullYear()];
+                              return displayYears.map(yr => (
+                                <option key={yr} value={yr}>{yr}</option>
+                              ));
+                            })()}
+                          </select>
+                        </div>
 
-                    {recapPeriodType === 'monthly' && (
-                      <div>
-                        <label className="text-[9px] uppercase tracking-wider font-bold text-gray-400 block mb-1">
-                          {lang === 'fr' ? 'Mois' : lang === 'es' ? 'Mes' : 'Month'}
-                        </label>
-                        <select
-                          value={recapMonth}
-                          onChange={(e) => setRecapMonth(Number(e.target.value))}
-                          className="w-full p-2 bg-[#f4f4ec] rounded-xl border border-black/5 text-xs focus:outline-none focus:ring-1 focus:ring-primary focus:bg-white"
-                        >
-                          {getMonthsList(lang).map((mthName, idx) => (
-                            <option key={idx} value={idx}>{mthName}</option>
-                          ))}
-                        </select>
-                      </div>
+                        {recapPeriodType === 'monthly' && (
+                          <div>
+                            <label className="text-[9px] uppercase tracking-wider font-bold text-gray-400 block mb-1">
+                              {lang === 'fr' ? 'Mois' : lang === 'es' ? 'Mes' : 'Month'}
+                            </label>
+                            <select
+                              value={recapMonth}
+                              onChange={(e) => setRecapMonth(Number(e.target.value))}
+                              className="w-full p-2 bg-[#f4f4ec] rounded-xl border border-black/5 text-xs focus:outline-none focus:ring-1 focus:ring-primary focus:bg-white"
+                            >
+                              {getMonthsList(lang).map((mthName, idx) => (
+                                <option key={idx} value={idx}>{mthName}</option>
+                              ))}
+                            </select>
+                          </div>
+                        )}
+                      </>
+                    ) : (
+                      <>
+                        <div>
+                          <label className="text-[9px] uppercase tracking-wider font-bold text-gray-400 block mb-1">
+                            {translations[lang].admin.billing.startDate}
+                          </label>
+                          <input
+                            type="date"
+                            value={recapStartDate}
+                            onChange={(e) => setRecapStartDate(e.target.value)}
+                            className="w-full p-2 bg-[#f4f4ec] rounded-xl border border-black/5 text-xs focus:outline-none focus:ring-1 focus:ring-primary focus:bg-white"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[9px] uppercase tracking-wider font-bold text-gray-400 block mb-1">
+                            {translations[lang].admin.billing.endDate}
+                          </label>
+                          <input
+                            type="date"
+                            value={recapEndDate}
+                            onChange={(e) => setRecapEndDate(e.target.value)}
+                            className="w-full p-2 bg-[#f4f4ec] rounded-xl border border-black/5 text-xs focus:outline-none focus:ring-1 focus:ring-primary focus:bg-white"
+                          />
+                        </div>
+                      </>
                     )}
                   </div>
 
@@ -2413,8 +2461,14 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                         const d = new Date(inv.date);
                         if (recapPeriodType === 'annual') {
                           return d.getFullYear() === recapYear;
-                        } else {
+                        } else if (recapPeriodType === 'monthly') {
                           return d.getFullYear() === recapYear && d.getMonth() === recapMonth;
+                        } else {
+                          const start = new Date(recapStartDate);
+                          const end = new Date(recapEndDate);
+                          start.setHours(0, 0, 0, 0);
+                          end.setHours(23, 59, 59, 999);
+                          return d >= start && d <= end;
                         }
                       } catch {
                         return false;
@@ -2432,13 +2486,13 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                         <div className="flex justify-between items-end">
                           <div className="text-left">
                             <p className="text-[9px] text-gray-400 uppercase tracking-wider">
-                              {lang === 'fr' ? "Recettes de la période" : lang === 'es' ? "Ingresos del período" : "Revenue for period"}
+                              {translations[lang].admin.billing.revenueForPeriod}
                             </p>
                             <h4 className="text-2xl font-serif font-bold text-primary">{totalAmt} €</h4>
                           </div>
                           <div className="text-right">
                             <p className="text-[9px] text-gray-400 uppercase tracking-wider">
-                              {lang === 'fr' ? "Consultations" : lang === 'es' ? "Consultas" : "Consultations"}
+                              {translations[lang].admin.billing.consultations}
                             </p>
                             <p className="text-sm font-bold text-gray-700">{count}</p>
                           </div>
@@ -2447,15 +2501,15 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                         {/* Payment Breakdown */}
                         <div className="bg-[#f4f4ec]/40 p-3 rounded-2xl space-y-2 text-xs">
                           <div className="flex justify-between text-gray-600">
-                            <span>{lang === 'fr' ? 'Carte' : lang === 'es' ? 'Tarjeta' : 'Card'} :</span>
+                            <span>{translations[lang].admin.billing.paymentCard} :</span>
                             <span className="font-bold">{cardTotal} €</span>
                           </div>
                           <div className="flex justify-between text-gray-600">
-                            <span>{lang === 'fr' ? 'Espèces' : lang === 'es' ? 'Efectivo' : 'Cash'} :</span>
+                            <span>{translations[lang].admin.billing.paymentCash} :</span>
                             <span className="font-bold">{cashTotal} €</span>
                           </div>
                           <div className="flex justify-between text-gray-600">
-                            <span>{lang === 'fr' ? 'Virement' : lang === 'es' ? 'Transferencia' : 'Transfer'} :</span>
+                            <span>{translations[lang].admin.billing.paymentTransfer} :</span>
                             <span className="font-bold">{transferTotal} €</span>
                           </div>
                         </div>
@@ -2467,6 +2521,8 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                               periodType: recapPeriodType,
                               year: recapYear,
                               month: recapMonth,
+                              startDate: recapStartDate,
+                              endDate: recapEndDate,
                               invoices: filtered,
                               total: totalAmt,
                               breakdown: { card: cardTotal, cash: cashTotal, transfer: transferTotal },
@@ -2474,10 +2530,10 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                             });
                           }}
                           disabled={count === 0}
-                          className="w-full flex items-center justify-center gap-2 py-2.5 bg-emerald-700 hover:bg-emerald-800 disabled:opacity-50 text-white rounded-2xl text-xs font-bold uppercase tracking-wider transition-all shadow-sm"
+                          className="w-full flex items-center justify-center gap-2 py-2.5 bg-primary hover:bg-primary/95 disabled:opacity-50 text-white rounded-2xl text-xs font-bold uppercase tracking-wider transition-all shadow-sm"
                         >
-                          <Download size={14} />
-                          <span>{lang === 'fr' ? 'Télécharger le récapitulatif (JPG)' : lang === 'es' ? 'Descargar resumen (JPG)' : 'Download summary (JPG)'}</span>
+                          <Printer size={14} />
+                          <span>{translations[lang].admin.billing.printRecap}</span>
                         </button>
                       </div>
                     );
@@ -2503,12 +2559,12 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                 <table className="w-full text-xs text-left border-collapse min-w-[500px]">
                   <thead>
                     <tr className="border-b border-black/5 text-gray-400">
-                      <th className="py-3 font-semibold">{lang === 'fr' ? 'Numéro' : lang === 'es' ? 'Número' : 'Number'}</th>
-                      <th className="py-3 font-semibold">{lang === 'fr' ? 'Patient' : lang === 'es' ? 'Paciente' : 'Patient'}</th>
-                      <th className="py-3 font-semibold">{lang === 'fr' ? 'Date' : lang === 'es' ? 'Fecha' : 'Date'}</th>
-                      <th className="py-3 font-semibold">{lang === 'fr' ? 'Règlement' : lang === 'es' ? 'Pago' : 'Payment'}</th>
-                      <th className="py-3 font-semibold text-right">{lang === 'fr' ? 'Montant' : lang === 'es' ? 'Monto' : 'Amount'}</th>
-                      <th className="py-3 font-semibold text-right">Actions</th>
+                      <th className="py-3 font-semibold">{translations[lang].admin.billing.tableNum}</th>
+                      <th className="py-3 font-semibold">{translations[lang].admin.billing.tablePatient}</th>
+                      <th className="py-3 font-semibold">{translations[lang].admin.billing.tableDate}</th>
+                      <th className="py-3 font-semibold">{translations[lang].admin.billing.tableMethod}</th>
+                      <th className="py-3 font-semibold text-right">{translations[lang].admin.billing.tableAmount}</th>
+                      <th className="py-3 font-semibold text-right">{translations[lang].admin.billing.tableActions}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -2542,17 +2598,17 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                             <button
                               onClick={() => setSelectedInvoiceForPrint(inv)}
                               className="p-1.5 hover:bg-primary/10 text-primary rounded-lg transition-colors inline-flex items-center gap-1.5"
-                              title={lang === 'fr' ? "Imprimer" : lang === 'es' ? "Imprimir" : "Print"}
+                              title={translations[lang].admin.billing.print}
                             >
                               <Printer size={13} />
                               <span className="text-[10px] uppercase font-bold tracking-wider">
-                                {lang === 'fr' ? "Reçu" : lang === 'es' ? "Recibo" : "Receipt"}
+                                {translations[lang].admin.billing.receipt}
                               </span>
                             </button>
                             <button
                               onClick={async () => {
                                 console.log("Delete attempt for invoice:", inv.id);
-                                const confirmed = window.confirm(lang === 'fr' ? "Êtes-vous sûr de vouloir supprimer cette facture ?" : "Are you sure you want to delete this invoice?");
+                                const confirmed = window.confirm(translations[lang].admin.billing.deleteConfirm);
                                 console.log("Confirmed:", confirmed);
                                 if (confirmed) {
                                   try {
@@ -2565,7 +2621,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                 }
                               }}
                               className="p-1.5 hover:bg-red-50 text-gray-500 hover:text-red-500 rounded-lg transition-all inline-flex items-center"
-                              title={lang === 'fr' ? "Supprimer" : lang === 'es' ? "Eliminar" : "Delete"}
+                              title={translations[lang].admin.billing.delete}
                             >
                               <Trash2 size={13} />
                             </button>
@@ -2576,7 +2632,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                     {invoices.length === 0 && (
                       <tr>
                         <td colSpan={6} className="text-center py-12 text-gray-400">
-                          {lang === 'fr' ? "Aucune facture émise pour le moment." : lang === 'es' ? "Ninguna factura emitida por el momento." : "No invoices issued yet."}
+                          {translations[lang].admin.billing.noInvoices}
                         </td>
                       </tr>
                     )}
@@ -2981,7 +3037,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                       handleGoToNotes(editingEvent);
                     }
                   }}
-                  className="px-3.5 py-2 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-bold transition-all shadow-xs shrink-0 flex items-center gap-1"
+                  className="px-3.5 py-2 bg-primary hover:bg-primary/95 text-white rounded-xl text-xs font-bold transition-all shadow-xs shrink-0 flex items-center gap-1"
                 >
                   <span>{lang === 'fr' ? 'Prendre des notes' : 'Take Notes'}</span>
                   <ArrowRight size={13} />
@@ -3511,7 +3567,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                     className="flex items-center gap-2 px-4 py-2 bg-primary text-white rounded-xl text-xs font-bold uppercase tracking-wider hover:bg-primary/95 transition-all shadow-sm active:scale-95"
                   >
                     <Printer size={14} /> 
-                    {lang === 'fr' ? 'Imprimer la facture' : lang === 'es' ? 'Imprimir factura' : 'Print Invoice'}
+                    {translations[lang].admin.billing.printInvoice}
                   </button>
                   <button
                     onClick={() => setSelectedInvoiceForPrint(null)}
@@ -3969,7 +4025,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                 <button
                   onClick={handleSyncAllToSupabase}
                   disabled={isSyncingAll}
-                  className="w-full sm:w-auto flex items-center justify-center gap-2 px-5 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-2xl text-xs font-bold transition-all shadow-sm disabled:opacity-50"
+                  className="w-full sm:w-auto flex items-center justify-center gap-2 px-5 py-2.5 bg-primary hover:bg-primary/95 text-white rounded-2xl text-xs font-bold transition-all shadow-sm disabled:opacity-50"
                 >
                   <RefreshCw size={14} className={isSyncingAll ? 'animate-spin' : ''} />
                   <span>
