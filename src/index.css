@@ -16,57 +16,64 @@
     margin: 10mm;
   }
   
-  /* 1. Hide EVERYTHING by default using display: none to reclaim space */
-  body * {
+  /* Hide UI components */
+  aside, main, .print\:hidden, [role="dialog"] > div:first-child {
     display: none !important;
   }
 
-  /* 2. Show ONLY the print container and its hierarchy */
-  html, body, #root, #root > div {
+  /* Ensure container hierarchy is visible */
+  html, body, #root, #root > div, [role="dialog"], .fixed.inset-0.z-\[100\] {
     display: block !important;
+    visibility: visible !important;
+    position: static !important;
     height: auto !important;
     overflow: visible !important;
-    visibility: visible !important;
     background: white !important;
+    opacity: 1 !important;
+    transform: none !important;
     margin: 0 !important;
     padding: 0 !important;
   }
 
-  /* 3. Re-enable display for the printable areas and their specific parents */
-  #receipt-print-area, 
-  #receipt-print-area *,
-  #recap-print-area, 
-  #recap-print-area *,
-  div:has(> #receipt-print-area),
-  div:has(> #recap-print-area),
-  .print-container-parent {
-    display: block !important;
-    visibility: visible !important;
+  /* Reset any animation-related transforms or opacities */
+  * {
+    animation: none !important;
+    transition: none !important;
+    opacity: 1 !important;
+    transform: none !important;
   }
 
+  /* The actual printable blocks */
   #receipt-print-area,
   #recap-print-area {
-    position: static !important;
+    display: block !important;
+    visibility: visible !important;
     width: 100% !important;
     margin: 0 !important;
     padding: 0 !important;
     background: white !important;
-    page-break-after: avoid !important;
-    page-break-before: avoid !important;
+    font-size: 10pt !important;
+    color: black !important;
   }
 
-  /* 4. Fine-tune spacing to ensure single page */
-  .space-y-8, .space-y-6 { gap: 0.75rem !important; }
-  .space-y-4 { gap: 0.5rem !important; }
-  
-  table { width: 100% !important; font-size: 9pt !important; border-collapse: collapse !important; }
-  th, td { padding: 4px 0 !important; }
-
-  /* Ensure background colors for the recipient block are kept */
-  * {
+  /* Force background colors for the "Destinataire" block */
+  .bg-\[\#f4f4ec\] {
+    background-color: #f4f4ec !important;
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;
   }
+
+  /* Spacing and tables */
+  .space-y-8 { gap: 1.5rem !important; }
+  .space-y-6 { gap: 1rem !important; }
+  .space-y-4 { gap: 0.75rem !important; }
+  
+  table { width: 100% !important; font-size: 10pt !important; border-collapse: collapse !important; margin-top: 1rem !important; }
+  th, td { padding: 8px 0 !important; border-bottom: 1px solid #eee !important; }
+  
+  /* Remove shadow from the receipt modal content */
+  .shadow-2xl { box-shadow: none !important; }
+  .rounded-3xl { border-radius: 0 !important; }
 }
 
 body {
