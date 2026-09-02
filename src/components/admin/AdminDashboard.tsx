@@ -758,7 +758,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
   );
 
   return (
-    <div className="fixed inset-0 z-[80] bg-[#fdfdfb] text-gray-800 flex flex-col md:flex-row overflow-hidden print:relative print:inset-auto print:overflow-visible print:bg-white">
+    <div id="admin-dashboard-layout" className="fixed inset-0 z-[80] bg-[#fdfdfb] text-gray-800 flex flex-col md:flex-row overflow-hidden print:relative print:inset-auto print:overflow-visible print:bg-white">
       
       {/* SIDEBAR */}
       <aside className="w-full md:w-60 bg-[#f4f4ec] border-b md:border-b-0 md:border-r border-black/5 flex flex-col justify-between shrink-0 p-4 md:p-5 print:hidden">
