@@ -16,56 +16,53 @@
     margin: 10mm;
   }
   
-  body {
-    background: white !important;
-    font-size: 9pt !important;
+  /* 1. Hide EVERYTHING by default using display: none to reclaim space */
+  body * {
+    display: none !important;
   }
 
-  /* Reset visibility and space */
-  body * {
-    visibility: hidden !important;
+  /* 2. Show ONLY the print container and its hierarchy */
+  html, body, #root, #root > div {
+    display: block !important;
+    height: auto !important;
+    overflow: visible !important;
+    visibility: visible !important;
+    background: white !important;
+    margin: 0 !important;
+    padding: 0 !important;
   }
-  
+
+  /* 3. Re-enable display for the printable areas and their specific parents */
   #receipt-print-area, 
   #receipt-print-area *,
   #recap-print-area, 
-  #recap-print-area * {
+  #recap-print-area *,
+  div:has(> #receipt-print-area),
+  div:has(> #recap-print-area),
+  .print-container-parent {
+    display: block !important;
     visibility: visible !important;
   }
-  
+
   #receipt-print-area,
   #recap-print-area {
-    position: absolute !important;
-    left: 0 !important;
-    top: 0 !important;
+    position: static !important;
     width: 100% !important;
     margin: 0 !important;
     padding: 0 !important;
-    display: block !important;
     background: white !important;
+    page-break-after: avoid !important;
+    page-break-before: avoid !important;
   }
 
-  /* Reduce gaps for print */
-  .space-y-8, .space-y-6, .space-y-4 {
-    gap: 0.5rem !important;
-  }
+  /* 4. Fine-tune spacing to ensure single page */
+  .space-y-8, .space-y-6 { gap: 0.75rem !important; }
+  .space-y-4 { gap: 0.5rem !important; }
   
-  div[class*="space-y-"] > * + * {
-    margin-top: 0.5rem !important;
-  }
+  table { width: 100% !important; font-size: 9pt !important; border-collapse: collapse !important; }
+  th, td { padding: 4px 0 !important; }
 
-  /* Table density */
-  table {
-    width: 100% !important;
-    font-size: 8pt !important;
-  }
-  
-  th, td {
-    padding-top: 2px !important;
-    padding-bottom: 2px !important;
-  }
-
-  /* Ensure background colors are printed */
+  /* Ensure background colors for the recipient block are kept */
   * {
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;
