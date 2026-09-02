@@ -5,7 +5,7 @@ import {
   Download, LogOut, ArrowLeft, Check, RefreshCw, Calendar as CalendarIcon, 
   CreditCard, Shield, Clock, MapPin, Phone, Mail, FileCheck, Printer,
   ChevronRight, Pencil, ChevronLeft, LayoutGrid, List, ArrowRight,
-  Copy, CheckCircle2, XCircle, AlertTriangle, Database, Server
+  Copy, CheckCircle2, XCircle, AlertTriangle, Database, Server, UserPlus
 } from 'lucide-react';
 import { Client, ClientNote, Invoice, CalendarEvent } from '../../types';
 import { api, isSupabaseConfigured, SUPABASE_SQL_SETUP } from '../../lib/supabase';
@@ -21,6 +21,12 @@ import {
 interface AdminDashboardProps {
   onClose: () => void;
 }
+
+const getDefaultAppointmentTitle = (language: string) => {
+  if (language === 'es') return "Sesión de Osteopatía";
+  if (language === 'en') return "Osteopathy Session";
+  return "Séance d'Ostéopathie";
+};
 
 type TabType = 'overview' | 'clients' | 'calendar' | 'billing';
 
@@ -72,6 +78,13 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
   });
   
   const [isAddEventOpen, setIsAddEventOpen] = useState(false);
+  const [isInlineNewPatient, setIsInlineNewPatient] = useState(false);
+  const [inlinePatient, setInlinePatient] = useState({
+    firstName: '',
+    lastName: '',
+    phone: '',
+    email: '',
+  });
   const [newEvent, setNewEvent] = useState({
     clientId: '',
     title: "Séance d'Ostéopathie",
@@ -80,6 +93,14 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
     endTime: '11:00',
     description: '',
   });
+
+  // Keep appointment title updated according to language
+  useEffect(() => {
+    setNewEvent(prev => ({
+      ...prev,
+      title: getDefaultAppointmentTitle(lang)
+    }));
+  }, [lang]);
 
   const [isEditEventOpen, setIsEditEventOpen] = useState(false);
   const [editingEvent, setEditingEvent] = useState<{
@@ -511,10 +532,44 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
   const handleAddEvent = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    const client = clients.find(c => c.id === newEvent.clientId);
+    let finalClientId: string | undefined = newEvent.clientId || undefined;
+    let finalClientName: string | undefined = undefined;
+
+    if (isInlineNewPatient) {
+      if (!inlinePatient.lastName || !inlinePatient.firstName) {
+        alert(lang === 'fr' ? "Veuillez saisir le nom et le prénom du nouveau patient." : "Please enter the new patient's first and last name.");
+        return;
+      }
+      try {
+        const fullName = `${inlinePatient.lastName.toUpperCase()} ${inlinePatient.firstName}`;
+        const createdCl = await api.createClient({
+          firstName: inlinePatient.firstName,
+          lastName: inlinePatient.lastName,
+          name: fullName,
+          email: inlinePatient.email,
+          phone: inlinePatient.phone,
+        });
+        setClients(prev => {
+          const filtered = prev.filter(c => c.id !== createdCl.id);
+          return [...filtered, createdCl].sort((a, b) => a.name.localeCompare(b.name));
+        });
+        finalClientId = createdCl.id;
+        finalClientName = createdCl.name;
+      } catch (err) {
+        console.error('Failed to create inline patient:', err);
+        alert(lang === 'fr' ? "Erreur lors de la création du patient." : "Error creating patient.");
+        return;
+      }
+    } else if (newEvent.clientId) {
+      const client = clients.find(c => c.id === newEvent.clientId);
+      if (client) {
+        finalClientName = client.name;
+      }
+    }
+
     let summary = newEvent.title;
-    if (client) {
-      summary = `${client.name} - ${newEvent.title}`;
+    if (finalClientName && !summary.includes(finalClientName)) {
+      summary = `${finalClientName} - ${newEvent.title}`;
     }
     
     const startIso = new Date(`${newEvent.date}T${newEvent.startTime}:00`).toISOString();
@@ -526,15 +581,17 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
         description: newEvent.description || "Consultation au cabinet Vincent Osteopatía.",
         start: startIso,
         end: endIso,
-        clientId: newEvent.clientId || undefined,
-        clientName: client ? client.name : undefined,
+        clientId: finalClientId,
+        clientName: finalClientName,
       });
 
       setEvents(prev => [...prev, created].sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime()));
       setIsAddEventOpen(false);
+      setIsInlineNewPatient(false);
+      setInlinePatient({ firstName: '', lastName: '', phone: '', email: '' });
       setNewEvent({
         clientId: '',
-        title: "Séance d'Ostéopathie",
+        title: getDefaultAppointmentTitle(lang),
         date: new Date().toISOString().split('T')[0],
         startTime: '10:00',
         endTime: '11:00',
@@ -683,6 +740,15 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
             </div>
           </div>
 
+          {/* Back to website button */}
+          <button
+            onClick={onClose}
+            className="flex items-center gap-2 px-3.5 py-2 bg-white/80 hover:bg-white border border-black/5 rounded-xl text-xs font-semibold uppercase tracking-wider text-gray-700 hover:text-primary transition-all shadow-2xs w-fit md:w-full"
+          >
+            <ArrowLeft size={15} />
+            <span>{lang === 'fr' ? "Retour au site" : lang === 'es' ? "Volver al sitio" : "Back to website"}</span>
+          </button>
+
           {/* Navigation Items */}
           <nav className="flex flex-row md:flex-col gap-1 overflow-x-auto md:overflow-x-visible pb-1 md:pb-0 scrollbar-none">
             {[
@@ -709,17 +775,6 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
               );
             })}
           </nav>
-        </div>
-
-        {/* Footer actions of Sidebar */}
-        <div className="flex flex-col gap-2 mt-3 pt-3 border-t border-black/5">
-          <button
-            onClick={onClose}
-            className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-gray-600 hover:text-primary transition-colors px-2 py-2"
-          >
-            <ArrowLeft size={15} />
-            <span>{lang === 'fr' ? "Retour au site" : lang === 'es' ? "Volver al sitio" : "Back to website"}</span>
-          </button>
         </div>
       </aside>
 
@@ -2260,27 +2315,84 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
               
               <form onSubmit={handleAddEvent} className="space-y-4">
                 <div>
-                  <label className="text-[10px] uppercase tracking-wider font-bold text-gray-400 block mb-1">
-                    {lang === 'fr' ? 'Patient associé (facultatif)' : 'Associated Patient (Optional)'}
-                  </label>
-                  <select
-                    value={newEvent.clientId}
-                    onChange={(e) => {
-                      const selectedId = e.target.value;
-                      const selectedCl = clients.find(c => c.id === selectedId);
-                      setNewEvent(prev => ({
-                        ...prev,
-                        clientId: selectedId,
-                        title: selectedCl ? `Consultation Ostéopathie - ${selectedCl.name}` : prev.title
-                      }));
-                    }}
-                    className="w-full p-2.5 bg-secondary rounded-xl border border-black/5 text-xs focus:outline-none focus:ring-1 focus:ring-primary focus:bg-white transition-all"
-                  >
-                    <option value="">-- Aucun ou patient non répertorié --</option>
-                    {clients.map(c => (
-                      <option key={c.id} value={c.id}>{c.name} ({c.phone || c.email})</option>
-                    ))}
-                  </select>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-[10px] uppercase tracking-wider font-bold text-gray-400 block">
+                      {lang === 'fr' ? 'Patient associé' : 'Associated Patient'}
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => setIsInlineNewPatient(!isInlineNewPatient)}
+                      className="text-xs font-bold text-primary hover:underline flex items-center gap-1"
+                    >
+                      <UserPlus size={13} />
+                      <span>
+                        {isInlineNewPatient
+                          ? (lang === 'fr' ? 'Choisir patient existant' : 'Select existing patient')
+                          : (lang === 'fr' ? '+ Nouveau patient' : '+ New patient')}
+                      </span>
+                    </button>
+                  </div>
+
+                  {isInlineNewPatient ? (
+                    <div className="p-3 bg-primary/5 rounded-2xl border border-primary/20 space-y-2.5">
+                      <p className="text-[11px] font-bold text-primary flex items-center gap-1.5">
+                        <UserPlus size={13} />
+                        <span>{lang === 'fr' ? 'Nouveau patient (création automatique)' : 'New patient (auto-created)'}</span>
+                      </p>
+                      <div className="grid grid-cols-2 gap-2">
+                        <input
+                          type="text"
+                          required
+                          placeholder={lang === 'fr' ? 'Nom *' : 'Last Name *'}
+                          value={inlinePatient.lastName}
+                          onChange={(e) => setInlinePatient(prev => ({ ...prev, lastName: e.target.value }))}
+                          className="w-full p-2 bg-white rounded-xl border border-black/10 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
+                        />
+                        <input
+                          type="text"
+                          required
+                          placeholder={lang === 'fr' ? 'Prénom *' : 'First Name *'}
+                          value={inlinePatient.firstName}
+                          onChange={(e) => setInlinePatient(prev => ({ ...prev, firstName: e.target.value }))}
+                          className="w-full p-2 bg-white rounded-xl border border-black/10 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
+                        />
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <input
+                          type="tel"
+                          placeholder={lang === 'fr' ? 'Téléphone' : 'Phone'}
+                          value={inlinePatient.phone}
+                          onChange={(e) => setInlinePatient(prev => ({ ...prev, phone: e.target.value }))}
+                          className="w-full p-2 bg-white rounded-xl border border-black/10 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
+                        />
+                        <input
+                          type="email"
+                          placeholder={lang === 'fr' ? 'Email' : 'Email'}
+                          value={inlinePatient.email}
+                          onChange={(e) => setInlinePatient(prev => ({ ...prev, email: e.target.value }))}
+                          className="w-full p-2 bg-white rounded-xl border border-black/10 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
+                        />
+                      </div>
+                    </div>
+                  ) : (
+                    <select
+                      value={newEvent.clientId}
+                      onChange={(e) => {
+                        const selectedId = e.target.value;
+                        setNewEvent(prev => ({
+                          ...prev,
+                          clientId: selectedId,
+                          title: prev.title || getDefaultAppointmentTitle(lang)
+                        }));
+                      }}
+                      className="w-full p-2.5 bg-secondary rounded-xl border border-black/5 text-xs focus:outline-none focus:ring-1 focus:ring-primary focus:bg-white transition-all"
+                    >
+                      <option value="">-- Aucun ou patient non répertorié --</option>
+                      {clients.map(c => (
+                        <option key={c.id} value={c.id}>{c.name} ({c.phone || c.email})</option>
+                      ))}
+                    </select>
+                  )}
                 </div>
 
                 <div>
@@ -2290,7 +2402,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                   <input
                     type="text"
                     required
-                    placeholder="Ex: Consultation - Jean Dupont"
+                    placeholder={getDefaultAppointmentTitle(lang)}
                     value={newEvent.title}
                     onChange={(e) => setNewEvent(prev => ({ ...prev, title: e.target.value }))}
                     className="w-full p-2.5 bg-secondary rounded-xl border border-black/5 text-xs focus:outline-none focus:ring-1 focus:ring-primary focus:bg-white transition-all"
