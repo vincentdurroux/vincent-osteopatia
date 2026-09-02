@@ -307,13 +307,21 @@ const saveLocal = <T>(key: string, data: T[]) => {
 // ==========================================
 
 export function mapClientFromDB(c: any): Client {
-  const firstName = c.firstName || c.first_name || (c.name ? c.name.split(' ')[0] : '');
-  const lastName = c.lastName || c.last_name || (c.name ? c.name.split(' ').slice(1).join(' ') : '');
+  let firstName = c.firstName || c.first_name;
+  let lastName = c.lastName || c.last_name;
+
+  if ((!firstName || !lastName) && c.name) {
+    const parts = c.name.split(' ');
+    // Assuming format "LASTNAME Firstname"
+    lastName = parts[0] || '';
+    firstName = parts.slice(1).join(' ') || '';
+  }
+
   const name = c.name || `${lastName.toUpperCase()} ${firstName}`.trim();
   return {
     id: String(c.id),
-    firstName,
-    lastName,
+    firstName: firstName || '',
+    lastName: lastName || '',
     name,
     email: c.email || '',
     phone: c.phone || '',
@@ -617,6 +625,8 @@ export const api = {
         const cleanPayload: Record<string, any> = {
           id: newClient.id,
           name: newClient.name,
+          firstName: newClient.firstName,
+          lastName: newClient.lastName,
           email: newClient.email || '',
           phone: newClient.phone || '',
           address: newClient.address || '',
@@ -633,6 +643,8 @@ export const api = {
           const snakePayload: Record<string, any> = {
             id: newClient.id,
             name: newClient.name,
+            first_name: newClient.firstName,
+            last_name: newClient.lastName,
             email: newClient.email || '',
             phone: newClient.phone || '',
             address: newClient.address || '',
@@ -687,6 +699,8 @@ export const api = {
       try {
         const payload: Record<string, any> = {
           name: client.name,
+          firstName: client.firstName,
+          lastName: client.lastName,
           email: client.email || '',
           phone: client.phone || '',
           address: client.address || '',
@@ -699,6 +713,8 @@ export const api = {
         if (updateRes.error) {
           const fallbackPayload: Record<string, any> = {
             name: client.name,
+            first_name: client.firstName,
+            last_name: client.lastName,
             email: client.email || '',
             phone: client.phone || '',
             address: client.address || '',

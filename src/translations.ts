@@ -102,7 +102,7 @@ export const translations = {
       call: 'Appel Direct',
     },
     admin: {
-      title: "Espace Cabinet & Gestion",
+      title: "Gestion",
       close: "Fermer",
       tabs: {
         overview: "Aperçu",
@@ -342,7 +342,7 @@ export const translations = {
       call: 'Direct Call',
     },
     admin: {
-      title: "Clinic Space & Management",
+      title: "Management",
       close: "Close",
       tabs: {
         overview: "Overview",
@@ -582,7 +582,7 @@ export const translations = {
       call: 'Llamada Directa',
     },
     admin: {
-      title: "Espacio de Gestión de la Clínica",
+      title: "Gestión",
       close: "Cerrar",
       tabs: {
         overview: "Resumen",

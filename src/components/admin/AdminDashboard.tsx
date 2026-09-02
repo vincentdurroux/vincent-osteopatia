@@ -5,7 +5,7 @@ import {
   Download, LogOut, ArrowLeft, Check, RefreshCw, Calendar as CalendarIcon, 
   CreditCard, Shield, Clock, MapPin, Phone, Mail, FileCheck, Printer,
   ChevronRight, Pencil, ChevronLeft, LayoutGrid, List, ArrowRight,
-  Copy, CheckCircle2, XCircle, AlertTriangle, Database, Server, UserPlus
+  Copy, CheckCircle2, XCircle, AlertTriangle, Database, Server, UserPlus, User
 } from 'lucide-react';
 import { Client, ClientNote, Invoice, CalendarEvent } from '../../types';
 import { api, isSupabaseConfigured, SUPABASE_SQL_SETUP } from '../../lib/supabase';
@@ -685,15 +685,18 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
 
   // Delete Calendar event
   const handleDeleteEvent = async (eventId: string) => {
+    console.log("Delete attempt for event:", eventId);
     const confirmed = window.confirm(
       lang === 'fr' 
         ? 'Voulez-vous supprimer définitivement ce rendez-vous ?' 
         : 'Do you want to permanently delete this appointment?'
     );
+    console.log("Confirmed:", confirmed);
     if (!confirmed) return;
 
     try {
       await api.deleteLocalEvent(eventId);
+      console.log("Deletion successful");
       setEvents(prev => prev.filter(ev => ev.id !== eventId));
       if (isEditEventOpen) {
         setIsEditEventOpen(false);
@@ -768,7 +771,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
               </div>
               <div>
                 <h1 className="text-base font-serif font-semibold tracking-tight leading-none">Vincent Osteo</h1>
-                <span className="text-[10px] uppercase tracking-widest font-bold text-primary/60">Espace Cabinet</span>
+                <span className="text-[10px] uppercase tracking-widest font-bold text-primary/60">Gestion</span>
               </div>
             </div>
 
@@ -1181,7 +1184,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                       >
                         <div className="flex items-center gap-3 overflow-hidden">
                           <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-primary text-xs font-bold">
-                            {c.name.charAt(0)}
+                            <User size={14} />
                           </div>
                           <div className="overflow-hidden">
                             <p className="text-xs font-bold truncate">{c.name}</p>
@@ -1253,7 +1256,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                         <div className={`w-9 h-9 rounded-full flex-shrink-0 flex items-center justify-center text-xs font-bold ${
                           isSelected ? 'bg-primary text-white' : 'bg-primary/10 text-primary'
                         }`}>
-                          {c.name.charAt(0)}
+                          <User size={18} />
                         </div>
                         <div className="overflow-hidden">
                           <p className="text-xs font-bold truncate">{c.name}</p>
@@ -1295,7 +1298,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                       <div className="flex items-center gap-4">
                         <div className="w-14 h-14 bg-primary/15 rounded-full flex items-center justify-center text-primary font-serif font-bold text-2xl">
-                          {selectedClient.name.charAt(0)}
+                          <User size={28} />
                         </div>
                         <div>
                           <div className="flex items-center gap-2">
@@ -1342,7 +1345,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                   </div>
 
                   {/* Consultation Notes Section */}
-                  <div className="grid grid-cols-1 md:grid-cols-5 gap-6 items-start">
+                  <div className="grid grid-cols-1 md:grid-cols-5 gap-6 items-stretch">
                     
                     {/* Add Clinical Note Form Column */}
                     <div className="bg-white p-6 rounded-3xl border border-black/5 shadow-sm md:col-span-2">
@@ -1436,7 +1439,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                     </div>
 
                     {/* Chronic Notes History Column */}
-                    <div className="md:col-span-3 space-y-4 max-h-[50vh] overflow-y-auto pr-1">
+                    <div className="md:col-span-3 space-y-4">
                       <h4 className="text-sm font-bold uppercase tracking-wider text-primary flex items-center gap-2 mb-2 px-1">
                         {lang === 'fr' ? 'Historique des fiches' : lang === 'es' ? 'Historial de fichas' : 'Record history'} ({clientNotes.length})
                       </h4>
@@ -1501,7 +1504,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                     <textarea
                                       value={editingNoteAnamnese}
                                       onChange={(e) => setEditingNoteAnamnese(e.target.value)}
-                                      rows={3}
+                                      rows={6}
                                       className="w-full p-2.5 bg-[#f4f4ec] rounded-xl border border-black/5 text-xs focus:outline-none focus:ring-1 focus:ring-primary focus:bg-white transition-all resize-none leading-relaxed"
                                     />
                                   </div>
@@ -1513,7 +1516,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                     <textarea
                                       value={editingNoteTreatment}
                                       onChange={(e) => setEditingNoteTreatment(e.target.value)}
-                                      rows={3}
+                                      rows={6}
                                       className="w-full p-2.5 bg-[#f4f4ec] rounded-xl border border-black/5 text-xs focus:outline-none focus:ring-1 focus:ring-primary focus:bg-white transition-all resize-none leading-relaxed"
                                     />
                                   </div>
@@ -1649,7 +1652,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                     className="flex items-center gap-1.5 px-3 py-1.5 bg-primary/10 hover:bg-primary text-primary hover:text-white rounded-xl text-[10px] font-bold uppercase tracking-wider transition-all"
                                   >
                                     <Printer size={12} />
-                                    <span>{lang === 'fr' ? 'Reçu Mutuelle' : lang === 'es' ? 'Recibo' : 'Receipt'}</span>
+                                    <span>{lang === 'fr' ? 'Reçu' : lang === 'es' ? 'Recibo' : 'Receipt'}</span>
                                   </button>
                                 </div>
                               ) : (
@@ -2149,15 +2152,6 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                       </div>
                     ))}
                   </div>
-
-                  <div className="pt-4 border-t border-black/5 space-y-3">
-                    <h4 className="text-xs font-bold uppercase tracking-wider text-primary">
-                      {lang === 'fr' ? "Sauvegarde & Synchronisation" : "Save & Sync"}
-                    </h4>
-                    <p className="text-[11px] text-gray-500 leading-relaxed font-medium">
-                      {lang === 'fr' ? "Toutes vos modifications et ajouts de rendez-vous sont instantanément enregistrés de manière sécurisée." : "All your appointment additions and edits are instantly and securely saved."}
-                    </p>
-                  </div>
                 </div>
 
               </div>
@@ -2176,7 +2170,6 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                   {lang === 'fr' ? 'Facturation & Honoraires' : lang === 'es' ? 'Facturación y Honorarios' : 'Billing & Fees'}
                 </h3>
                 <p className="text-xs text-gray-500">
-                  {lang === 'fr' ? "Émettez des factures conformes pour vos consultations d'ostéopathie." : lang === 'es' ? "Emita facturas conformes para sus consultas de osteopatía." : "Issue compliant invoices for your osteopathy consultations."}
                 </p>
               </div>
 
@@ -2451,7 +2444,20 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                               </span>
                             </button>
                             <button
-                              onClick={() => setInvoices(prev => prev.filter(i => i.id !== inv.id))}
+                              onClick={async () => {
+                                console.log("Delete attempt for invoice:", inv.id);
+                                const confirmed = window.confirm(lang === 'fr' ? "Êtes-vous sûr de vouloir supprimer cette facture ?" : "Are you sure you want to delete this invoice?");
+                                console.log("Confirmed:", confirmed);
+                                if (confirmed) {
+                                  try {
+                                    await api.deleteInvoice(inv.id);
+                                    console.log("Invoice deletion successful");
+                                    setInvoices(prev => prev.filter(i => i.id !== inv.id));
+                                  } catch (err) {
+                                    console.error("Invoice deletion failed:", err);
+                                  }
+                                }
+                              }}
                               className="p-1.5 hover:bg-red-50 text-gray-500 hover:text-red-500 rounded-lg transition-all inline-flex items-center"
                               title={lang === 'fr' ? "Supprimer" : lang === 'es' ? "Eliminar" : "Delete"}
                             >
@@ -2749,7 +2755,15 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                         type="time"
                         required
                         value={newEvent.startTime}
-                        onChange={(e) => setNewEvent(prev => ({ ...prev, startTime: e.target.value }))}
+                        onChange={(e) => {
+                          const startTime = e.target.value;
+                          const [hours, minutes] = startTime.split(':').map(Number);
+                          const date = new Date();
+                          date.setHours(hours);
+                          date.setMinutes(minutes + 55);
+                          const endTime = `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+                          setNewEvent(prev => ({ ...prev, startTime, endTime }));
+                        }}
                         className="w-full p-2.5 bg-secondary rounded-xl border border-black/5 text-xs focus:outline-none focus:ring-1 focus:ring-primary focus:bg-white transition-all"
                       />
                     </div>
@@ -3157,7 +3171,6 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                   </label>
                   <input
                     type="date"
-                    required
                     value={editingClient.birthDate}
                     onChange={(e) => setEditingClient(prev => prev ? ({ ...prev, birthDate: e.target.value }) : null)}
                     className="w-full p-2.5 bg-secondary rounded-xl border border-black/5 text-xs focus:outline-none focus:ring-1 focus:ring-primary focus:bg-white transition-all"
@@ -3388,16 +3401,20 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
 
                 <div className="flex items-center gap-3">
                   <button
-                    onClick={() => window.print()}
-                    className="flex items-center gap-2 px-4 py-2 bg-primary text-white rounded-xl text-xs font-bold uppercase tracking-wider hover:bg-primary/95 transition-all shadow"
+                    onClick={() => {
+                      setTimeout(() => {
+                        window.print();
+                      }, 50);
+                    }}
+                    className="flex items-center gap-2 px-4 py-2 bg-primary text-white rounded-xl text-xs font-bold uppercase tracking-wider hover:bg-primary/95 transition-all shadow-sm active:scale-95"
                   >
-                    <Printer size={14} /> {translations[receiptLang].invoice.printButton}
+                    <Printer size={14} /> {translations[receiptLang]?.invoice?.printButton || (lang === 'fr' ? 'Imprimer' : 'Print')}
                   </button>
                   <button
                     onClick={() => setSelectedInvoiceForPrint(null)}
-                    className="px-4 py-2 bg-secondary text-gray-600 rounded-xl text-xs font-bold uppercase tracking-wider hover:bg-black/5 transition-all"
+                    className="px-4 py-2 bg-secondary text-gray-600 rounded-xl text-xs font-bold uppercase tracking-wider hover:bg-black/5 transition-all shadow-sm active:scale-95"
                   >
-                    {translations[receiptLang].invoice.closeButton}
+                    {translations[receiptLang]?.invoice?.closeButton || (lang === 'fr' ? 'Fermer' : 'Close')}
                   </button>
                 </div>
               </div>
