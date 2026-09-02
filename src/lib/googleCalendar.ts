@@ -9,6 +9,9 @@ export const auth = getAuth(app);
 const provider = new GoogleAuthProvider();
 provider.addScope('https://www.googleapis.com/auth/calendar.events');
 provider.addScope('https://www.googleapis.com/auth/calendar.readonly');
+provider.setCustomParameters({
+  prompt: 'select_account'
+});
 
 let cachedAccessToken: string | null = null;
 let isSigningIn = false;

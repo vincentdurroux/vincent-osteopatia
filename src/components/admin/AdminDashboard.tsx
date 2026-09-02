@@ -4,7 +4,7 @@ import {
   Users, Calendar, FileText, TrendingUp, Plus, Search, Trash2, 
   Download, LogOut, ArrowLeft, Check, RefreshCw, Calendar as CalendarIcon, 
   CreditCard, Shield, Clock, MapPin, Phone, Mail, FileCheck, ExternalLink, Printer,
-  ChevronRight, Pencil
+  ChevronRight, Pencil, ChevronLeft, LayoutGrid, List, Globe
 } from 'lucide-react';
 import { Client, ClientNote, Invoice, CalendarEvent } from '../../types';
 import { api, isSupabaseConfigured } from '../../lib/supabase';
@@ -55,6 +55,10 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [localEvents, setLocalEvents] = useState<CalendarEvent[]>([]);
   const [googleEvents, setGoogleEvents] = useState<CalendarEvent[]>([]);
+  
+  // Calendar View Mode: 'google_grid' (Month grid like Google Calendar), 'google_embed' (Official Google Calendar Iframe), 'list' (List view)
+  const [calendarViewMode, setCalendarViewMode] = useState<'grid' | 'google_embed' | 'list'>('grid');
+  const [currentCalendarDate, setCurrentCalendarDate] = useState(new Date());
   
   // Auth state
   const [googleUser, setGoogleUser] = useState<any>(null);
@@ -1255,155 +1259,456 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
 
         {/* TAB 3: CALENDAR SYNC */}
         {activeTab === 'calendar' && (
-          <div className="space-y-8 flex-1">
+          <div className="space-y-6 flex-1">
             
             {/* Header / Config Bar */}
-            <div className="bg-white p-6 rounded-3xl border border-black/5 shadow-sm flex flex-col sm:flex-row items-center justify-between gap-4">
+            <div className="bg-white p-6 rounded-3xl border border-black/5 shadow-sm flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
               <div>
-                <h3 className="text-xl font-bold font-serif text-primary">
-                  {lang === 'fr' ? 'Agenda du Cabinet' : lang === 'es' ? 'Agenda de la Clínica' : 'Clinic Calendar'}
-                </h3>
-                <p className="text-xs text-gray-500">
+                <div className="flex items-center gap-3">
+                  <h3 className="text-xl font-bold font-serif text-primary flex items-center gap-2">
+                    <CalendarIcon className="text-primary" size={22} />
+                    {lang === 'fr' ? 'Google Calendar - Cabinet' : lang === 'es' ? 'Google Calendar - Clínica' : 'Clinic Google Calendar'}
+                  </h3>
+                  {googleUser && (
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                      Google Connecté
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs text-gray-500 mt-1">
                   {googleUser 
-                    ? (lang === 'fr' ? `Synchronisé en temps réel avec votre Google Calendar principal : ${googleUser.email}` : lang === 'es' ? `Sincronizado en tiempo real con su Google Calendar principal: ${googleUser.email}` : `Synchronized in real-time with your primary Google Calendar: ${googleUser.email}`)
-                    : (lang === 'fr' ? "Mode de planification local activé. Liez votre Google Calendar pour la synchro automatique." : lang === 'es' ? "Modo de planificación local activado. Conecte su Google Calendar para la sincronización automática." : "Local planning mode active. Link your Google Calendar for automatic synchronization.")}
+                    ? (lang === 'fr' ? `Synchronisé en temps réel avec : ${googleUser.email}` : lang === 'es' ? `Sincronizado en tiempo real con: ${googleUser.email}` : `Synchronized in real-time with: ${googleUser.email}`)
+                    : (lang === 'fr' ? "Connectez vincentosteopath1@gmail.com pour voir et modifier vos rendez-vous Google Calendar." : lang === 'es' ? "Conecte vincentosteopath1@gmail.com para ver y modificar sus citas de Google Calendar." : "Connect vincentosteopath1@gmail.com to view and manage your Google Calendar events.")}
                 </p>
               </div>
 
-              <div className="flex items-center gap-3">
-                {googleToken && (
-                  <button 
-                    onClick={() => syncGoogleCalendar(googleToken)}
-                    disabled={isSyncing}
-                    className="p-2 bg-[#f4f4ec] hover:bg-black/5 rounded-xl transition-all text-gray-600 disabled:opacity-50"
-                    title={lang === 'fr' ? "Actualiser l'agenda" : lang === 'es' ? "Actualizar agenda" : "Refresh calendar"}
+              <div className="flex flex-wrap items-center gap-2.5 w-full lg:w-auto justify-between lg:justify-end">
+                {/* View Switcher: Grid (Google Style) vs List vs Official Embed */}
+                <div className="flex items-center bg-[#f4f4ec] p-1 rounded-2xl border border-black/5">
+                  <button
+                    onClick={() => setCalendarViewMode('grid')}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                      calendarViewMode === 'grid' 
+                        ? 'bg-white text-primary shadow-sm' 
+                        : 'text-gray-600 hover:text-gray-900'
+                    }`}
                   >
-                    <RefreshCw size={16} className={isSyncing ? "animate-spin" : ""} />
+                    <LayoutGrid size={14} />
+                    <span>{lang === 'fr' ? "Vue Grille" : lang === 'es' ? "Vista Cuadrícula" : "Grid View"}</span>
+                  </button>
+                  <button
+                    onClick={() => setCalendarViewMode('list')}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                      calendarViewMode === 'list' 
+                        ? 'bg-white text-primary shadow-sm' 
+                        : 'text-gray-600 hover:text-gray-900'
+                    }`}
+                  >
+                    <List size={14} />
+                    <span>{lang === 'fr' ? "Liste" : lang === 'es' ? "Lista" : "List View"}</span>
+                  </button>
+                  <button
+                    onClick={() => setCalendarViewMode('google_embed')}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                      calendarViewMode === 'google_embed' 
+                        ? 'bg-white text-primary shadow-sm' 
+                        : 'text-gray-600 hover:text-gray-900'
+                    }`}
+                  >
+                    <ExternalLink size={14} />
+                    <span>Google Web</span>
+                  </button>
+                </div>
+
+                {googleUser ? (
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={handleGoogleLogout}
+                      className="text-xs px-3 py-2 bg-gray-100 text-gray-700 hover:text-rose-600 rounded-2xl font-medium transition-colors"
+                      title={lang === 'fr' ? "Déconnecter Google" : lang === 'es' ? "Desconectar Google" : "Disconnect Google"}
+                    >
+                      {lang === 'fr' ? "Changer de compte" : lang === 'es' ? "Cambiar cuenta" : "Switch Account"}
+                    </button>
+                    {googleToken && (
+                      <button 
+                        onClick={() => syncGoogleCalendar(googleToken)}
+                        disabled={isSyncing}
+                        className="p-2 bg-white border border-gray-200 hover:bg-gray-50 rounded-2xl transition-all text-gray-700 disabled:opacity-50 shadow-sm"
+                        title={lang === 'fr' ? "Actualiser l'agenda" : lang === 'es' ? "Actualizar agenda" : "Refresh calendar"}
+                      >
+                        <RefreshCw size={15} className={isSyncing ? "animate-spin text-primary" : ""} />
+                      </button>
+                    )}
+                  </div>
+                ) : (
+                  <button
+                    onClick={handleGoogleLogin}
+                    disabled={isAuthLoading}
+                    className="flex items-center gap-2 px-3.5 py-2 bg-white border border-gray-200 text-gray-800 rounded-2xl text-xs font-bold hover:bg-gray-50 transition-all shadow-sm"
+                  >
+                    <Globe size={14} className="text-primary" />
+                    <span>Connecter vincentosteopath1@gmail.com</span>
                   </button>
                 )}
 
                 <button
                   onClick={() => setIsAddEventOpen(true)}
-                  className="flex items-center gap-2 px-4 py-2.5 bg-primary text-white rounded-2xl text-xs font-bold uppercase tracking-wider hover:bg-primary/95 transition-all shadow-md shadow-primary/10"
+                  className="flex items-center gap-2 px-4 py-2 bg-primary text-white rounded-2xl text-xs font-bold uppercase tracking-wider hover:bg-primary/95 transition-all shadow-md shadow-primary/10"
                 >
-                  <Plus size={16} /> {lang === 'fr' ? "Bloquer un RDV" : lang === 'es' ? "Bloquear una cita" : "Block a Slot"}
+                  <Plus size={16} /> {lang === 'fr' ? "Nouveau RDV" : lang === 'es' ? "Nueva Cita" : "New Appointment"}
                 </button>
               </div>
             </div>
 
-            {/* Agenda Layout Grid */}
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-              
-              {/* Left col: Appointment list */}
-              <div className="bg-white p-6 rounded-3xl border border-black/5 shadow-sm lg:col-span-2 flex flex-col">
-                <h4 className="text-xs font-bold uppercase tracking-wider text-primary mb-4 flex items-center gap-2">
-                  <CalendarIcon size={14} /> {lang === 'fr' ? "Prochains rendez-vous cliniques" : lang === 'es' ? "Próximas citas clínicas" : "Upcoming clinical appointments"}
-                </h4>
-
-                <div className="space-y-3 overflow-y-auto max-h-[60vh] pr-1">
-                  
-                  {/* Google Calendar Events */}
-                  {googleUser && googleEvents.map(event => (
-                    <div key={event.id} className="p-4 rounded-2xl bg-emerald-50/30 border border-emerald-100/50 flex items-start justify-between group">
-                      <div className="flex items-start gap-3">
-                        <div className="w-9 h-9 rounded-xl bg-emerald-100 text-emerald-800 flex items-center justify-center shrink-0">
-                          <CalendarIcon size={18} />
-                        </div>
-                        <div>
-                          <h5 className="text-xs font-bold text-gray-800 leading-tight flex items-center gap-1.5">
-                            {event.summary} <span className="text-[8px] bg-emerald-200 text-emerald-800 px-1.5 py-0.5 rounded-full uppercase tracking-widest font-extrabold font-sans">Google</span>
-                          </h5>
-                          <p className="text-[10px] text-gray-500 mt-1 flex items-center gap-1">
-                            <Clock size={12} /> {new Date(event.start).toLocaleDateString(lang === 'fr' ? 'fr-FR' : lang === 'es' ? 'es-ES' : 'en-US', { weekday: 'long', day: 'numeric', month: 'short' })} • {new Date(event.start).toLocaleTimeString(lang === 'fr' ? 'fr-FR' : lang === 'es' ? 'es-ES' : 'en-US', { hour: '2-digit', minute: '2-digit' })}
-                          </p>
-                          {event.description && <p className="text-[10px] text-gray-400 mt-2 italic leading-relaxed">{event.description}</p>}
-                        </div>
-                      </div>
-
-                      <button
-                        onClick={() => handleDeleteEvent(event.id, true)}
-                        className="opacity-0 group-hover:opacity-100 p-1.5 hover:bg-rose-50 text-rose-500 rounded-lg transition-all shrink-0"
-                        title={lang === 'fr' ? "Supprimer ce rendez-vous" : lang === 'es' ? "Eliminar esta cita" : "Delete this appointment"}
-                      >
-                        <Trash2 size={13} />
-                      </button>
-                    </div>
-                  ))}
-
-                  {/* Local Backup Events */}
-                  {localEvents.map(event => (
-                    <div key={event.id} className="p-4 rounded-2xl bg-primary/5 border border-primary/10 flex items-start justify-between group">
-                      <div className="flex items-start gap-3">
-                        <div className="w-9 h-9 rounded-xl bg-primary/10 text-primary flex items-center justify-center shrink-0">
-                          <CalendarIcon size={18} />
-                        </div>
-                        <div>
-                          <h5 className="text-xs font-bold text-gray-800 leading-tight">
-                            {event.summary}
-                          </h5>
-                          <p className="text-[10px] text-gray-500 mt-1 flex items-center gap-1">
-                            <Clock size={12} /> {new Date(event.start).toLocaleDateString(lang === 'fr' ? 'fr-FR' : lang === 'es' ? 'es-ES' : 'en-US', { weekday: 'long', day: 'numeric', month: 'short' })} • {new Date(event.start).toLocaleTimeString(lang === 'fr' ? 'fr-FR' : lang === 'es' ? 'es-ES' : 'en-US', { hour: '2-digit', minute: '2-digit' })}
-                          </p>
-                          {event.description && <p className="text-[10px] text-gray-400 mt-2 italic leading-relaxed">{event.description}</p>}
-                        </div>
-                      </div>
-
-                      <button
-                        onClick={() => handleDeleteEvent(event.id, false)}
-                        className="opacity-0 group-hover:opacity-100 p-1.5 hover:bg-rose-50 text-rose-500 rounded-lg transition-all shrink-0"
-                        title={lang === 'fr' ? "Supprimer ce rendez-vous" : lang === 'es' ? "Eliminar esta cita" : "Delete this appointment"}
-                      >
-                        <Trash2 size={13} />
-                      </button>
-                    </div>
-                  ))}
-
-                  {googleEvents.length === 0 && localEvents.length === 0 && (
-                    <p className="text-xs text-center text-gray-400 py-12">
-                      {lang === 'fr' ? "Aucun rendez-vous planifié dans les prochains jours." : lang === 'es' ? "No hay citas programadas para los próximos días." : "No appointments scheduled for the upcoming days."}
-                    </p>
-                  )}
-                </div>
-              </div>
-
-              {/* Right col: Cabinet Details Card */}
+            {/* VIEW 1: GOOGLE STYLE MONTH/DAY GRID */}
+            {calendarViewMode === 'grid' && (
               <div className="bg-white p-6 rounded-3xl border border-black/5 shadow-sm space-y-6">
-                <div>
-                  <h4 className="text-sm font-serif font-bold text-primary mb-1">
-                    {lang === 'fr' ? "Horaires de consultations" : lang === 'es' ? "Horarios de consulta" : "Consultation hours"}
-                  </h4>
-                  <p className="text-xs text-gray-500">
-                    {lang === 'fr' ? "Vos créneaux d'activité générale définis." : lang === 'es' ? "Sus franjas horarias de actividad general definidas." : "Your defined general active time slots."}
-                  </p>
-                </div>
+                
+                {/* Month Navigator Header */}
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pb-4 border-b border-black/5">
+                  <div className="flex items-center gap-4">
+                    <h4 className="text-xl font-bold font-serif text-gray-800 capitalize">
+                      {currentCalendarDate.toLocaleDateString(lang === 'fr' ? 'fr-FR' : lang === 'es' ? 'es-ES' : 'en-US', { month: 'long', year: 'numeric' })}
+                    </h4>
+                    
+                    <div className="flex items-center gap-1 bg-[#f4f4ec] p-1 rounded-xl">
+                      <button
+                        onClick={() => {
+                          const prev = new Date(currentCalendarDate);
+                          prev.setMonth(prev.getMonth() - 1);
+                          setCurrentCalendarDate(prev);
+                        }}
+                        className="p-1.5 hover:bg-white rounded-lg text-gray-700 transition-all"
+                        title={lang === 'fr' ? "Mois précédent" : "Previous month"}
+                      >
+                        <ChevronLeft size={16} />
+                      </button>
+                      
+                      <button
+                        onClick={() => setCurrentCalendarDate(new Date())}
+                        className="px-2.5 py-1 text-xs font-bold text-gray-700 hover:bg-white rounded-lg transition-all"
+                      >
+                        {lang === 'fr' ? "Aujourd'hui" : lang === 'es' ? "Hoy" : "Today"}
+                      </button>
 
-                <div className="space-y-3">
-                  {[
-                    { day: lang === 'fr' ? 'Lundi - Vendredi' : lang === 'es' ? 'Lunes - Viernes' : 'Monday - Friday', hours: '09:00 - 13:00, 16:00 - 20:00' },
-                    { day: lang === 'fr' ? 'Samedi' : lang === 'es' ? 'Sábado' : 'Saturday', hours: '09:00 - 13:00' },
-                    { day: lang === 'fr' ? 'Dimanche' : lang === 'es' ? 'Domingo' : 'Sunday', hours: lang === 'fr' ? 'Fermé' : lang === 'es' ? 'Cerrado' : 'Closed' },
-                  ].map((sched, i) => (
-                    <div key={i} className="flex justify-between items-center text-xs py-1">
-                      <span className="font-bold text-gray-600">{sched.day}</span>
-                      <span className="text-gray-500">{sched.hours}</span>
+                      <button
+                        onClick={() => {
+                          const next = new Date(currentCalendarDate);
+                          next.setMonth(next.getMonth() + 1);
+                          setCurrentCalendarDate(next);
+                        }}
+                        className="p-1.5 hover:bg-white rounded-lg text-gray-700 transition-all"
+                        title={lang === 'fr' ? "Mois suivant" : "Next month"}
+                      >
+                        <ChevronRight size={16} />
+                      </button>
                     </div>
-                  ))}
+                  </div>
+
+                  <div className="flex items-center gap-4 text-xs text-gray-500">
+                    <div className="flex items-center gap-1.5">
+                      <span className="w-3 h-3 rounded-md bg-emerald-500"></span>
+                      <span>Google Calendar</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="w-3 h-3 rounded-md bg-primary"></span>
+                      <span>{lang === 'fr' ? "Cabinet Local" : "Local App"}</span>
+                    </div>
+                  </div>
                 </div>
 
-                <div className="pt-4 border-t border-black/5 space-y-3">
-                  <h4 className="text-xs font-bold uppercase tracking-wider text-primary">
-                    {lang === 'fr' ? "Instructions Synchro" : lang === 'es' ? "Instrucciones de Sincronización" : "Sync Instructions"}
-                  </h4>
-                  <p className="text-[11px] text-gray-500 leading-relaxed">
-                    {lang === 'fr' ? "Lorsque vous ajoutez un rendez-vous depuis cet espace, il est automatiquement enregistré dans la base de données interne de votre site." : lang === 'es' ? "Cuando agrega una cita desde este espacio, se registra automáticamente en la base de datos interna de su sitio." : "When you add an appointment from this space, it is automatically saved in your website's internal database."}
-                  </p>
-                  <p className="text-[11px] text-gray-500 leading-relaxed font-bold">
-                    {lang === 'fr' ? "Si votre Google Calendar est lié, l'événement est instantanément créé sur votre application Google Calendar réelle, vous permettant de le recevoir sur votre téléphone en temps réel !" : lang === 'es' ? "¡Si su Google Calendar está vinculado, el evento se crea instantáneamente en su aplicación Google Calendar real, lo que le permite recibirlo en su teléfono en tiempo real!" : "If your Google Calendar is linked, the event is instantly created on your real Google Calendar application, allowing you to receive it on your phone in real time!"}
-                  </p>
+                {/* Monthly Calendar Grid Layout */}
+                <div className="w-full overflow-x-auto">
+                  <div className="min-w-[700px]">
+                    {/* Days of week header */}
+                    <div className="grid grid-cols-7 gap-px mb-2 text-center text-xs font-bold text-gray-500 uppercase tracking-wider">
+                      {(lang === 'fr' 
+                        ? ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'] 
+                        : lang === 'es' 
+                        ? ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'] 
+                        : ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+                      ).map((d, i) => (
+                        <div key={i} className="py-2">{d}</div>
+                      ))}
+                    </div>
+
+                    {/* Month Days Calculation */}
+                    {(() => {
+                      const year = currentCalendarDate.getFullYear();
+                      const month = currentCalendarDate.getMonth();
+                      
+                      // First day of month (1 = Monday, 0 = Sunday in JS getDay())
+                      const firstDayDate = new Date(year, month, 1);
+                      let startDay = firstDayDate.getDay(); // 0 is Sun, 1 is Mon
+                      startDay = startDay === 0 ? 6 : startDay - 1; // convert to 0 = Mon
+                      
+                      const daysInMonth = new Date(year, month + 1, 0).getDate();
+                      const daysInPrevMonth = new Date(year, month, 0).getDate();
+
+                      const allDays: { day: number; currentMonth: boolean; dateString: string }[] = [];
+
+                      // Leading days from prev month
+                      for (let i = startDay - 1; i >= 0; i--) {
+                        const dayNum = daysInPrevMonth - i;
+                        const dStr = new Date(year, month - 1, dayNum).toISOString().split('T')[0];
+                        allDays.push({ day: dayNum, currentMonth: false, dateString: dStr });
+                      }
+
+                      // Current month days
+                      for (let i = 1; i <= daysInMonth; i++) {
+                        const dStr = new Date(year, month, i).toISOString().split('T')[0];
+                        allDays.push({ day: i, currentMonth: true, dateString: dStr });
+                      }
+
+                      // Trailing days to complete 35 or 42 grid cells
+                      const remaining = (7 - (allDays.length % 7)) % 7;
+                      for (let i = 1; i <= remaining; i++) {
+                        const dStr = new Date(year, month + 1, i).toISOString().split('T')[0];
+                        allDays.push({ day: i, currentMonth: false, dateString: dStr });
+                      }
+
+                      const todayStr = new Date().toISOString().split('T')[0];
+
+                      return (
+                        <div className="grid grid-cols-7 gap-2">
+                          {allDays.map((cell, idx) => {
+                            // Find events for this day
+                            const dayEvents = [...googleEvents, ...localEvents].filter(ev => {
+                              try {
+                                const evDate = new Date(ev.start).toISOString().split('T')[0];
+                                return evDate === cell.dateString;
+                              } catch (e) {
+                                return false;
+                              }
+                            });
+
+                            const isToday = cell.dateString === todayStr;
+
+                            return (
+                              <div
+                                key={idx}
+                                onClick={() => {
+                                  // Pre-fill modal date
+                                  setNewEvent(prev => ({
+                                    ...prev,
+                                    date: cell.dateString
+                                  }));
+                                  setIsAddEventOpen(true);
+                                }}
+                                className={`min-h-[105px] p-2 rounded-2xl border transition-all cursor-pointer flex flex-col justify-between ${
+                                  cell.currentMonth 
+                                    ? isToday 
+                                      ? 'bg-primary/5 border-primary/40 shadow-sm' 
+                                      : 'bg-[#fafafa] border-black/5 hover:border-primary/30 hover:bg-white' 
+                                    : 'bg-black/[0.02] border-transparent opacity-40 hover:opacity-80'
+                                }`}
+                              >
+                                <div className="flex items-center justify-between">
+                                  <span className={`text-xs font-bold rounded-full w-6 h-6 flex items-center justify-center ${
+                                    isToday 
+                                      ? 'bg-primary text-white shadow-sm' 
+                                      : 'text-gray-700'
+                                  }`}>
+                                    {cell.day}
+                                  </span>
+                                  {dayEvents.length > 0 && (
+                                    <span className="text-[10px] font-bold text-gray-400">
+                                      {dayEvents.length} {dayEvents.length === 1 ? 'rdv' : 'rdvs'}
+                                    </span>
+                                  )}
+                                </div>
+
+                                {/* Events snippets in cell */}
+                                <div className="mt-1 space-y-1 overflow-hidden">
+                                  {dayEvents.slice(0, 2).map((ev, evIdx) => {
+                                    const isGoogle = googleEvents.some(g => g.id === ev.id);
+                                    const timeStr = new Date(ev.start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+                                    return (
+                                      <div
+                                        key={evIdx}
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                        }}
+                                        className={`px-2 py-1 rounded-lg text-[10px] font-bold truncate leading-tight flex items-center justify-between ${
+                                          isGoogle 
+                                            ? 'bg-emerald-100/80 text-emerald-900 border border-emerald-200' 
+                                            : 'bg-primary/10 text-primary border border-primary/20'
+                                        }`}
+                                        title={`${timeStr} - ${ev.summary}`}
+                                      >
+                                        <span className="truncate">{timeStr} {ev.summary}</span>
+                                      </div>
+                                    );
+                                  })}
+                                  {dayEvents.length > 2 && (
+                                    <p className="text-[9px] font-bold text-gray-500 pl-1">
+                                      +{dayEvents.length - 2} {lang === 'fr' ? 'autre(s)' : 'more'}
+                                    </p>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      );
+                    })()}
+                  </div>
                 </div>
               </div>
+            )}
 
-            </div>
+            {/* VIEW 2: OFFICIAL GOOGLE CALENDAR EMBED */}
+            {calendarViewMode === 'google_embed' && (
+              <div className="bg-white p-6 rounded-3xl border border-black/5 shadow-sm space-y-4">
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                  <div>
+                    <h4 className="text-sm font-bold text-gray-800">
+                      {lang === 'fr' ? "Interface Web Google Calendar intégrée" : "Integrated Google Calendar Web Interface"}
+                    </h4>
+                    <p className="text-xs text-gray-500">
+                      {lang === 'fr' ? "Visualisation directe et interactive de votre agenda Google Calendar en direct." : "Direct interactive live view of your Google Calendar."}
+                    </p>
+                  </div>
+                  <a
+                    href="https://calendar.google.com/calendar/u/0/r"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="flex items-center gap-1.5 px-3.5 py-1.5 bg-primary/10 hover:bg-primary/15 text-primary text-xs font-bold rounded-xl transition-all"
+                  >
+                    <span>{lang === 'fr' ? "Ouvrir dans Google Calendar" : "Open in Google Calendar"}</span>
+                    <ExternalLink size={13} />
+                  </a>
+                </div>
+
+                <div className="w-full h-[650px] rounded-2xl overflow-hidden border border-black/10 bg-[#f9f9f9]">
+                  <iframe
+                    src={`https://calendar.google.com/calendar/embed?src=${encodeURIComponent(googleUser?.email || 'vincentosteopath1@gmail.com')}&ctz=Europe%2FMadrid&hl=${lang === 'es' ? 'es' : lang === 'fr' ? 'fr' : 'en'}&showTitle=0&showNav=1&showDate=1&showPrint=0&showTabs=1&showCalendars=0`}
+                    style={{ border: 0 }}
+                    width="100%"
+                    height="100%"
+                    frameBorder="0"
+                    scrolling="no"
+                    title="Google Calendar Direct Embed"
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* VIEW 3: APPOINTMENT LIST & CABINET HOURS */}
+            {calendarViewMode === 'list' && (
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                
+                {/* Left col: Appointment list */}
+                <div className="bg-white p-6 rounded-3xl border border-black/5 shadow-sm lg:col-span-2 flex flex-col">
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-primary mb-4 flex items-center gap-2">
+                    <CalendarIcon size={14} /> {lang === 'fr' ? "Prochains rendez-vous cliniques" : lang === 'es' ? "Próximas citas clínicas" : "Upcoming clinical appointments"}
+                  </h4>
+
+                  <div className="space-y-3 overflow-y-auto max-h-[60vh] pr-1">
+                    
+                    {/* Google Calendar Events */}
+                    {googleUser && googleEvents.map(event => (
+                      <div key={event.id} className="p-4 rounded-2xl bg-emerald-50/40 border border-emerald-100 flex items-start justify-between group">
+                        <div className="flex items-start gap-3">
+                          <div className="w-9 h-9 rounded-xl bg-emerald-100 text-emerald-800 flex items-center justify-center shrink-0">
+                            <CalendarIcon size={18} />
+                          </div>
+                          <div>
+                            <h5 className="text-xs font-bold text-gray-800 leading-tight flex items-center gap-1.5">
+                              {event.summary} <span className="text-[8px] bg-emerald-200 text-emerald-800 px-1.5 py-0.5 rounded-full uppercase tracking-widest font-extrabold font-sans">Google</span>
+                            </h5>
+                            <p className="text-[10px] text-gray-500 mt-1 flex items-center gap-1">
+                              <Clock size={12} /> {new Date(event.start).toLocaleDateString(lang === 'fr' ? 'fr-FR' : lang === 'es' ? 'es-ES' : 'en-US', { weekday: 'long', day: 'numeric', month: 'short' })} • {new Date(event.start).toLocaleTimeString(lang === 'fr' ? 'fr-FR' : lang === 'es' ? 'es-ES' : 'en-US', { hour: '2-digit', minute: '2-digit' })}
+                            </p>
+                            {event.description && <p className="text-[10px] text-gray-400 mt-2 italic leading-relaxed">{event.description}</p>}
+                          </div>
+                        </div>
+
+                        <button
+                          onClick={() => handleDeleteEvent(event.id, true)}
+                          className="opacity-0 group-hover:opacity-100 p-1.5 hover:bg-rose-50 text-rose-500 rounded-lg transition-all shrink-0"
+                          title={lang === 'fr' ? "Supprimer ce rendez-vous" : lang === 'es' ? "Eliminar esta cita" : "Delete this appointment"}
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      </div>
+                    ))}
+
+                    {/* Local Backup Events */}
+                    {localEvents.map(event => (
+                      <div key={event.id} className="p-4 rounded-2xl bg-primary/5 border border-primary/10 flex items-start justify-between group">
+                        <div className="flex items-start gap-3">
+                          <div className="w-9 h-9 rounded-xl bg-primary/10 text-primary flex items-center justify-center shrink-0">
+                            <CalendarIcon size={18} />
+                          </div>
+                          <div>
+                            <h5 className="text-xs font-bold text-gray-800 leading-tight">
+                              {event.summary}
+                            </h5>
+                            <p className="text-[10px] text-gray-500 mt-1 flex items-center gap-1">
+                              <Clock size={12} /> {new Date(event.start).toLocaleDateString(lang === 'fr' ? 'fr-FR' : lang === 'es' ? 'es-ES' : 'en-US', { weekday: 'long', day: 'numeric', month: 'short' })} • {new Date(event.start).toLocaleTimeString(lang === 'fr' ? 'fr-FR' : lang === 'es' ? 'es-ES' : 'en-US', { hour: '2-digit', minute: '2-digit' })}
+                            </p>
+                            {event.description && <p className="text-[10px] text-gray-400 mt-2 italic leading-relaxed">{event.description}</p>}
+                          </div>
+                        </div>
+
+                        <button
+                          onClick={() => handleDeleteEvent(event.id, false)}
+                          className="opacity-0 group-hover:opacity-100 p-1.5 hover:bg-rose-50 text-rose-500 rounded-lg transition-all shrink-0"
+                          title={lang === 'fr' ? "Supprimer ce rendez-vous" : lang === 'es' ? "Eliminar esta cita" : "Delete this appointment"}
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      </div>
+                    ))}
+
+                    {googleEvents.length === 0 && localEvents.length === 0 && (
+                      <p className="text-xs text-center text-gray-400 py-12">
+                        {lang === 'fr' ? "Aucun rendez-vous planifié dans les prochains jours." : lang === 'es' ? "No hay citas programadas para los próximos días." : "No appointments scheduled for the upcoming days."}
+                      </p>
+                    )}
+                  </div>
+                </div>
+
+                {/* Right col: Cabinet Details Card */}
+                <div className="bg-white p-6 rounded-3xl border border-black/5 shadow-sm space-y-6">
+                  <div>
+                    <h4 className="text-sm font-serif font-bold text-primary mb-1">
+                      {lang === 'fr' ? "Horaires de consultations" : lang === 'es' ? "Horarios de consulta" : "Consultation hours"}
+                    </h4>
+                    <p className="text-xs text-gray-500">
+                      {lang === 'fr' ? "Vos créneaux d'activité générale définis." : lang === 'es' ? "Sus franjas horarias de actividad general definidas." : "Your defined general active time slots."}
+                    </p>
+                  </div>
+
+                  <div className="space-y-3">
+                    {[
+                      { day: lang === 'fr' ? 'Lundi - Vendredi' : lang === 'es' ? 'Lunes - Viernes' : 'Monday - Friday', hours: '09:00 - 13:00, 16:00 - 20:00' },
+                      { day: lang === 'fr' ? 'Samedi' : lang === 'es' ? 'Sábado' : 'Saturday', hours: '09:00 - 13:00' },
+                      { day: lang === 'fr' ? 'Dimanche' : lang === 'es' ? 'Domingo' : 'Sunday', hours: lang === 'fr' ? 'Fermé' : lang === 'es' ? 'Cerrado' : 'Closed' },
+                    ].map((sched, i) => (
+                      <div key={i} className="flex justify-between items-center text-xs py-1">
+                        <span className="font-bold text-gray-600">{sched.day}</span>
+                        <span className="text-gray-500">{sched.hours}</span>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="pt-4 border-t border-black/5 space-y-3">
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-primary">
+                      {lang === 'fr' ? "Instructions Synchro" : lang === 'es' ? "Instrucciones de Sincronización" : "Sync Instructions"}
+                    </h4>
+                    <p className="text-[11px] text-gray-500 leading-relaxed font-medium">
+                      {lang === 'fr' ? "Lorsque vous ajoutez un rendez-vous depuis cet espace, il est instantanément créé sur votre application Google Calendar réelle, vous permettant de le recevoir sur votre smartphone en temps réel." : lang === 'es' ? "Cuando agrega una cita desde este espacio, se crea instantáneamente en su aplicación Google Calendar real, lo que le permite recibirla en su teléfono inteligente en tiempo real." : "When you add an appointment from this space, it is instantly created on your real Google Calendar application, allowing you to receive it on your smartphone in real time."}
+                    </p>
+                  </div>
+                </div>
+
+              </div>
+            )}
+
           </div>
         )}
 
