@@ -28,6 +28,16 @@ const getDefaultAppointmentTitle = (language: string) => {
   return "Séance d'Ostéopathie";
 };
 
+const getMonthsList = (lang: string) => {
+  if (lang === 'es') {
+    return ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
+  }
+  if (lang === 'en') {
+    return ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+  }
+  return ["Janvier", "Février", "Mars", "Avril", "Mai", "Juin", "Juillet", "Août", "Septembre", "Octobre", "Novembre", "Décembre"];
+};
+
 type TabType = 'overview' | 'clients' | 'calendar' | 'billing';
 
 export default function AdminDashboard({ onClose }: AdminDashboardProps) {
@@ -127,8 +137,27 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
   const [editingNoteMotif, setEditingNoteMotif] = useState('');
   const [editingNoteDate, setEditingNoteDate] = useState('');
 
+  // Inline invoice creation states for patient notes
+  const [creatingInvoiceForNoteId, setCreatingInvoiceForNoteId] = useState<string | null>(null);
+  const [inlineInvoiceAmount, setInlineInvoiceAmount] = useState<number>(60);
+  const [inlineInvoicePaymentMethod, setInlineInvoicePaymentMethod] = useState<'card' | 'cash' | 'transfer'>('card');
+
   const [isEditInvoiceOpen, setIsEditInvoiceOpen] = useState(false);
   const [editingInvoice, setEditingInvoice] = useState<Invoice | null>(null);
+
+  // Accounting recap states
+  const [recapPeriodType, setRecapPeriodType] = useState<'monthly' | 'annual'>('monthly');
+  const [recapYear, setRecapYear] = useState<number>(new Date().getFullYear());
+  const [recapMonth, setRecapMonth] = useState<number>(new Date().getMonth());
+  const [selectedRecapForPrint, setSelectedRecapForPrint] = useState<{
+    periodType: 'monthly' | 'annual';
+    year: number;
+    month: number;
+    invoices: Invoice[];
+    total: number;
+    breakdown: { card: number; cash: number; transfer: number };
+    count: number;
+  } | null>(null);
 
   // Supabase Diagnostics & Synchronization states
   const [isSupabaseModalOpen, setIsSupabaseModalOpen] = useState(false);
@@ -354,6 +383,28 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
       setNewInvoice({ clientId: '', amount: 60, paymentMethod: 'card', description: "Séance d'Ostéopathie (1h)", language: lang as 'fr' | 'en' | 'es' });
     } catch (err) {
       console.error('Failed to create invoice:', err);
+    }
+  };
+
+  // Create inline invoice from notes history
+  const handleCreateInlineInvoice = async (note: ClientNote) => {
+    if (!selectedClient) return;
+    try {
+      const noteDateStr = note.date.includes('T') ? note.date.split('T')[0] : note.date;
+      const created = await api.createInvoice({
+        clientId: selectedClient.id,
+        clientName: selectedClient.name,
+        amount: Number(inlineInvoiceAmount),
+        status: 'paid',
+        paymentMethod: inlineInvoicePaymentMethod,
+        date: noteDateStr,
+        description: lang === 'fr' ? "Séance d'Ostéopathie" : lang === 'es' ? "Sesión de Osteopatía" : "Osteopathy Session",
+        language: lang as 'fr' | 'en' | 'es',
+      });
+      setInvoices(prev => [created, ...prev]);
+      setCreatingInvoiceForNoteId(null);
+    } catch (err) {
+      console.error('Failed to create inline invoice:', err);
     }
   };
 
@@ -1498,7 +1549,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                        note.category === 'follow-up' ? (lang === 'fr' ? 'Suivi' : lang === 'es' ? 'Seguimiento' : 'Follow-up') : (lang === 'fr' ? 'Général' : lang === 'es' ? 'General' : 'General')}
                                     </span>
                                     <span className="text-[10px] text-gray-400">
-                                      {new Date(note.date).toLocaleDateString(lang === 'fr' ? 'fr-FR' : lang === 'es' ? 'es-ES' : 'en-US', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                                      {new Date(note.date).toLocaleDateString(lang === 'fr' ? 'fr-FR' : lang === 'es' ? 'es-ES' : 'en-US', { day: 'numeric', month: 'short', year: 'numeric' })}
                                     </span>
                                   </div>
 
@@ -1564,6 +1615,112 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                 )}
                               </>
                             )}
+
+                            {/* Associated Invoice or Inline Creation Options */}
+                            {(() => {
+                              const noteDateStr = note.date.includes('T') ? note.date.split('T')[0] : note.date;
+                              const associatedInvoice = invoices.find(inv => 
+                                inv.clientId === note.clientId && 
+                                (inv.date === noteDateStr || (inv.date && noteDateStr && inv.date.slice(0, 10) === noteDateStr.slice(0, 10)))
+                              );
+
+                              return associatedInvoice ? (
+                                <div className="mt-4 pt-4 border-t border-black/5 flex flex-wrap items-center justify-between gap-3 bg-secondary/30 p-3 rounded-2xl">
+                                  <div className="flex items-center gap-2">
+                                    <CreditCard size={14} className="text-primary" />
+                                    <div className="text-left">
+                                      <p className="text-xs font-bold text-gray-800 flex items-center gap-1.5">
+                                        <span>{lang === 'fr' ? 'Facture' : lang === 'es' ? 'Factura' : 'Invoice'} #{associatedInvoice.invoiceNumber}</span>
+                                        <span className="text-[10px] text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded-full font-bold">
+                                          {lang === 'fr' ? 'Payée' : lang === 'es' ? 'Pagada' : 'Paid'}
+                                        </span>
+                                      </p>
+                                      <p className="text-[10px] text-gray-500">
+                                        {associatedInvoice.amount} € • {
+                                          associatedInvoice.paymentMethod === 'card' ? (lang === 'fr' ? 'Carte' : lang === 'es' ? 'Tarjeta' : 'Card') :
+                                          associatedInvoice.paymentMethod === 'cash' ? (lang === 'fr' ? 'Espèces' : lang === 'es' ? 'Efectivo' : 'Cash') : (lang === 'fr' ? 'Virement' : lang === 'es' ? 'Transferencia' : 'Transfer')
+                                        }
+                                      </p>
+                                    </div>
+                                  </div>
+                                  
+                                  <button
+                                    onClick={() => setSelectedInvoiceForPrint(associatedInvoice)}
+                                    className="flex items-center gap-1.5 px-3 py-1.5 bg-primary/10 hover:bg-primary text-primary hover:text-white rounded-xl text-[10px] font-bold uppercase tracking-wider transition-all"
+                                  >
+                                    <Printer size={12} />
+                                    <span>{lang === 'fr' ? 'Reçu Mutuelle' : lang === 'es' ? 'Recibo' : 'Receipt'}</span>
+                                  </button>
+                                </div>
+                              ) : (
+                                <div className="mt-4 pt-4 border-t border-black/5">
+                                  {creatingInvoiceForNoteId === note.id ? (
+                                    <div className="p-3 bg-primary/5 rounded-2xl border border-primary/20 space-y-3">
+                                      <div className="flex items-center justify-between">
+                                        <span className="text-[11px] font-bold text-primary flex items-center gap-1.5">
+                                          <CreditCard size={13} />
+                                          {lang === 'fr' ? 'Créer une facture' : lang === 'es' ? 'Crear factura' : 'Create invoice'}
+                                        </span>
+                                        <button
+                                          type="button"
+                                          onClick={() => setCreatingInvoiceForNoteId(null)}
+                                          className="text-[10px] text-gray-400 hover:text-gray-600 font-bold"
+                                        >
+                                          {lang === 'fr' ? 'Annuler' : 'Cancel'}
+                                        </button>
+                                      </div>
+                                      <div className="grid grid-cols-2 gap-2">
+                                        <div>
+                                          <label className="text-[9px] uppercase tracking-wider font-bold text-gray-400 block mb-0.5">
+                                            {lang === 'fr' ? 'Montant (€)' : 'Amount (€)'}
+                                          </label>
+                                          <input
+                                            type="number"
+                                            value={inlineInvoiceAmount}
+                                            onChange={(e) => setInlineInvoiceAmount(Number(e.target.value))}
+                                            className="w-full p-2 bg-white rounded-xl border border-black/10 text-xs focus:outline-none focus:ring-1 focus:ring-primary font-bold"
+                                          />
+                                        </div>
+                                        <div>
+                                          <label className="text-[9px] uppercase tracking-wider font-bold text-gray-400 block mb-0.5">
+                                            {lang === 'fr' ? 'Paiement' : 'Payment'}
+                                          </label>
+                                          <select
+                                            value={inlineInvoicePaymentMethod}
+                                            onChange={(e) => setInlineInvoicePaymentMethod(e.target.value as any)}
+                                            className="w-full p-2 bg-white rounded-xl border border-black/10 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
+                                          >
+                                            <option value="card">{lang === 'fr' ? 'Carte' : lang === 'es' ? 'Tarjeta' : 'Card'}</option>
+                                            <option value="cash">{lang === 'fr' ? 'Espèces' : lang === 'es' ? 'Efectivo' : 'Cash'}</option>
+                                            <option value="transfer">{lang === 'fr' ? 'Virement' : lang === 'es' ? 'Transferencia' : 'Transfer'}</option>
+                                          </select>
+                                        </div>
+                                      </div>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleCreateInlineInvoice(note)}
+                                        className="w-full py-2 bg-primary text-white text-xs font-bold rounded-xl hover:bg-primary/95 transition-all shadow-sm"
+                                      >
+                                        {lang === 'fr' ? 'Générer & Enregistrer' : 'Generate & Save'}
+                                      </button>
+                                    </div>
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setCreatingInvoiceForNoteId(note.id);
+                                        setInlineInvoiceAmount(60);
+                                        setInlineInvoicePaymentMethod('card');
+                                      }}
+                                      className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-50 hover:bg-primary/5 text-gray-500 hover:text-primary rounded-xl text-[10px] font-bold uppercase tracking-wider transition-all border border-black/5"
+                                    >
+                                      <Plus size={12} />
+                                      <span>{lang === 'fr' ? 'Créer une facture' : lang === 'es' ? 'Crear factura' : 'Create Invoice'}</span>
+                                    </button>
+                                  )}
+                                </div>
+                              );
+                            })()}
                           </div>
                         );
                       })}
@@ -2072,6 +2229,162 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                   </div>
                 </div>
 
+                {/* Accounting Period Recap & Print Card */}
+                <div className="bg-white p-6 rounded-3xl border border-black/5 shadow-sm space-y-4">
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-primary">
+                    {lang === 'fr' ? 'Récapitulatif Comptable' : lang === 'es' ? 'Resumen Contable' : 'Accounting Recap'}
+                  </h4>
+
+                  {/* Toggle Period Type */}
+                  <div className="flex bg-[#f4f4ec] p-1 rounded-xl border border-black/5">
+                    <button
+                      type="button"
+                      onClick={() => setRecapPeriodType('monthly')}
+                      className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-all ${
+                        recapPeriodType === 'monthly'
+                          ? 'bg-primary text-white shadow-sm'
+                          : 'text-gray-500 hover:bg-black/5'
+                      }`}
+                    >
+                      {lang === 'fr' ? 'Mensuel' : lang === 'es' ? 'Mensual' : 'Monthly'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setRecapPeriodType('annual')}
+                      className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-all ${
+                        recapPeriodType === 'annual'
+                          ? 'bg-primary text-white shadow-sm'
+                          : 'text-gray-500 hover:bg-black/5'
+                      }`}
+                    >
+                      {lang === 'fr' ? 'Annuel' : lang === 'es' ? 'Anual' : 'Annual'}
+                    </button>
+                  </div>
+
+                  {/* Selectors */}
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="text-[9px] uppercase tracking-wider font-bold text-gray-400 block mb-1">
+                        {lang === 'fr' ? 'Année' : lang === 'es' ? 'Año' : 'Year'}
+                      </label>
+                      <select
+                        value={recapYear}
+                        onChange={(e) => setRecapYear(Number(e.target.value))}
+                        className="w-full p-2 bg-[#f4f4ec] rounded-xl border border-black/5 text-xs focus:outline-none focus:ring-1 focus:ring-primary focus:bg-white"
+                      >
+                        {(() => {
+                          const yearNums: number[] = invoices.map(inv => {
+                            try {
+                              return new Date(inv.date).getFullYear();
+                            } catch {
+                              return new Date().getFullYear();
+                            }
+                          });
+                          const invoiceYears = Array.from(new Set<number>(yearNums)).sort((a: number, b: number) => b - a);
+                          const displayYears = invoiceYears.length > 0 ? invoiceYears : [new Date().getFullYear()];
+                          return displayYears.map(yr => (
+                            <option key={yr} value={yr}>{yr}</option>
+                          ));
+                        })()}
+                      </select>
+                    </div>
+
+                    {recapPeriodType === 'monthly' && (
+                      <div>
+                        <label className="text-[9px] uppercase tracking-wider font-bold text-gray-400 block mb-1">
+                          {lang === 'fr' ? 'Mois' : lang === 'es' ? 'Mes' : 'Month'}
+                        </label>
+                        <select
+                          value={recapMonth}
+                          onChange={(e) => setRecapMonth(Number(e.target.value))}
+                          className="w-full p-2 bg-[#f4f4ec] rounded-xl border border-black/5 text-xs focus:outline-none focus:ring-1 focus:ring-primary focus:bg-white"
+                        >
+                          {getMonthsList(lang).map((mthName, idx) => (
+                            <option key={idx} value={idx}>{mthName}</option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Filtered statistics */}
+                  {(() => {
+                    const filtered = invoices.filter(inv => {
+                      try {
+                        const d = new Date(inv.date);
+                        if (recapPeriodType === 'annual') {
+                          return d.getFullYear() === recapYear;
+                        } else {
+                          return d.getFullYear() === recapYear && d.getMonth() === recapMonth;
+                        }
+                      } catch {
+                        return false;
+                      }
+                    });
+
+                    const totalAmt = filtered.reduce((sum, item) => sum + item.amount, 0);
+                    const count = filtered.length;
+                    const cardTotal = filtered.filter(i => i.paymentMethod === 'card').reduce((sum, item) => sum + item.amount, 0);
+                    const cashTotal = filtered.filter(i => i.paymentMethod === 'cash').reduce((sum, item) => sum + item.amount, 0);
+                    const transferTotal = filtered.filter(i => i.paymentMethod === 'transfer').reduce((sum, item) => sum + item.amount, 0);
+
+                    return (
+                      <div className="space-y-4 pt-3 border-t border-black/5">
+                        <div className="flex justify-between items-end">
+                          <div className="text-left">
+                            <p className="text-[9px] text-gray-400 uppercase tracking-wider">
+                              {lang === 'fr' ? "Recettes de la période" : lang === 'es' ? "Ingresos del período" : "Revenue for period"}
+                            </p>
+                            <h4 className="text-2xl font-serif font-bold text-primary">{totalAmt} €</h4>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-[9px] text-gray-400 uppercase tracking-wider">
+                              {lang === 'fr' ? "Consultations" : lang === 'es' ? "Consultas" : "Consultations"}
+                            </p>
+                            <p className="text-sm font-bold text-gray-700">{count}</p>
+                          </div>
+                        </div>
+
+                        {/* Payment Breakdown */}
+                        <div className="bg-[#f4f4ec]/40 p-3 rounded-2xl space-y-2 text-xs">
+                          <div className="flex justify-between text-gray-600">
+                            <span>{lang === 'fr' ? 'Carte' : lang === 'es' ? 'Tarjeta' : 'Card'} :</span>
+                            <span className="font-bold">{cardTotal} €</span>
+                          </div>
+                          <div className="flex justify-between text-gray-600">
+                            <span>{lang === 'fr' ? 'Espèces' : lang === 'es' ? 'Efectivo' : 'Cash'} :</span>
+                            <span className="font-bold">{cashTotal} €</span>
+                          </div>
+                          <div className="flex justify-between text-gray-600">
+                            <span>{lang === 'fr' ? 'Virement' : lang === 'es' ? 'Transferencia' : 'Transfer'} :</span>
+                            <span className="font-bold">{transferTotal} €</span>
+                          </div>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedRecapForPrint({
+                              periodType: recapPeriodType,
+                              year: recapYear,
+                              month: recapMonth,
+                              invoices: filtered,
+                              total: totalAmt,
+                              breakdown: { card: cardTotal, cash: cashTotal, transfer: transferTotal },
+                              count
+                            });
+                          }}
+                          disabled={count === 0}
+                          className="w-full flex items-center justify-center gap-2 py-2.5 bg-primary hover:bg-primary/95 disabled:opacity-50 text-white rounded-2xl text-xs font-bold uppercase tracking-wider transition-all shadow-sm"
+                        >
+                          <Printer size={14} />
+                          <span>{lang === 'fr' ? 'Imprimer le récapitulatif' : lang === 'es' ? 'Imprimir resumen' : 'Print summary'}</span>
+                        </button>
+                      </div>
+                    );
+                  })()}
+                </div>
+
                 <div className="bg-[#f4f4ec] p-6 rounded-3xl border border-black/5 space-y-3">
                   <h4 className="text-xs font-bold uppercase tracking-wider text-primary">
                     {lang === 'fr' ? "Impression Directe" : lang === 'es' ? "Impresión Directa" : "Direct Printing"}
@@ -2211,13 +2524,12 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                   </div>
                 </div>
 
-                <div>
+                 <div>
                   <label className="text-[10px] uppercase tracking-wider font-bold text-gray-400 block mb-1">
                     {lang === 'fr' ? 'Email' : lang === 'es' ? 'Correo' : 'Email'}
                   </label>
                   <input
                     type="email"
-                    required
                     value={newClient.email}
                     onChange={(e) => setNewClient(prev => ({ ...prev, email: e.target.value }))}
                     className="w-full p-2.5 bg-secondary rounded-xl border border-black/5 text-xs focus:outline-none focus:ring-1 focus:ring-primary focus:bg-white transition-all"
@@ -2230,7 +2542,6 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                   </label>
                   <input
                     type="tel"
-                    required
                     value={newClient.phone}
                     onChange={(e) => setNewClient(prev => ({ ...prev, phone: e.target.value }))}
                     className="w-full p-2.5 bg-secondary rounded-xl border border-black/5 text-xs focus:outline-none focus:ring-1 focus:ring-primary focus:bg-white transition-all"
@@ -2815,7 +3126,6 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                   </label>
                   <input
                     type="email"
-                    required
                     value={editingClient.email}
                     onChange={(e) => setEditingClient(prev => prev ? ({ ...prev, email: e.target.value }) : null)}
                     className="w-full p-2.5 bg-secondary rounded-xl border border-black/5 text-xs focus:outline-none focus:ring-1 focus:ring-primary focus:bg-white transition-all"
@@ -2828,7 +3138,6 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                   </label>
                   <input
                     type="tel"
-                    required
                     value={editingClient.phone}
                     onChange={(e) => setEditingClient(prev => prev ? ({ ...prev, phone: e.target.value }) : null)}
                     className="w-full p-2.5 bg-secondary rounded-xl border border-black/5 text-xs focus:outline-none focus:ring-1 focus:ring-primary focus:bg-white transition-all"
@@ -3108,7 +3417,6 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                 <div className="bg-[#f4f4ec] p-6 rounded-2xl border border-black/5">
                   <span className="text-[9px] uppercase tracking-widest font-bold text-primary/60 block mb-2">{translations[receiptLang].invoice.recipient}</span>
                   <h4 className="text-sm font-bold text-gray-800">{selectedInvoiceForPrint.clientName}</h4>
-                  <p className="text-gray-500 mt-1">{translations[receiptLang].invoice.recipientDesc}</p>
                 </div>
 
                 {/* Invoice Table Grid */}
@@ -3124,14 +3432,6 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                     <tr className="border-b border-black/5 text-gray-700">
                       <td className="py-4">
                         <p className="font-bold">{selectedInvoiceForPrint.description}</p>
-                        <p className="text-[10px] text-gray-400 mt-1">
-                          {receiptLang === 'fr' 
-                            ? "Consultation thérapeutique individuelle d'Ostéopathie à L'Eliana" 
-                            : receiptLang === 'es' 
-                              ? "Consulta terapéutica individual de Osteopatía en L'Eliana" 
-                              : "Individual therapeutic Osteopathy consultation in L'Eliana"
-                          }
-                        </p>
                       </td>
                       <td className="py-4 text-center">{translations[receiptLang].invoice.tableExempt}</td>
                       <td className="py-4 text-right font-bold">{selectedInvoiceForPrint.amount} €</td>
@@ -3144,11 +3444,11 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                   <div className="w-64 text-right space-y-2">
                     <div className="flex justify-between text-[11px] text-gray-500">
                       <span>{translations[receiptLang].invoice.totalHt}</span>
-                      <span>{selectedInvoiceForPrint.amount} €</span>
+                      <span>{(selectedInvoiceForPrint.amount / 1.21).toFixed(2)} €</span>
                     </div>
                     <div className="flex justify-between text-[11px] text-gray-500">
                       <span>{translations[receiptLang].invoice.tvaLabel}</span>
-                      <span>0.00 €</span>
+                      <span>{(selectedInvoiceForPrint.amount - (selectedInvoiceForPrint.amount / 1.21)).toFixed(2)} €</span>
                     </div>
                     <div className="flex justify-between text-sm font-bold text-primary pt-2 border-t border-black/10">
                       <span>{translations[receiptLang].invoice.totalTtc}</span>
@@ -3169,17 +3469,176 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                             ? translations[receiptLang].invoice.methods.cash 
                             : translations[receiptLang].invoice.methods.transfer
                         )}
-                      <br />
-                      {translations[receiptLang].invoice.approvedAssociation}
                     </p>
                   </div>
                   
                   <div className="text-center w-48 border-t border-dashed border-gray-300 pt-3">
-                    <p className="text-[9px] uppercase tracking-wider font-bold text-gray-400">{translations[receiptLang].invoice.signatureStamp}</p>
-                    <p className="font-serif italic text-primary mt-1 text-[11px]">{translations[receiptLang].invoice.signatureName}</p>
+                    <p className="font-serif italic text-primary mt-1 text-[13px]">{translations[receiptLang].invoice.signatureName}</p>
                   </div>
                 </div>
 
+              </div>
+            </motion.div>
+          </div>
+        )}
+
+        {/* ACCOUNTING PERIOD RECAP PRINT MODAL */}
+        {selectedRecapForPrint && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm overflow-y-auto animate-fadeIn">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setSelectedRecapForPrint(null)}
+              className="absolute inset-0"
+            />
+            
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 20 }}
+              className="relative w-full max-w-2xl bg-white rounded-3xl shadow-2xl p-8 sm:p-12 z-10 border border-black/5 my-8"
+            >
+              {/* Actions Bar */}
+              <div className="flex justify-between items-center mb-8 pb-4 border-b border-black/5 print:hidden">
+                <div>
+                  <h4 className="text-sm font-bold uppercase tracking-wider text-primary">
+                    {lang === 'fr' ? "Récapitulatif Comptable" : lang === 'es' ? "Resumen de Contabilidad" : "Accounting Summary"}
+                  </h4>
+                  <p className="text-[11px] text-gray-500 mt-1">
+                    {selectedRecapForPrint.periodType === 'annual'
+                      ? `${lang === 'fr' ? 'Année' : lang === 'es' ? 'Año' : 'Year'} ${selectedRecapForPrint.year}`
+                      : `${getMonthsList(lang)[selectedRecapForPrint.month]} ${selectedRecapForPrint.year}`
+                    }
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={() => window.print()}
+                    className="flex items-center gap-2 px-4 py-2 bg-primary text-white rounded-xl text-xs font-bold uppercase tracking-wider hover:bg-primary/95 transition-all shadow"
+                  >
+                    <Printer size={14} /> {lang === 'fr' ? 'Imprimer' : lang === 'es' ? 'Imprimir' : 'Print'}
+                  </button>
+                  <button
+                    onClick={() => setSelectedRecapForPrint(null)}
+                    className="px-4 py-2 bg-secondary text-gray-600 rounded-xl text-xs font-bold uppercase tracking-wider hover:bg-black/5 transition-all"
+                  >
+                    {lang === 'fr' ? 'Fermer' : lang === 'es' ? 'Cerrar' : 'Close'}
+                  </button>
+                </div>
+              </div>
+
+              {/* PRINTABLE AREA */}
+              <div id="recap-print-area" className="space-y-8 text-xs font-sans print:p-0 text-left">
+                {/* Header */}
+                <div className="flex justify-between items-start border-b border-black/5 pb-6">
+                  <div>
+                    <h1 className="text-lg font-bold font-serif text-primary">Vincent Durroux</h1>
+                    <p className="text-gray-500 mt-1 font-medium">Ostéopathe D.O. • Osteo Valencia</p>
+                    <p className="text-gray-400 text-[10px] mt-1">Calle General Pastor 25, 46183 L'Eliana, Valencia</p>
+                    <p className="text-gray-400 text-[10px]">Tél : +34 614 159 462</p>
+                  </div>
+                  <div className="text-right">
+                    <span className="text-[10px] uppercase font-bold tracking-widest text-primary/60 block">
+                      {lang === 'fr' ? 'Rapport Financier' : lang === 'es' ? 'Informe Financiero' : 'Financial Report'}
+                    </span>
+                    <p className="text-sm font-serif font-bold text-gray-800 mt-1">
+                      {selectedRecapForPrint.periodType === 'annual'
+                        ? `${lang === 'fr' ? 'Bilan Annuel' : lang === 'es' ? 'Balance Anual' : 'Annual Balance'} ${selectedRecapForPrint.year}`
+                        : `${lang === 'fr' ? 'Bilan Mensuel' : lang === 'es' ? 'Balance Mensual' : 'Monthly Balance'} - ${getMonthsList(lang)[selectedRecapForPrint.month]} ${selectedRecapForPrint.year}`
+                      }
+                    </p>
+                    <p className="text-[9px] text-gray-400 mt-1">
+                      {lang === 'fr' ? 'Généré le' : lang === 'es' ? 'Generado el' : 'Generated on'} : {new Date().toLocaleDateString(lang === 'fr' ? 'fr-FR' : lang === 'es' ? 'es-ES' : 'en-US')}
+                    </p>
+                  </div>
+                </div>
+
+                {/* KPI Metrics */}
+                <div className="grid grid-cols-3 gap-4">
+                  <div className="bg-[#f4f4ec] p-4 rounded-2xl border border-black/5">
+                    <p className="text-[9px] uppercase font-bold text-gray-400">{lang === 'fr' ? 'Chiffre d\'Affaires' : lang === 'es' ? 'Facturación' : 'Total Revenue'}</p>
+                    <p className="text-xl font-bold font-serif text-primary mt-1">{selectedRecapForPrint.total} €</p>
+                  </div>
+                  <div className="bg-[#f4f4ec] p-4 rounded-2xl border border-black/5">
+                    <p className="text-[9px] uppercase font-bold text-gray-400">{lang === 'fr' ? 'Consultations' : lang === 'es' ? 'Consultas' : 'Consultations'}</p>
+                    <p className="text-xl font-bold font-serif text-primary mt-1">{selectedRecapForPrint.count}</p>
+                  </div>
+                  <div className="bg-[#f4f4ec] p-4 rounded-2xl border border-black/5">
+                    <p className="text-[9px] uppercase font-bold text-gray-400">{lang === 'fr' ? 'Panier Moyen' : lang === 'es' ? 'Ticket Promedio' : 'Average Ticket'}</p>
+                    <p className="text-xl font-bold font-serif text-primary mt-1">
+                      {selectedRecapForPrint.count > 0 ? Math.round(selectedRecapForPrint.total / selectedRecapForPrint.count) : 0} €
+                    </p>
+                  </div>
+                </div>
+
+                {/* Payment Breakdown */}
+                <div className="space-y-3">
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-primary">
+                    {lang === 'fr' ? 'Répartition par mode de règlement' : lang === 'es' ? 'Distribución por método de pago' : 'Breakdown by payment method'}
+                  </h3>
+                  <div className="grid grid-cols-3 gap-4 text-xs">
+                    <div className="p-3 bg-white rounded-xl border border-black/5 flex justify-between items-center">
+                      <span className="text-gray-500">{lang === 'fr' ? 'Carte Bancaire' : lang === 'es' ? 'Tarjeta' : 'Credit Card'}</span>
+                      <span className="font-bold text-gray-800">{selectedRecapForPrint.breakdown.card} €</span>
+                    </div>
+                    <div className="p-3 bg-white rounded-xl border border-black/5 flex justify-between items-center">
+                      <span className="text-gray-500">{lang === 'fr' ? 'Espèces' : lang === 'es' ? 'Efectivo' : 'Cash'}</span>
+                      <span className="font-bold text-gray-800">{selectedRecapForPrint.breakdown.cash} €</span>
+                    </div>
+                    <div className="p-3 bg-white rounded-xl border border-black/5 flex justify-between items-center">
+                      <span className="text-gray-500">{lang === 'fr' ? 'Virement' : lang === 'es' ? 'Transferencia' : 'Transfer'}</span>
+                      <span className="font-bold text-gray-800">{selectedRecapForPrint.breakdown.transfer} €</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Detailed Invoices List */}
+                <div className="space-y-3">
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-primary">
+                    {lang === 'fr' ? 'Détail des factures' : lang === 'es' ? 'Detalle de facturas' : 'Invoices detail'} ({selectedRecapForPrint.invoices.length})
+                  </h3>
+                  <table className="w-full border-collapse text-xs">
+                    <thead>
+                      <tr className="border-b-2 border-primary/20 text-left font-bold text-gray-400 uppercase text-[9px] tracking-wider">
+                        <th className="py-2">{lang === 'fr' ? 'Facture' : lang === 'es' ? 'Factura' : 'Invoice'}</th>
+                        <th className="py-2">{lang === 'fr' ? 'Patient' : lang === 'es' ? 'Paciente' : 'Patient'}</th>
+                        <th className="py-2">{lang === 'fr' ? 'Date' : lang === 'es' ? 'Fecha' : 'Date'}</th>
+                        <th className="py-2">{lang === 'fr' ? 'Règlement' : lang === 'es' ? 'Pago' : 'Payment'}</th>
+                        <th className="py-2 text-right">{lang === 'fr' ? 'Montant' : lang === 'es' ? 'Monto' : 'Amount'}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {selectedRecapForPrint.invoices.map((inv) => (
+                        <tr key={inv.id} className="border-b border-black/5 text-gray-700">
+                          <td className="py-2 font-bold text-primary">{inv.invoiceNumber}</td>
+                          <td className="py-2 font-medium">{inv.clientName}</td>
+                          <td className="py-2 text-gray-500">{new Date(inv.date).toLocaleDateString(lang === 'fr' ? 'fr-FR' : lang === 'es' ? 'es-ES' : 'en-US')}</td>
+                          <td className="py-2">
+                            <span className="text-[10px] font-medium uppercase">
+                              {inv.paymentMethod === 'card' ? (lang === 'fr' ? 'Carte' : lang === 'es' ? 'Tarjeta' : 'Card') :
+                               inv.paymentMethod === 'cash' ? (lang === 'fr' ? 'Espèces' : lang === 'es' ? 'Efectivo' : 'Cash') : (lang === 'fr' ? 'Virement' : lang === 'es' ? 'Transferencia' : 'Transfer')}
+                            </span>
+                          </td>
+                          <td className="py-2 text-right font-bold">{inv.amount} €</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Footer validation statement */}
+                <div className="pt-8 border-t border-black/5 flex justify-between items-center text-[10px] text-gray-400">
+                  <p>
+                    {lang === 'fr' 
+                      ? "Rapport comptable officiel pour déclarations fiscales et suivi d'activité." 
+                      : lang === 'es' 
+                        ? "Informe contable oficial para declaraciones fiscales y seguimiento de actividad." 
+                        : "Official accounting report for tax declarations and activity tracking."}
+                  </p>
+                  <p className="font-serif italic text-primary">{lang === 'fr' ? "Vincent Durroux - Ostéo Valencia" : "Vincent Durroux - Osteo Valencia"}</p>
+                </div>
               </div>
             </motion.div>
           </div>
