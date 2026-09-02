@@ -3349,7 +3349,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
       {/* MODAL: PRINTABLE RECEIPT / MUTUELLE REÇU */}
       <AnimatePresence>
         {selectedInvoiceForPrint && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm overflow-y-auto print:bg-white print:p-0 print:block print:static print:overflow-visible">
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm overflow-y-auto print:bg-white print:p-0 print:block print:static print:overflow-visible print-modal-container">
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -3508,7 +3508,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
 
         {/* ACCOUNTING PERIOD RECAP PRINT MODAL */}
         {selectedRecapForPrint && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm overflow-y-auto animate-fadeIn print:bg-white print:p-0 print:block print:static print:overflow-visible">
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm overflow-y-auto animate-fadeIn print:bg-white print:p-0 print:block print:static print:overflow-visible print-modal-container">
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
