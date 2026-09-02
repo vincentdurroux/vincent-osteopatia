@@ -759,33 +759,51 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
 
     setIsExporting(true);
     try {
-      // Small delay to ensure any layout shifts are settled
-      await new Promise(resolve => setTimeout(resolve, 100));
+      // Delay to ensure any animations or layout shifts are settled
+      await new Promise(resolve => setTimeout(resolve, 500));
 
       const canvas = await html2canvas(element, {
         scale: 2,
         useCORS: true,
+        allowTaint: true,
         logging: false,
         backgroundColor: '#ffffff',
-        windowWidth: 800, // Fixed width for consistent PDF layout
+        imageTimeout: 20000,
+        // Ensure we capture it with a desktop-like width to avoid responsive shifts
+        windowWidth: 1024,
       });
       
-      const imgData = canvas.toDataURL('image/png');
+      const imgData = canvas.toDataURL('image/jpeg', 0.95);
       const pdf = new jsPDF({
         orientation: 'portrait',
         unit: 'mm',
-        format: 'a4'
+        format: 'a4',
+        compress: true
       });
 
-      const imgProps = pdf.getImageProperties(imgData);
       const pdfWidth = pdf.internal.pageSize.getWidth();
-      const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
+      const pdfHeight = pdf.internal.pageSize.getHeight();
       
-      pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
+      const imgProps = pdf.getImageProperties(imgData);
+      const ratio = imgProps.width / imgProps.height;
+      
+      // Standard A4 margins (10mm)
+      const margin = 10;
+      const contentWidth = pdfWidth - (2 * margin);
+      const contentHeight = contentWidth / ratio;
+
+      // Center the content on the page
+      const xOffset = margin;
+      const yOffset = margin;
+      
+      pdf.addImage(imgData, 'JPEG', xOffset, yOffset, contentWidth, contentHeight);
       pdf.save(`${filename}.pdf`);
     } catch (error) {
       console.error('Error generating PDF:', error);
-      alert(lang === 'fr' ? 'Erreur lors de la génération du PDF. Veuillez réessayer.' : 'Error generating PDF. Please try again.');
+      // Fallback message with clearer instructions
+      alert(lang === 'fr' 
+        ? 'La génération du PDF a échoué sur ce navigateur (souvent dû à des restrictions de sécurité sur iPhone/Safari). \n\nAstuce : Cliquez sur "Imprimer" puis choisissez "Enregistrer comme PDF".' 
+        : 'PDF generation failed on this browser. \n\nTip: Click "Print" and select "Save as PDF" instead.');
     } finally {
       setIsExporting(false);
     }
