@@ -12,7 +12,7 @@ import { api, isSupabaseConfigured, SUPABASE_SQL_SETUP } from '../../lib/supabas
 import SpineLogo from '../SpineLogo';
 import { useTranslation } from '../../App';
 import { Language, translations } from '../../translations';
-import jsPDF from 'jspdf';
+import { jsPDF } from 'jspdf';
 import html2canvas from 'html2canvas';
 
 // Recharts imports for beautiful financial analytics
@@ -55,6 +55,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
   const [calendarViewMode, setCalendarViewMode] = useState<'grid' | 'list'>('grid');
   const [currentCalendarDate, setCurrentCalendarDate] = useState(new Date());
   const [isSyncing, setIsSyncing] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
   
   // Modals & Selected states
   const [selectedClient, setSelectedClient] = useState<Client | null>(null);
@@ -754,14 +755,19 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
 
   const handleExportPDF = async (elementId: string, filename: string) => {
     const element = document.getElementById(elementId);
-    if (!element) return;
+    if (!element || isExporting) return;
 
+    setIsExporting(true);
     try {
+      // Small delay to ensure any layout shifts are settled
+      await new Promise(resolve => setTimeout(resolve, 100));
+
       const canvas = await html2canvas(element, {
         scale: 2,
         useCORS: true,
         logging: false,
-        backgroundColor: '#ffffff'
+        backgroundColor: '#ffffff',
+        windowWidth: 800, // Fixed width for consistent PDF layout
       });
       
       const imgData = canvas.toDataURL('image/png');
@@ -779,6 +785,9 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
       pdf.save(`${filename}.pdf`);
     } catch (error) {
       console.error('Error generating PDF:', error);
+      alert(lang === 'fr' ? 'Erreur lors de la génération du PDF. Veuillez réessayer.' : 'Error generating PDF. Please try again.');
+    } finally {
+      setIsExporting(false);
     }
   };
 
@@ -3433,13 +3442,19 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
 
                 <div className="flex items-center gap-3">
                   <button
+                    disabled={isExporting}
                     onClick={async () => {
                       const filename = `FAC-${selectedInvoiceForPrint.invoiceNumber}-${selectedInvoiceForPrint.clientName.replace(/\s+/g, '_')}`;
                       await handleExportPDF('receipt-print-area', filename);
                     }}
-                    className="flex items-center gap-2 px-4 py-2 bg-secondary text-gray-700 rounded-xl text-xs font-bold uppercase tracking-wider hover:bg-gray-200 transition-all shadow-sm active:scale-95"
+                    className={`flex items-center gap-2 px-4 py-2 bg-secondary text-gray-700 rounded-xl text-xs font-bold uppercase tracking-wider transition-all shadow-sm active:scale-95 ${isExporting ? 'opacity-50 cursor-not-allowed' : 'hover:bg-gray-200'}`}
                   >
-                    <Download size={14} /> PDF
+                    {isExporting ? (
+                      <RefreshCw size={14} className="animate-spin" />
+                    ) : (
+                      <Download size={14} />
+                    )}
+                    {isExporting ? (lang === 'fr' ? 'Export...' : 'Export...') : 'PDF'}
                   </button>
                   <button
                     onClick={() => {
@@ -3580,15 +3595,21 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
 
                 <div className="flex items-center gap-3">
                   <button
+                    disabled={isExporting}
                     onClick={async () => {
                       const period = selectedRecapForPrint.periodType === 'annual' 
                         ? selectedRecapForPrint.year 
                         : `${getMonthsList(lang)[selectedRecapForPrint.month]}_${selectedRecapForPrint.year}`;
                       await handleExportPDF('recap-print-area', `RECAP_${period}`);
                     }}
-                    className="flex items-center gap-2 px-4 py-2 bg-secondary text-gray-700 rounded-xl text-xs font-bold uppercase tracking-wider hover:bg-gray-200 transition-all shadow-sm active:scale-95"
+                    className={`flex items-center gap-2 px-4 py-2 bg-secondary text-gray-700 rounded-xl text-xs font-bold uppercase tracking-wider transition-all shadow-sm active:scale-95 ${isExporting ? 'opacity-50 cursor-not-allowed' : 'hover:bg-gray-200'}`}
                   >
-                    <Download size={14} /> PDF
+                    {isExporting ? (
+                      <RefreshCw size={14} className="animate-spin" />
+                    ) : (
+                      <Download size={14} />
+                    )}
+                    {isExporting ? (lang === 'fr' ? 'Export...' : 'Export...') : 'PDF'}
                   </button>
                   <button
                     onClick={() => {
