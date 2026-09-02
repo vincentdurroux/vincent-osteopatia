@@ -398,7 +398,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
         status: 'paid',
         paymentMethod: inlineInvoicePaymentMethod,
         date: noteDateStr,
-        description: lang === 'fr' ? "Séance d'Ostéopathie" : lang === 'es' ? "Sesión de Osteopatía" : "Osteopathy Session",
+        description: translations[lang as Language].invoice.serviceDescription,
         language: lang as 'fr' | 'en' | 'es',
       });
       setInvoices(prev => [created, ...prev]);
@@ -2443,12 +2443,19 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                             <button
                               onClick={() => setSelectedInvoiceForPrint(inv)}
                               className="p-1.5 hover:bg-primary/10 text-primary rounded-lg transition-colors inline-flex items-center gap-1.5"
-                              title={lang === 'fr' ? "Imprimer / Reçu Mutuelle" : lang === 'es' ? "Imprimir / Recibo" : "Print / Health Receipt"}
+                              title={lang === 'fr' ? "Imprimer" : lang === 'es' ? "Imprimir" : "Print"}
                             >
                               <Printer size={13} />
                               <span className="text-[10px] uppercase font-bold tracking-wider">
                                 {lang === 'fr' ? "Reçu" : lang === 'es' ? "Recibo" : "Receipt"}
                               </span>
+                            </button>
+                            <button
+                              onClick={() => setInvoices(prev => prev.filter(i => i.id !== inv.id))}
+                              className="p-1.5 hover:bg-red-50 text-gray-500 hover:text-red-500 rounded-lg transition-all inline-flex items-center"
+                              title={lang === 'fr' ? "Supprimer" : lang === 'es' ? "Eliminar" : "Delete"}
+                            >
+                              <Trash2 size={13} />
                             </button>
                           </div>
                         </td>
