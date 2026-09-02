@@ -286,7 +286,11 @@ const loadLocal = <T>(key: string, seed: T[]): T[] => {
     localStorage.setItem(`vincent_osteo_${key}`, JSON.stringify(seed));
     return seed;
   }
-  return JSON.parse(data);
+  try {
+    return JSON.parse(data);
+  } catch {
+    return seed;
+  }
 };
 
 const saveLocal = <T>(key: string, data: T[]) => {
@@ -294,55 +298,411 @@ const saveLocal = <T>(key: string, data: T[]) => {
 };
 
 // ==========================================
+// COLUMN MAPPERS (HANDLES BOTH SNAKE_CASE & CAMELCASE)
+// ==========================================
+
+export function mapClientFromDB(c: any): Client {
+  const firstName = c.firstName || c.first_name || (c.name ? c.name.split(' ')[0] : '');
+  const lastName = c.lastName || c.last_name || (c.name ? c.name.split(' ').slice(1).join(' ') : '');
+  const name = c.name || `${lastName.toUpperCase()} ${firstName}`.trim();
+  return {
+    id: String(c.id),
+    firstName,
+    lastName,
+    name,
+    email: c.email || '',
+    phone: c.phone || '',
+    birthDate: c.birthDate || c.birth_date || '',
+    address: c.address || '',
+    createdAt: c.createdAt || c.created_at || new Date().toISOString(),
+    lastSessionAt: c.lastSessionAt || c.last_session_at,
+  };
+}
+
+export function mapNoteFromDB(n: any): ClientNote {
+  return {
+    id: String(n.id),
+    clientId: String(n.clientId || n.client_id || n.clientid || ''),
+    date: n.date || n.created_at || new Date().toISOString(),
+    motif: n.motif || '',
+    anamnese: n.anamnese || '',
+    treatment: n.treatment || '',
+    content: n.content || `Anamnèse :\n${n.anamnese || ''}\n\nTraitement :\n${n.treatment || ''}`,
+    category: n.category || 'treatment',
+  };
+}
+
+export function mapInvoiceFromDB(i: any): Invoice {
+  return {
+    id: String(i.id),
+    invoiceNumber: i.invoiceNumber || i.invoice_number || i.invoicenumber || `FAC-${i.id}`,
+    clientId: String(i.clientId || i.client_id || i.clientid || ''),
+    clientName: i.clientName || i.client_name || i.clientname || '',
+    date: i.date || new Date().toISOString().split('T')[0],
+    amount: Number(i.amount) || 0,
+    status: i.status || 'paid',
+    paymentMethod: i.paymentMethod || i.payment_method || i.paymentmethod || 'card',
+    description: i.description || "Séance d'Ostéopathie",
+    language: i.language || 'fr',
+  };
+}
+
+export function mapEventFromDB(e: any): CalendarEvent {
+  return {
+    id: String(e.id),
+    summary: e.summary || '',
+    description: e.description || '',
+    start: e.start || '',
+    end: e.end || '',
+    clientId: e.clientId || e.client_id || e.clientid,
+    clientName: e.clientName || e.client_name || e.clientname,
+  };
+}
+
+// SQL SCRIPT FOR SUPABASE SETUP
+export const SUPABASE_SQL_SETUP = `-- ==============================================================================
+-- SCRIPT COMPLET DE CRÉATION DES TABLES SUPABASE (CABINET D'OSTÉOPATHIE)
+-- À exécuter dans Supabase : Menu gauche > SQL Editor > New query > Run
+-- ==============================================================================
+
+-- 1. TABLE DES PATIENTS (CLIENTS)
+CREATE TABLE IF NOT EXISTS public.clients (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    "firstName" TEXT,
+    "lastName" TEXT,
+    first_name TEXT,
+    last_name TEXT,
+    email TEXT,
+    phone TEXT,
+    "birthDate" TEXT,
+    birth_date TEXT,
+    address TEXT,
+    "createdAt" TIMESTAMPTZ DEFAULT NOW(),
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    "lastSessionAt" TIMESTAMPTZ,
+    last_session_at TIMESTAMPTZ
+);
+
+-- 2. TABLE DES NOTES CLINIQUES & CONSULTATIONS
+CREATE TABLE IF NOT EXISTS public.client_notes (
+    id TEXT PRIMARY KEY,
+    "clientId" TEXT NOT NULL,
+    client_id TEXT,
+    date TIMESTAMPTZ NOT NULL,
+    motif TEXT,
+    anamnese TEXT,
+    treatment TEXT,
+    content TEXT,
+    category TEXT DEFAULT 'treatment',
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 3. TABLE DES FACTURES & REÇUS D'HONORAIRES
+CREATE TABLE IF NOT EXISTS public.invoices (
+    id TEXT PRIMARY KEY,
+    "invoiceNumber" TEXT NOT NULL,
+    invoice_number TEXT,
+    "clientId" TEXT NOT NULL,
+    client_id TEXT,
+    "clientName" TEXT NOT NULL,
+    client_name TEXT,
+    date TEXT NOT NULL,
+    amount NUMERIC NOT NULL,
+    status TEXT DEFAULT 'paid',
+    "paymentMethod" TEXT DEFAULT 'card',
+    payment_method TEXT DEFAULT 'card',
+    description TEXT,
+    language TEXT DEFAULT 'fr',
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 4. TABLE DE L'AGENDA & RENDEZ-VOUS
+CREATE TABLE IF NOT EXISTS public.calendar_events (
+    id TEXT PRIMARY KEY,
+    summary TEXT NOT NULL,
+    description TEXT,
+    start TIMESTAMPTZ NOT NULL,
+    "end" TIMESTAMPTZ NOT NULL,
+    "clientId" TEXT,
+    client_id TEXT,
+    "clientName" TEXT,
+    client_name TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 5. ACTIVATION RLS & AUTORISATIONS EN LECTURE/ÉCRITURE
+ALTER TABLE public.clients ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.client_notes ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.invoices ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.calendar_events ENABLE ROW LEVEL SECURITY;
+
+DO $$ 
+BEGIN
+    DROP POLICY IF EXISTS "Accès total clients" ON public.clients;
+    CREATE POLICY "Accès total clients" ON public.clients FOR ALL USING (true) WITH CHECK (true);
+    
+    DROP POLICY IF EXISTS "Accès total notes" ON public.client_notes;
+    CREATE POLICY "Accès total notes" ON public.client_notes FOR ALL USING (true) WITH CHECK (true);
+    
+    DROP POLICY IF EXISTS "Accès total factures" ON public.invoices;
+    CREATE POLICY "Accès total factures" ON public.invoices FOR ALL USING (true) WITH CHECK (true);
+    
+    DROP POLICY IF EXISTS "Accès total agenda" ON public.calendar_events;
+    CREATE POLICY "Accès total agenda" ON public.calendar_events FOR ALL USING (true) WITH CHECK (true);
+END $$;
+`;
+
+// ==========================================
 // UNIFIED DATA API PROVIDER
 // ==========================================
 export const api = {
+  // DIAGNOSTIC DE CONNEXION SUPABASE
+  async checkTablesStatus(): Promise<{
+    isConfigured: boolean;
+    clients: boolean;
+    clientNotes: boolean;
+    invoices: boolean;
+    calendarEvents: boolean;
+    errorSummary?: string;
+  }> {
+    if (!isSupabaseConfigured || !supabase) {
+      return {
+        isConfigured: false,
+        clients: false,
+        clientNotes: false,
+        invoices: false,
+        calendarEvents: false,
+        errorSummary: 'Variables Supabase manquantes dans Vercel (.env)',
+      };
+    }
+
+    const results = {
+      isConfigured: true,
+      clients: false,
+      clientNotes: false,
+      invoices: false,
+      calendarEvents: false,
+      errorSummary: '',
+    };
+
+    const errors: string[] = [];
+
+    // Test clients
+    try {
+      const { error } = await supabase.from('clients').select('id').limit(1);
+      results.clients = !error;
+      if (error) errors.push(`clients: ${error.message}`);
+    } catch (e: any) {
+      errors.push(`clients: ${e.message}`);
+    }
+
+    // Test client_notes
+    try {
+      const { error } = await supabase.from('client_notes').select('id').limit(1);
+      results.clientNotes = !error;
+      if (error) errors.push(`client_notes: ${error.message}`);
+    } catch (e: any) {
+      errors.push(`client_notes: ${e.message}`);
+    }
+
+    // Test invoices
+    try {
+      const { error } = await supabase.from('invoices').select('id').limit(1);
+      results.invoices = !error;
+      if (error) errors.push(`invoices: ${error.message}`);
+    } catch (e: any) {
+      errors.push(`invoices: ${e.message}`);
+    }
+
+    // Test calendar_events
+    try {
+      const { error } = await supabase.from('calendar_events').select('id').limit(1);
+      results.calendarEvents = !error;
+      if (error) errors.push(`calendar_events: ${error.message}`);
+    } catch (e: any) {
+      errors.push(`calendar_events: ${e.message}`);
+    }
+
+    if (errors.length > 0) {
+      results.errorSummary = errors.join(' | ');
+    }
+
+    return results;
+  },
+
+  // SYNCHRONISATION INITIALE VERS SUPABASE
+  async syncAllToSupabase(): Promise<{ success: boolean; count: number; message: string }> {
+    if (!isSupabaseConfigured || !supabase) {
+      return { success: false, count: 0, message: 'Supabase n\'est pas configuré' };
+    }
+
+    try {
+      const localClients = loadLocal('clients', mockClients);
+      const localNotes = loadLocal('notes', mockNotes);
+      const localInvoices = loadLocal('invoices', mockInvoices);
+      const localEvents = loadLocal('events', mockEvents);
+
+      let syncedCount = 0;
+
+      // 1. Sync Clients
+      for (const client of localClients) {
+        await this.createClient(client);
+        syncedCount++;
+      }
+
+      // 2. Sync Notes
+      for (const note of localNotes) {
+        await this.createClientNote(note);
+        syncedCount++;
+      }
+
+      // 3. Sync Invoices
+      for (const inv of localInvoices) {
+        await this.createInvoice(inv);
+        syncedCount++;
+      }
+
+      // 4. Sync Events
+      for (const ev of localEvents) {
+        await this.createLocalEvent(ev);
+        syncedCount++;
+      }
+
+      return { 
+        success: true, 
+        count: syncedCount, 
+        message: `${syncedCount} éléments synchronisés avec succès dans Supabase !` 
+      };
+    } catch (err: any) {
+      return { success: false, count: 0, message: err.message || 'Erreur lors de la synchronisation' };
+    }
+  },
+
   // CLIENTS
   async getClients(): Promise<Client[]> {
     if (isSupabaseConfigured && supabase) {
-      const { data, error } = await supabase.from('clients').select('*').order('name');
-      if (!error && data) {
-        return (data as Client[]).map(c => {
-          if (!c.firstName || !c.lastName) {
-            const parts = c.name.split(' ');
-            return {
-              ...c,
-              firstName: parts[0] || '',
-              lastName: parts.slice(1).join(' ') || '',
-            };
-          }
-          return c;
-        });
+      const { data, error } = await supabase.from('clients').select('*');
+      if (!error && data && data.length > 0) {
+        const mapped = data.map(mapClientFromDB);
+        saveLocal('clients', mapped);
+        return mapped.sort((a, b) => a.name.localeCompare(b.name));
       }
-      console.warn('Supabase fetch failed, falling back to LocalStorage', error);
+      if (error) {
+        console.warn('Supabase clients fetch failed, using local storage:', error.message);
+      }
     }
     return loadLocal('clients', mockClients).sort((a, b) => a.name.localeCompare(b.name));
   },
 
-  async createClient(client: Omit<Client, 'id' | 'createdAt'>): Promise<Client> {
+  async createClient(client: Omit<Client, 'id' | 'createdAt'> & { id?: string; createdAt?: string }): Promise<Client> {
     const newClient: Client = {
       ...client,
-      id: crypto.randomUUID(),
-      createdAt: new Date().toISOString(),
+      id: client.id || crypto.randomUUID(),
+      createdAt: client.createdAt || new Date().toISOString(),
     };
 
     if (isSupabaseConfigured && supabase) {
-      const { data, error } = await supabase.from('clients').insert(newClient).select().single();
-      if (!error && data) return data as Client;
-      console.warn('Supabase insert failed, falling back to LocalStorage', error);
+      // Primary payload with both camelCase & snake_case support
+      const primaryPayload: any = {
+        id: newClient.id,
+        name: newClient.name,
+        firstName: newClient.firstName,
+        lastName: newClient.lastName,
+        first_name: newClient.firstName,
+        last_name: newClient.lastName,
+        email: newClient.email,
+        phone: newClient.phone,
+        birthDate: newClient.birthDate,
+        birth_date: newClient.birthDate,
+        address: newClient.address,
+        createdAt: newClient.createdAt,
+        created_at: newClient.createdAt,
+        lastSessionAt: newClient.lastSessionAt,
+        last_session_at: newClient.lastSessionAt,
+      };
+
+      let insertRes = await supabase.from('clients').upsert(primaryPayload).select().single();
+
+      // If failed due to unknown column, fallback to pure snake_case or base fields
+      if (insertRes.error) {
+        const fallbackPayload: any = {
+          id: newClient.id,
+          name: newClient.name,
+          email: newClient.email,
+          phone: newClient.phone,
+          address: newClient.address,
+        };
+        if (newClient.firstName) fallbackPayload.first_name = newClient.firstName;
+        if (newClient.lastName) fallbackPayload.last_name = newClient.lastName;
+        if (newClient.birthDate) fallbackPayload.birth_date = newClient.birthDate;
+        if (newClient.lastSessionAt) fallbackPayload.last_session_at = newClient.lastSessionAt;
+        
+        insertRes = await supabase.from('clients').upsert(fallbackPayload).select().single();
+      }
+
+      if (!insertRes.error && insertRes.data) {
+        const mapped = mapClientFromDB(insertRes.data);
+        const current = loadLocal('clients', mockClients);
+        const existsIdx = current.findIndex(c => c.id === mapped.id);
+        if (existsIdx !== -1) current[existsIdx] = mapped;
+        else current.push(mapped);
+        saveLocal('clients', current);
+        return mapped;
+      }
+      console.warn('Supabase client insert failed, saving locally:', insertRes.error);
     }
 
     const current = loadLocal('clients', mockClients);
-    current.push(newClient);
+    const existsIdx = current.findIndex(c => c.id === newClient.id);
+    if (existsIdx !== -1) current[existsIdx] = newClient;
+    else current.push(newClient);
     saveLocal('clients', current);
     return newClient;
   },
 
   async updateClient(client: Client): Promise<Client> {
     if (isSupabaseConfigured && supabase) {
-      const { data, error } = await supabase.from('clients').update(client).eq('id', client.id).select().single();
-      if (!error && data) return data as Client;
-      console.warn('Supabase update failed, falling back to LocalStorage', error);
+      const payload: any = {
+        id: client.id,
+        name: client.name,
+        firstName: client.firstName,
+        lastName: client.lastName,
+        first_name: client.firstName,
+        last_name: client.lastName,
+        email: client.email,
+        phone: client.phone,
+        birthDate: client.birthDate,
+        birth_date: client.birthDate,
+        address: client.address,
+        lastSessionAt: client.lastSessionAt,
+        last_session_at: client.lastSessionAt,
+      };
+
+      let updateRes = await supabase.from('clients').update(payload).eq('id', client.id).select().single();
+      
+      if (updateRes.error) {
+        const fallbackPayload: any = {
+          name: client.name,
+          first_name: client.firstName,
+          last_name: client.lastName,
+          email: client.email,
+          phone: client.phone,
+          address: client.address,
+          birth_date: client.birthDate,
+          last_session_at: client.lastSessionAt,
+        };
+        updateRes = await supabase.from('clients').update(fallbackPayload).eq('id', client.id).select().single();
+      }
+
+      if (!updateRes.error && updateRes.data) {
+        const mapped = mapClientFromDB(updateRes.data);
+        const current = loadLocal('clients', mockClients);
+        const index = current.findIndex(c => c.id === client.id);
+        if (index !== -1) current[index] = mapped;
+        saveLocal('clients', current);
+        return mapped;
+      }
     }
 
     const current = loadLocal('clients', mockClients);
@@ -357,34 +717,82 @@ export const api = {
   // CLIENT NOTES
   async getClientNotes(clientId: string): Promise<ClientNote[]> {
     if (isSupabaseConfigured && supabase) {
-      const { data, error } = await supabase.from('client_notes').select('*').eq('clientId', clientId).order('date', { ascending: false });
-      if (!error && data) return data as ClientNote[];
-      console.warn('Supabase notes fetch failed, falling back to LocalStorage', error);
+      let { data, error } = await supabase.from('client_notes').select('*').eq('clientId', clientId).order('date', { ascending: false });
+      
+      if (error) {
+        // Retry with client_id column
+        const res = await supabase.from('client_notes').select('*').eq('client_id', clientId).order('date', { ascending: false });
+        data = res.data;
+        error = res.error;
+      }
+
+      if (!error && data) {
+        return data.map(mapNoteFromDB);
+      }
     }
     return loadLocal('notes', mockNotes)
       .filter(n => n.clientId === clientId)
       .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
   },
 
-  async createClientNote(note: Omit<ClientNote, 'id'> & { date?: string }): Promise<ClientNote> {
+  async createClientNote(note: Omit<ClientNote, 'id'> & { id?: string; date?: string }): Promise<ClientNote> {
     const newNote: ClientNote = {
       ...note,
-      id: crypto.randomUUID(),
+      id: note.id || crypto.randomUUID(),
       date: note.date || new Date().toISOString(),
     };
 
     if (isSupabaseConfigured && supabase) {
-      const { data, error } = await supabase.from('client_notes').insert(newNote).select().single();
-      if (!error && data) {
-        // Update lastSessionAt in Supabase for this client
-        await supabase.from('clients').update({ lastSessionAt: newNote.date }).eq('id', note.clientId);
-        return data as ClientNote;
+      const payload: any = {
+        id: newNote.id,
+        clientId: newNote.clientId,
+        client_id: newNote.clientId,
+        date: newNote.date,
+        motif: newNote.motif,
+        anamnese: newNote.anamnese,
+        treatment: newNote.treatment,
+        content: newNote.content,
+        category: newNote.category,
+      };
+
+      let insertRes = await supabase.from('client_notes').upsert(payload).select().single();
+      
+      if (insertRes.error) {
+        const fallbackPayload: any = {
+          id: newNote.id,
+          client_id: newNote.clientId,
+          date: newNote.date,
+          motif: newNote.motif,
+          anamnese: newNote.anamnese,
+          treatment: newNote.treatment,
+          content: newNote.content,
+          category: newNote.category,
+        };
+        insertRes = await supabase.from('client_notes').upsert(fallbackPayload).select().single();
       }
-      console.warn('Supabase note insertion failed, falling back to LocalStorage', error);
+
+      if (!insertRes.error && insertRes.data) {
+        // Also update lastSessionAt in Supabase for this client
+        await supabase.from('clients').update({ 
+          lastSessionAt: newNote.date,
+          last_session_at: newNote.date 
+        }).eq('id', note.clientId);
+
+        const mapped = mapNoteFromDB(insertRes.data);
+        const current = loadLocal('notes', mockNotes);
+        const idx = current.findIndex(n => n.id === mapped.id);
+        if (idx !== -1) current[idx] = mapped;
+        else current.push(mapped);
+        saveLocal('notes', current);
+        return mapped;
+      }
+      console.warn('Supabase note insert failed:', insertRes.error);
     }
 
     const current = loadLocal('notes', mockNotes);
-    current.push(newNote);
+    const idx = current.findIndex(n => n.id === newNote.id);
+    if (idx !== -1) current[idx] = newNote;
+    else current.push(newNote);
     saveLocal('notes', current);
 
     // Update lastSessionAt in Client record
@@ -400,9 +808,40 @@ export const api = {
 
   async updateClientNote(note: ClientNote): Promise<ClientNote> {
     if (isSupabaseConfigured && supabase) {
-      const { data, error } = await supabase.from('client_notes').update(note).eq('id', note.id).select().single();
-      if (!error && data) return data as ClientNote;
-      console.warn('Supabase note update failed, falling back to LocalStorage', error);
+      const payload: any = {
+        id: note.id,
+        clientId: note.clientId,
+        client_id: note.clientId,
+        date: note.date,
+        motif: note.motif,
+        anamnese: note.anamnese,
+        treatment: note.treatment,
+        content: note.content,
+        category: note.category,
+      };
+
+      let updateRes = await supabase.from('client_notes').update(payload).eq('id', note.id).select().single();
+      if (updateRes.error) {
+        const fallback: any = {
+          client_id: note.clientId,
+          date: note.date,
+          motif: note.motif,
+          anamnese: note.anamnese,
+          treatment: note.treatment,
+          content: note.content,
+          category: note.category,
+        };
+        updateRes = await supabase.from('client_notes').update(fallback).eq('id', note.id).select().single();
+      }
+
+      if (!updateRes.error && updateRes.data) {
+        const mapped = mapNoteFromDB(updateRes.data);
+        const current = loadLocal('notes', mockNotes);
+        const index = current.findIndex(n => n.id === note.id);
+        if (index !== -1) current[index] = mapped;
+        saveLocal('notes', current);
+        return mapped;
+      }
     }
 
     const current = loadLocal('notes', mockNotes);
@@ -417,8 +856,12 @@ export const api = {
   async deleteClientNote(id: string): Promise<boolean> {
     if (isSupabaseConfigured && supabase) {
       const { error } = await supabase.from('client_notes').delete().eq('id', id);
-      if (!error) return true;
-      console.warn('Supabase note deletion failed, falling back to LocalStorage', error);
+      if (!error) {
+        const current = loadLocal('notes', mockNotes);
+        const filtered = current.filter(n => n.id !== id);
+        saveLocal('notes', filtered);
+        return true;
+      }
     }
 
     const current = loadLocal('notes', mockNotes);
@@ -431,39 +874,126 @@ export const api = {
   async getInvoices(): Promise<Invoice[]> {
     if (isSupabaseConfigured && supabase) {
       const { data, error } = await supabase.from('invoices').select('*').order('date', { ascending: false });
-      if (!error && data) return data as Invoice[];
-      console.warn('Supabase invoices fetch failed, falling back to LocalStorage', error);
+      if (!error && data && data.length > 0) {
+        const mapped = data.map(mapInvoiceFromDB);
+        saveLocal('invoices', mapped);
+        return mapped;
+      }
+      if (error) {
+        console.warn('Supabase invoices fetch failed, using local storage:', error.message);
+      }
     }
     return loadLocal('invoices', mockInvoices).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
   },
 
-  async createInvoice(invoice: Omit<Invoice, 'id' | 'invoiceNumber'>): Promise<Invoice> {
+  async createInvoice(invoice: Omit<Invoice, 'id' | 'invoiceNumber'> & { id?: string; invoiceNumber?: string }): Promise<Invoice> {
     const currentInvoices = loadLocal('invoices', mockInvoices);
     const nextNum = 100 + currentInvoices.length + 1;
-    const invoiceNumber = `FAC-${new Date().getFullYear()}-${nextNum}`;
+    const invoiceNumber = invoice.invoiceNumber || `FAC-${new Date().getFullYear()}-${nextNum}`;
 
     const newInvoice: Invoice = {
       ...invoice,
-      id: crypto.randomUUID(),
+      id: invoice.id || crypto.randomUUID(),
       invoiceNumber,
     };
 
     if (isSupabaseConfigured && supabase) {
-      const { data, error } = await supabase.from('invoices').insert(newInvoice).select().single();
-      if (!error && data) return data as Invoice;
-      console.warn('Supabase invoice insertion failed, falling back to LocalStorage', error);
+      const payload: any = {
+        id: newInvoice.id,
+        invoiceNumber: newInvoice.invoiceNumber,
+        invoice_number: newInvoice.invoiceNumber,
+        clientId: newInvoice.clientId,
+        client_id: newInvoice.clientId,
+        clientName: newInvoice.clientName,
+        client_name: newInvoice.clientName,
+        date: newInvoice.date,
+        amount: newInvoice.amount,
+        status: newInvoice.status,
+        paymentMethod: newInvoice.paymentMethod,
+        payment_method: newInvoice.paymentMethod,
+        description: newInvoice.description,
+        language: newInvoice.language || 'fr',
+      };
+
+      let insertRes = await supabase.from('invoices').upsert(payload).select().single();
+
+      if (insertRes.error) {
+        const fallback: any = {
+          id: newInvoice.id,
+          invoice_number: newInvoice.invoiceNumber,
+          client_id: newInvoice.clientId,
+          client_name: newInvoice.clientName,
+          date: newInvoice.date,
+          amount: newInvoice.amount,
+          status: newInvoice.status,
+          payment_method: newInvoice.paymentMethod,
+          description: newInvoice.description,
+          language: newInvoice.language || 'fr',
+        };
+        insertRes = await supabase.from('invoices').upsert(fallback).select().single();
+      }
+
+      if (!insertRes.error && insertRes.data) {
+        const mapped = mapInvoiceFromDB(insertRes.data);
+        const idx = currentInvoices.findIndex(i => i.id === mapped.id);
+        if (idx !== -1) currentInvoices[idx] = mapped;
+        else currentInvoices.push(mapped);
+        saveLocal('invoices', currentInvoices);
+        return mapped;
+      }
+      console.warn('Supabase invoice insertion failed:', insertRes.error);
     }
 
-    currentInvoices.push(newInvoice);
+    const idx = currentInvoices.findIndex(i => i.id === newInvoice.id);
+    if (idx !== -1) currentInvoices[idx] = newInvoice;
+    else currentInvoices.push(newInvoice);
     saveLocal('invoices', currentInvoices);
     return newInvoice;
   },
 
   async updateInvoice(invoice: Invoice): Promise<Invoice> {
     if (isSupabaseConfigured && supabase) {
-      const { data, error } = await supabase.from('invoices').update(invoice).eq('id', invoice.id).select().single();
-      if (!error && data) return data as Invoice;
-      console.warn('Supabase invoice update failed, falling back to LocalStorage', error);
+      const payload: any = {
+        id: invoice.id,
+        invoiceNumber: invoice.invoiceNumber,
+        invoice_number: invoice.invoiceNumber,
+        clientId: invoice.clientId,
+        client_id: invoice.clientId,
+        clientName: invoice.clientName,
+        client_name: invoice.clientName,
+        date: invoice.date,
+        amount: invoice.amount,
+        status: invoice.status,
+        paymentMethod: invoice.paymentMethod,
+        payment_method: invoice.paymentMethod,
+        description: invoice.description,
+        language: invoice.language || 'fr',
+      };
+
+      let updateRes = await supabase.from('invoices').update(payload).eq('id', invoice.id).select().single();
+      if (updateRes.error) {
+        const fallback: any = {
+          invoice_number: invoice.invoiceNumber,
+          client_id: invoice.clientId,
+          client_name: invoice.clientName,
+          date: invoice.date,
+          amount: invoice.amount,
+          status: invoice.status,
+          payment_method: invoice.paymentMethod,
+          description: invoice.description,
+          language: invoice.language || 'fr',
+        };
+        updateRes = await supabase.from('invoices').update(fallback).eq('id', invoice.id).select().single();
+      }
+
+      if (!updateRes.error && updateRes.data) {
+        const mapped = mapInvoiceFromDB(updateRes.data);
+        const current = loadLocal('invoices', mockInvoices);
+        const index = current.findIndex(i => i.id === invoice.id);
+        if (index !== -1) current[index] = mapped;
+        saveLocal('invoices', current);
+        return mapped;
+      }
     }
 
     const current = loadLocal('invoices', mockInvoices);
@@ -479,32 +1009,102 @@ export const api = {
   async getLocalEvents(): Promise<CalendarEvent[]> {
     if (isSupabaseConfigured && supabase) {
       const { data, error } = await supabase.from('calendar_events').select('*').order('start', { ascending: true });
-      if (!error && data) return data as CalendarEvent[];
+      if (!error && data) {
+        const mapped = data.map(mapEventFromDB);
+        saveLocal('events', mapped);
+        return mapped;
+      }
     }
     return loadLocal('events', mockEvents).sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
   },
 
-  async createLocalEvent(event: Omit<CalendarEvent, 'id'>): Promise<CalendarEvent> {
+  async createLocalEvent(event: Omit<CalendarEvent, 'id'> & { id?: string }): Promise<CalendarEvent> {
     const newEvent: CalendarEvent = {
       ...event,
-      id: crypto.randomUUID(),
+      id: event.id || crypto.randomUUID(),
     };
 
     if (isSupabaseConfigured && supabase) {
-      const { data, error } = await supabase.from('calendar_events').insert(newEvent).select().single();
-      if (!error && data) return data as CalendarEvent;
+      const payload: any = {
+        id: newEvent.id,
+        summary: newEvent.summary,
+        description: newEvent.description,
+        start: newEvent.start,
+        end: newEvent.end,
+        clientId: newEvent.clientId,
+        client_id: newEvent.clientId,
+        clientName: newEvent.clientName,
+        client_name: newEvent.clientName,
+      };
+
+      let insertRes = await supabase.from('calendar_events').upsert(payload).select().single();
+      if (insertRes.error) {
+        const fallback: any = {
+          id: newEvent.id,
+          summary: newEvent.summary,
+          description: newEvent.description,
+          start: newEvent.start,
+          end: newEvent.end,
+          client_id: newEvent.clientId,
+          client_name: newEvent.clientName,
+        };
+        insertRes = await supabase.from('calendar_events').upsert(fallback).select().single();
+      }
+
+      if (!insertRes.error && insertRes.data) {
+        const mapped = mapEventFromDB(insertRes.data);
+        const current = loadLocal('events', mockEvents);
+        const idx = current.findIndex(e => e.id === mapped.id);
+        if (idx !== -1) current[idx] = mapped;
+        else current.push(mapped);
+        saveLocal('events', current);
+        return mapped;
+      }
     }
 
     const current = loadLocal('events', mockEvents);
-    current.push(newEvent);
+    const idx = current.findIndex(e => e.id === newEvent.id);
+    if (idx !== -1) current[idx] = newEvent;
+    else current.push(newEvent);
     saveLocal('events', current);
     return newEvent;
   },
 
   async updateLocalEvent(event: CalendarEvent): Promise<CalendarEvent> {
     if (isSupabaseConfigured && supabase) {
-      const { data, error } = await supabase.from('calendar_events').update(event).eq('id', event.id).select().single();
-      if (!error && data) return data as CalendarEvent;
+      const payload: any = {
+        id: event.id,
+        summary: event.summary,
+        description: event.description,
+        start: event.start,
+        end: event.end,
+        clientId: event.clientId,
+        client_id: event.clientId,
+        clientName: event.clientName,
+        client_name: event.clientName,
+      };
+
+      let updateRes = await supabase.from('calendar_events').update(payload).eq('id', event.id).select().single();
+      if (updateRes.error) {
+        const fallback: any = {
+          summary: event.summary,
+          description: event.description,
+          start: event.start,
+          end: event.end,
+          client_id: event.clientId,
+          client_name: event.clientName,
+        };
+        updateRes = await supabase.from('calendar_events').update(fallback).eq('id', event.id).select().single();
+      }
+
+      if (!updateRes.error && updateRes.data) {
+        const mapped = mapEventFromDB(updateRes.data);
+        const current = loadLocal('events', mockEvents);
+        const index = current.findIndex(e => e.id === event.id);
+        if (index !== -1) current[index] = mapped;
+        saveLocal('events', current);
+        return mapped;
+      }
     }
 
     const current = loadLocal('events', mockEvents);
@@ -519,7 +1119,12 @@ export const api = {
   async deleteLocalEvent(id: string): Promise<boolean> {
     if (isSupabaseConfigured && supabase) {
       const { error } = await supabase.from('calendar_events').delete().eq('id', id);
-      if (!error) return true;
+      if (!error) {
+        const current = loadLocal('events', mockEvents);
+        const filtered = current.filter(e => e.id !== id);
+        saveLocal('events', filtered);
+        return true;
+      }
     }
 
     const current = loadLocal('events', mockEvents);

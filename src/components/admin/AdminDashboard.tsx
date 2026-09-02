@@ -4,10 +4,11 @@ import {
   Users, Calendar, FileText, TrendingUp, Plus, Search, Trash2, 
   Download, LogOut, ArrowLeft, Check, RefreshCw, Calendar as CalendarIcon, 
   CreditCard, Shield, Clock, MapPin, Phone, Mail, FileCheck, Printer,
-  ChevronRight, Pencil, ChevronLeft, LayoutGrid, List, ArrowRight
+  ChevronRight, Pencil, ChevronLeft, LayoutGrid, List, ArrowRight,
+  Copy, CheckCircle2, XCircle, AlertTriangle, Database, Server
 } from 'lucide-react';
 import { Client, ClientNote, Invoice, CalendarEvent } from '../../types';
-import { api, isSupabaseConfigured } from '../../lib/supabase';
+import { api, isSupabaseConfigured, SUPABASE_SQL_SETUP } from '../../lib/supabase';
 import SpineLogo from '../SpineLogo';
 import { useTranslation } from '../../App';
 import { Language, translations } from '../../translations';
@@ -28,26 +29,6 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
   const [receiptLang, setReceiptLang] = useState<Language>('fr');
   const [activeTab, setActiveTab] = useState<TabType>('overview');
   
-  const [isScrolled, setIsScrolled] = useState(false);
-  const mainRef = useRef<HTMLElement>(null);
-
-  useEffect(() => {
-    const mainElement = mainRef.current;
-    if (!mainElement) return;
-
-    const handleScroll = () => {
-      if (mainElement.scrollTop > 40) {
-        setIsScrolled(true);
-      } else {
-        setIsScrolled(false);
-      }
-    };
-
-    mainElement.addEventListener('scroll', handleScroll, { passive: true });
-    return () => {
-      mainElement.removeEventListener('scroll', handleScroll);
-    };
-  }, []);
   const [clients, setClients] = useState<Client[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [events, setEvents] = useState<CalendarEvent[]>([]);
@@ -127,6 +108,69 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
 
   const [isEditInvoiceOpen, setIsEditInvoiceOpen] = useState(false);
   const [editingInvoice, setEditingInvoice] = useState<Invoice | null>(null);
+
+  // Supabase Diagnostics & Synchronization states
+  const [isSupabaseModalOpen, setIsSupabaseModalOpen] = useState(false);
+  const [isDiagnosing, setIsDiagnosing] = useState(false);
+  const [tableDiagnostics, setTableDiagnostics] = useState<{
+    isConfigured: boolean;
+    clients: boolean;
+    clientNotes: boolean;
+    invoices: boolean;
+    calendarEvents: boolean;
+    errorSummary?: string;
+  } | null>(null);
+  const [isSyncingAll, setIsSyncingAll] = useState(false);
+  const [syncMessage, setSyncMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [copiedSql, setCopiedSql] = useState(false);
+
+  // Run diagnostics for Supabase tables
+  const runDiagnostics = async () => {
+    setIsDiagnosing(true);
+    setSyncMessage(null);
+    try {
+      const res = await api.checkTablesStatus();
+      setTableDiagnostics(res);
+    } catch (err: any) {
+      setTableDiagnostics({
+        isConfigured: false,
+        clients: false,
+        clientNotes: false,
+        invoices: false,
+        calendarEvents: false,
+        errorSummary: err.message,
+      });
+    } finally {
+      setIsDiagnosing(false);
+    }
+  };
+
+  // Sync Local data to Supabase
+  const handleSyncAllToSupabase = async () => {
+    setIsSyncingAll(true);
+    setSyncMessage(null);
+    try {
+      const res = await api.syncAllToSupabase();
+      if (res.success) {
+        setSyncMessage({ type: 'success', text: res.message });
+        await loadData();
+        await runDiagnostics();
+      } else {
+        setSyncMessage({ type: 'error', text: res.message });
+      }
+    } catch (err: any) {
+      setSyncMessage({ type: 'error', text: err.message || 'Erreur inconnue' });
+    } finally {
+      setIsSyncingAll(false);
+    }
+  };
+
+  // Copy SQL script to clipboard
+  const handleCopySql = () => {
+    navigator.clipboard.writeText(SUPABASE_SQL_SETUP);
+    setCopiedSql(true);
+    setTimeout(() => setCopiedSql(false), 3000);
+  };
 
   // Load baseline app data
   const loadData = async () => {
@@ -577,50 +621,30 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
     <div className="fixed inset-0 z-[80] bg-[#fdfdfb] text-gray-800 flex flex-col md:flex-row overflow-hidden">
       
       {/* SIDEBAR */}
-      <aside className={`w-full md:w-64 bg-[#f4f4ec] border-b md:border-b-0 md:border-r border-black/5 flex flex-col justify-between shrink-0 transition-all duration-300 ${
-        isScrolled ? 'p-3 pb-1 md:p-6' : 'p-6'
-      }`}>
-        <div className={`flex flex-col transition-all duration-300 ${isScrolled ? 'gap-2 md:gap-8' : 'gap-8'}`}>
+      <aside className="w-full md:w-60 bg-[#f4f4ec] border-b md:border-b-0 md:border-r border-black/5 flex flex-col justify-between shrink-0 p-4 md:p-5">
+        <div className="flex flex-col gap-4 md:gap-6">
           {/* Logo Section */}
-          <div className={`items-center gap-3 transition-all duration-300 ${isScrolled ? 'hidden md:flex' : 'flex'}`}>
-            <div className="w-10 h-10 bg-primary rounded-full flex items-center justify-center text-white shrink-0">
-              <SpineLogo size={22} />
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 bg-primary rounded-full flex items-center justify-center text-white shrink-0 shadow-xs">
+                <SpineLogo size={20} />
+              </div>
+              <div>
+                <h1 className="text-base font-serif font-semibold tracking-tight leading-none">Vincent Osteo</h1>
+                <span className="text-[10px] uppercase tracking-widest font-bold text-primary/60">Espace Cabinet</span>
+              </div>
             </div>
-            <div>
-              <h1 className="text-lg font-serif font-semibold tracking-tight leading-none">Vincent Osteo</h1>
-              <span className="text-[10px] uppercase tracking-widest font-bold text-primary/60">Espace Cabinet</span>
-            </div>
-          </div>
 
-          {/* Practitioner Profile Widget */}
-          <div className={`bg-white/50 backdrop-blur-sm p-4 rounded-2xl border border-black/5 items-center gap-3 transition-all duration-300 ${
-            isScrolled ? 'hidden md:flex' : 'flex'
-          }`}>
-            <div className="w-10 h-10 bg-primary/15 rounded-full flex items-center justify-center text-primary font-bold">
-              VD
-            </div>
-            <div className="overflow-hidden">
-              <p className="text-xs font-bold truncate">Dr. Vincent Durroux</p>
-              <p className="text-[10px] text-gray-500 truncate flex items-center gap-1">
-                <MapPin size={10} /> L'Eliana, Valencia
-              </p>
-            </div>
-          </div>
-
-          {/* Admin Language Selector (Moved to Top) */}
-          <div className={`flex items-center justify-between px-2 pb-1 transition-all duration-300 ${
-            isScrolled ? 'hidden md:flex' : 'flex'
-          }`}>
-            <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Langue / Idioma</span>
-            <div className="flex items-center gap-1 bg-white/60 p-1 rounded-xl border border-black/5">
+            {/* Language Selector compact */}
+            <div className="flex items-center gap-0.5 bg-white/80 p-0.5 rounded-lg border border-black/5 shadow-2xs">
               {(['fr', 'en', 'es'] as const).map((l) => (
                 <button
                   key={l}
                   type="button"
                   onClick={() => setLang(l)}
-                  className={`px-2.5 py-0.5 text-[9px] font-bold uppercase rounded-lg transition-all ${
+                  className={`px-2 py-0.5 text-[9px] font-bold uppercase rounded-md transition-all ${
                     lang === l
-                      ? 'bg-primary text-white shadow-sm'
+                      ? 'bg-primary text-white shadow-xs'
                       : 'text-gray-500 hover:bg-black/5'
                   }`}
                 >
@@ -644,11 +668,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                 <button
                   key={item.id}
                   onClick={() => setActiveTab(item.id as TabType)}
-                  className={`flex items-center gap-2 md:gap-3 rounded-xl transition-all whitespace-nowrap md:w-full ${
-                    isScrolled 
-                      ? 'px-3 py-1.5 text-[11px] rounded-lg md:px-4 md:py-3 md:text-xs md:rounded-xl' 
-                      : 'px-4 py-3 rounded-xl text-xs'
-                  } font-semibold uppercase tracking-wider ${
+                  className={`flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl transition-all whitespace-nowrap md:w-full text-xs font-semibold uppercase tracking-wider ${
                     isActive 
                       ? 'bg-primary text-white shadow-md shadow-primary/10' 
                       : 'text-gray-600 hover:bg-black/5'
@@ -663,66 +683,33 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
         </div>
 
         {/* Footer actions of Sidebar */}
-        <div className={`flex flex-col gap-3 mt-4 md:mt-6 pt-4 border-t border-black/5 transition-all duration-300 ${
-          isScrolled ? 'hidden md:flex' : 'flex'
-        }`}>
-          {/* Cloud Storage State */}
-          <div className="text-[10px] text-gray-500 flex items-center gap-1.5 px-2">
-            <Shield size={12} className={isSupabaseConfigured ? "text-emerald-500" : "text-amber-500"} />
-            <span>
-              {isSupabaseConfigured 
-                ? (lang === 'fr' ? "Connecté à Supabase Cloud" : lang === 'es' ? "Conectado a Supabase Cloud" : "Connected to Supabase Cloud")
-                : (lang === 'fr' ? "Mode LocalStorage Actif" : lang === 'es' ? "Modo LocalStorage Activo" : "LocalStorage Mode Active")}
-            </span>
-          </div>
-
+        <div className="flex flex-col gap-2 mt-3 pt-3 border-t border-black/5">
           <button
             onClick={onClose}
-            className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-gray-600 hover:text-primary transition-colors px-2 py-2 mt-2"
+            className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-gray-600 hover:text-primary transition-colors px-2 py-2"
           >
-            <ArrowLeft size={16} />
-            <span>{lang === 'fr' ? "Retour au site public" : lang === 'es' ? "Volver al sitio público" : "Back to public website"}</span>
+            <ArrowLeft size={15} />
+            <span>{lang === 'fr' ? "Retour au site" : lang === 'es' ? "Volver al sitio" : "Back to website"}</span>
           </button>
         </div>
       </aside>
 
       {/* MAIN CONTAINER */}
-      <main ref={mainRef} className="flex-1 overflow-y-auto bg-[#fbfbfa] p-4 sm:p-8 flex flex-col">
+      <main className="flex-1 overflow-y-auto bg-[#fbfbfa] p-4 sm:p-8 flex flex-col">
         
         {/* TAB 1: OVERVIEW */}
         {activeTab === 'overview' && (
           <div className="space-y-8 flex-1">
             {/* Header */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <div>
-                <h2 className="text-3xl font-serif font-bold text-primary">{t.admin.overview.title}</h2>
-                <p className="text-sm text-gray-500">
-                  {lang === 'fr' 
-                    ? "Statistiques de performance du cabinet et gestion locale." 
-                    : lang === 'es' 
-                      ? "Estadísticas de rendimiento de la clínica y gestión local." 
-                      : "Clinic performance statistics and management."}
-                </p>
-              </div>
-              
-              {/* Database / Cloud Status Badge */}
-              <div>
-                <div className="flex items-center gap-3 bg-white border border-black/5 shadow-2xs px-4 py-2.5 rounded-2xl">
-                  <div className={`w-2.5 h-2.5 rounded-full ${isSupabaseConfigured ? 'bg-emerald-500' : 'bg-primary'}`} />
-                  <div className="text-left">
-                    <p className="text-xs font-bold text-gray-800">
-                      {isSupabaseConfigured 
-                        ? (lang === 'fr' ? 'Supabase Connecté' : 'Supabase Connected') 
-                        : (lang === 'fr' ? 'Mode Local Actif' : 'Active Local Mode')}
-                    </p>
-                    <p className="text-[10px] text-gray-500">
-                      {isSupabaseConfigured 
-                        ? (lang === 'fr' ? 'Données synchronisées' : 'Data synchronized')
-                        : (lang === 'fr' ? 'Sauvegarde locale instantanée' : 'Instant local storage')}
-                    </p>
-                  </div>
-                </div>
-              </div>
+            <div>
+              <h2 className="text-3xl font-serif font-bold text-primary">{t.admin.overview.title}</h2>
+              <p className="text-sm text-gray-500 mt-1">
+                {lang === 'fr' 
+                  ? "Statistiques de performance du cabinet et gestion locale." 
+                  : lang === 'es' 
+                    ? "Estadísticas de rendimiento de la clínica y gestión local." 
+                    : "Clinic performance statistics and management."}
+              </p>
             </div>
 
             {/* Metrics cards grid */}
@@ -804,14 +791,9 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                         <CalendarIcon size={20} />
                       </div>
                       <div>
-                        <div className="flex items-center gap-2">
-                          <h3 className="text-lg font-serif font-bold text-primary">
-                            {lang === 'fr' ? "Agenda & Consultations du Cabinet" : lang === 'es' ? "Agenda y Consultas de la Clínica" : "Clinic Agenda & Consultations"}
-                          </h3>
-                          <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-primary/10 text-primary uppercase tracking-wider">
-                            {todayEvents.length} {lang === 'fr' ? (todayEvents.length <= 1 ? "aujourd'hui" : "aujourd'hui") : "today"}
-                          </span>
-                        </div>
+                        <h3 className="text-lg font-serif font-bold text-primary">
+                          {lang === 'fr' ? "Agenda" : lang === 'es' ? "Agenda" : "Agenda"}
+                        </h3>
                         <p className="text-xs text-gray-500">
                           {lang === 'fr' 
                             ? "Consultez vos rendez-vous et cliquez sur \"Prise de notes\" pour ouvrir directement le dossier patient." 
@@ -3027,6 +3009,217 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
             </motion.div>
           </div>
         )}
+        {/* SUPABASE DIAGNOSTICS & SYNCHRONIZATION MODAL */}
+        {isSupabaseModalOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-white rounded-3xl max-w-2xl w-full p-6 sm:p-8 shadow-2xl border border-black/10 max-h-[90vh] overflow-y-auto space-y-6"
+            >
+              <div className="flex items-start justify-between gap-4 border-b border-black/5 pb-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-2xl bg-emerald-50 text-emerald-700 flex items-center justify-center">
+                    <Database size={20} />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-serif font-bold text-primary">
+                      {lang === 'fr' ? 'Synchronisation Base de Données Supabase' : 'Supabase Database Sync'}
+                    </h3>
+                    <p className="text-xs text-gray-500">
+                      {lang === 'fr' 
+                        ? 'Diagnostic de vos 4 tables cloud et synchronisation des données.' 
+                        : 'Diagnostics for your 4 cloud tables and data sync.'}
+                    </p>
+                  </div>
+                </div>
+
+                <button 
+                  onClick={() => setIsSupabaseModalOpen(false)}
+                  className="w-8 h-8 rounded-full bg-gray-100 hover:bg-gray-200 text-gray-500 flex items-center justify-center transition-colors"
+                >
+                  ✕
+                </button>
+              </div>
+
+              {/* Status Section */}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-gray-400">
+                    {lang === 'fr' ? 'État des 4 Tables Supabase' : 'Supabase Tables Status'}
+                  </h4>
+                  <button
+                    onClick={runDiagnostics}
+                    disabled={isDiagnosing}
+                    className="flex items-center gap-1 text-xs font-bold text-primary hover:underline disabled:opacity-50"
+                  >
+                    <RefreshCw size={12} className={isDiagnosing ? 'animate-spin' : ''} />
+                    <span>{lang === 'fr' ? 'Tester la connexion' : 'Test connection'}</span>
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {/* Table 1: Clients */}
+                  <div className="p-3 rounded-2xl border border-black/5 bg-[#fafafa] flex items-center justify-between">
+                    <div className="flex items-center gap-2.5">
+                      <Users size={16} className="text-gray-500" />
+                      <div>
+                        <p className="text-xs font-bold text-gray-800">clients</p>
+                        <p className="text-[10px] text-gray-400">Patients & Coordonnées</p>
+                      </div>
+                    </div>
+                    {tableDiagnostics ? (
+                      tableDiagnostics.clients ? (
+                        <span className="flex items-center gap-1 text-[11px] font-bold text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200">
+                          <CheckCircle2 size={12} /> Connectée
+                        </span>
+                      ) : (
+                        <span className="flex items-center gap-1 text-[11px] font-bold text-rose-600 bg-rose-50 px-2.5 py-1 rounded-full border border-rose-200">
+                          <XCircle size={12} /> À créer
+                        </span>
+                      )
+                    ) : (
+                      <span className="text-[10px] text-gray-400">En attente de test</span>
+                    )}
+                  </div>
+
+                  {/* Table 2: Client Notes */}
+                  <div className="p-3 rounded-2xl border border-black/5 bg-[#fafafa] flex items-center justify-between">
+                    <div className="flex items-center gap-2.5">
+                      <FileText size={16} className="text-gray-500" />
+                      <div>
+                        <p className="text-xs font-bold text-gray-800">client_notes</p>
+                        <p className="text-[10px] text-gray-400">Consultations & Anamnèses</p>
+                      </div>
+                    </div>
+                    {tableDiagnostics ? (
+                      tableDiagnostics.clientNotes ? (
+                        <span className="flex items-center gap-1 text-[11px] font-bold text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200">
+                          <CheckCircle2 size={12} /> Connectée
+                        </span>
+                      ) : (
+                        <span className="flex items-center gap-1 text-[11px] font-bold text-rose-600 bg-rose-50 px-2.5 py-1 rounded-full border border-rose-200">
+                          <XCircle size={12} /> À créer
+                        </span>
+                      )
+                    ) : (
+                      <span className="text-[10px] text-gray-400">En attente de test</span>
+                    )}
+                  </div>
+
+                  {/* Table 3: Invoices */}
+                  <div className="p-3 rounded-2xl border border-black/5 bg-[#fafafa] flex items-center justify-between">
+                    <div className="flex items-center gap-2.5">
+                      <CreditCard size={16} className="text-gray-500" />
+                      <div>
+                        <p className="text-xs font-bold text-gray-800">invoices</p>
+                        <p className="text-[10px] text-gray-400">Factures & Reçus</p>
+                      </div>
+                    </div>
+                    {tableDiagnostics ? (
+                      tableDiagnostics.invoices ? (
+                        <span className="flex items-center gap-1 text-[11px] font-bold text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200">
+                          <CheckCircle2 size={12} /> Connectée
+                        </span>
+                      ) : (
+                        <span className="flex items-center gap-1 text-[11px] font-bold text-rose-600 bg-rose-50 px-2.5 py-1 rounded-full border border-rose-200">
+                          <XCircle size={12} /> À créer
+                        </span>
+                      )
+                    ) : (
+                      <span className="text-[10px] text-gray-400">En attente de test</span>
+                    )}
+                  </div>
+
+                  {/* Table 4: Calendar Events */}
+                  <div className="p-3 rounded-2xl border border-black/5 bg-[#fafafa] flex items-center justify-between">
+                    <div className="flex items-center gap-2.5">
+                      <CalendarIcon size={16} className="text-gray-500" />
+                      <div>
+                        <p className="text-xs font-bold text-gray-800">calendar_events</p>
+                        <p className="text-[10px] text-gray-400">Rendez-vous Cabinet</p>
+                      </div>
+                    </div>
+                    {tableDiagnostics ? (
+                      tableDiagnostics.calendarEvents ? (
+                        <span className="flex items-center gap-1 text-[11px] font-bold text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200">
+                          <CheckCircle2 size={12} /> Connectée
+                        </span>
+                      ) : (
+                        <span className="flex items-center gap-1 text-[11px] font-bold text-rose-600 bg-rose-50 px-2.5 py-1 rounded-full border border-rose-200">
+                          <XCircle size={12} /> À créer
+                        </span>
+                      )
+                    ) : (
+                      <span className="text-[10px] text-gray-400">En attente de test</span>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Sync Message Alert */}
+              {syncMessage && (
+                <div className={`p-3.5 rounded-2xl text-xs font-bold flex items-center gap-2 ${
+                  syncMessage.type === 'success' 
+                    ? 'bg-emerald-50 text-emerald-800 border border-emerald-200' 
+                    : 'bg-rose-50 text-rose-800 border border-rose-200'
+                }`}>
+                  {syncMessage.type === 'success' ? <CheckCircle2 size={16} /> : <AlertTriangle size={16} />}
+                  <span>{syncMessage.text}</span>
+                </div>
+              )}
+
+              {/* SQL Script Box */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-gray-400">
+                    {lang === 'fr' ? 'Script SQL complet (Création des 4 tables)' : 'Full SQL Script (All 4 Tables)'}
+                  </h4>
+                  <button
+                    onClick={handleCopySql}
+                    className="flex items-center gap-1.5 px-3 py-1 bg-primary text-white hover:bg-primary/95 rounded-xl text-xs font-bold transition-all shadow-2xs"
+                  >
+                    {copiedSql ? <Check size={13} /> : <Copy size={13} />}
+                    <span>{copiedSql ? (lang === 'fr' ? 'Copié !' : 'Copied!') : (lang === 'fr' ? 'Copier le script SQL' : 'Copy SQL')}</span>
+                  </button>
+                </div>
+                <p className="text-[11px] text-gray-500">
+                  {lang === 'fr' 
+                    ? "Si vos tables de patients ou de factures ne sont pas encore créées dans Supabase : copiez ce script, ouvrez votre tableau de bord Supabase > SQL Editor > collez et cliquez sur Run." 
+                    : "If your patients or invoices tables are not created in Supabase yet: copy this script, open your Supabase dashboard > SQL Editor > paste and click Run."}
+                </p>
+                <div className="bg-[#1e1e1e] text-gray-200 p-3.5 rounded-2xl text-[11px] font-mono overflow-x-auto max-h-40 border border-black/10">
+                  <pre>{SUPABASE_SQL_SETUP}</pre>
+                </div>
+              </div>
+
+              {/* Sync Actions */}
+              <div className="pt-2 border-t border-black/5 flex flex-col sm:flex-row items-center justify-between gap-3">
+                <button
+                  onClick={handleSyncAllToSupabase}
+                  disabled={isSyncingAll}
+                  className="w-full sm:w-auto flex items-center justify-center gap-2 px-5 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-2xl text-xs font-bold transition-all shadow-sm disabled:opacity-50"
+                >
+                  <RefreshCw size={14} className={isSyncingAll ? 'animate-spin' : ''} />
+                  <span>
+                    {isSyncingAll 
+                      ? (lang === 'fr' ? 'Synchronisation en cours...' : 'Syncing...') 
+                      : (lang === 'fr' ? 'Synchroniser les données locales vers Supabase' : 'Sync local data to Supabase')}
+                  </span>
+                </button>
+
+                <button
+                  onClick={() => setIsSupabaseModalOpen(false)}
+                  className="w-full sm:w-auto px-4 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-2xl text-xs font-bold transition-all"
+                >
+                  {lang === 'fr' ? 'Fermer' : 'Close'}
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+
       </AnimatePresence>
 
     </div>
