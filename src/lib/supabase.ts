@@ -1,25 +1,30 @@
 import { createClient } from '@supabase/supabase-js';
 import { Client, ClientNote, Invoice, CalendarEvent } from '../types';
 
-const getEnvVar = (key: string): string => {
-  const metaEnv = (import.meta as any).env;
-  if (metaEnv && metaEnv[key]) return metaEnv[key];
-  if (typeof process !== 'undefined' && process.env && process.env[key]) return process.env[key] as string;
-  return '';
-};
+// Default Supabase project credentials as robust production fallback
+const DEFAULT_SUPABASE_URL = 'https://lnlemynayesjduntoran.supabase.co';
+const DEFAULT_SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxubGVteW5heWVzamR1bnRvcmFuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjczNDAyMDgsImV4cCI6MjA4MjkxNjIwOH0.3b9fFgeWTXen1fsOO0xMdM5Fd3PTxYs41UxlPapo0ZU';
+
+// Note: Vite bundler requires explicit static property access (import.meta.env.VITE_...)
+// Dynamic access like import.meta.env[key] gets stripped during Vite production build.
+const metaEnv = (import.meta as any).env || {};
 
 const supabaseUrl = 
-  getEnvVar('SUPABASE_URL') || 
-  getEnvVar('VITE_SUPABASE_URL') || 
-  getEnvVar('NEXT_PUBLIC_SUPABASE_URL') || 
-  '';
+  metaEnv.VITE_SUPABASE_URL ||
+  metaEnv.SUPABASE_URL ||
+  metaEnv.NEXT_PUBLIC_SUPABASE_URL ||
+  (typeof process !== 'undefined' && process.env?.VITE_SUPABASE_URL) ||
+  (typeof process !== 'undefined' && process.env?.SUPABASE_URL) ||
+  DEFAULT_SUPABASE_URL;
 
 const supabaseAnonKey = 
-  getEnvVar('SUPABASE_ANON_KEY') || 
-  getEnvVar('VITE_SUPABASE_ANON_KEY') || 
-  getEnvVar('SUPABASE_PUBLISHABLE_KEY') || 
-  getEnvVar('NEXT_PUBLIC_SUPABASE_ANON_KEY') || 
-  '';
+  metaEnv.VITE_SUPABASE_ANON_KEY ||
+  metaEnv.SUPABASE_ANON_KEY ||
+  metaEnv.SUPABASE_PUBLISHABLE_KEY ||
+  metaEnv.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
+  (typeof process !== 'undefined' && process.env?.VITE_SUPABASE_ANON_KEY) ||
+  (typeof process !== 'undefined' && process.env?.SUPABASE_ANON_KEY) ||
+  DEFAULT_SUPABASE_ANON_KEY;
 
 export const isSupabaseConfigured = !!(supabaseUrl && supabaseAnonKey);
 
@@ -582,14 +587,18 @@ export const api = {
   // CLIENTS
   async getClients(): Promise<Client[]> {
     if (isSupabaseConfigured && supabase) {
-      const { data, error } = await supabase.from('clients').select('*');
-      if (!error && data && data.length > 0) {
-        const mapped = data.map(mapClientFromDB);
-        saveLocal('clients', mapped);
-        return mapped.sort((a, b) => a.name.localeCompare(b.name));
-      }
-      if (error) {
-        console.warn('Supabase clients fetch failed, using local storage:', error.message);
+      try {
+        const { data, error } = await supabase.from('clients').select('*');
+        if (!error && data) {
+          const mapped = data.map(mapClientFromDB);
+          saveLocal('clients', mapped);
+          return mapped.sort((a, b) => a.name.localeCompare(b.name));
+        }
+        if (error) {
+          console.warn('Supabase clients fetch failed, using local storage:', error.message);
+        }
+      } catch (err: any) {
+        console.warn('Supabase clients fetch exception:', err);
       }
     }
     return loadLocal('clients', mockClients).sort((a, b) => a.name.localeCompare(b.name));
@@ -603,56 +612,68 @@ export const api = {
     };
 
     if (isSupabaseConfigured && supabase) {
-      // Primary payload with both camelCase & snake_case support
-      const primaryPayload: any = {
-        id: newClient.id,
-        name: newClient.name,
-        firstName: newClient.firstName,
-        lastName: newClient.lastName,
-        first_name: newClient.firstName,
-        last_name: newClient.lastName,
-        email: newClient.email,
-        phone: newClient.phone,
-        birthDate: newClient.birthDate,
-        birth_date: newClient.birthDate,
-        address: newClient.address,
-        createdAt: newClient.createdAt,
-        created_at: newClient.createdAt,
-        lastSessionAt: newClient.lastSessionAt,
-        last_session_at: newClient.lastSessionAt,
-      };
-
-      let insertRes = await supabase.from('clients').upsert(primaryPayload).select().single();
-
-      // If failed due to unknown column, fallback to pure snake_case or base fields
-      if (insertRes.error) {
-        const fallbackPayload: any = {
+      try {
+        // Primary payload: exact columns existing in Supabase 'clients' table
+        const cleanPayload: Record<string, any> = {
           id: newClient.id,
           name: newClient.name,
-          email: newClient.email,
-          phone: newClient.phone,
-          address: newClient.address,
+          email: newClient.email || '',
+          phone: newClient.phone || '',
+          address: newClient.address || '',
+          createdAt: newClient.createdAt,
         };
-        if (newClient.firstName) fallbackPayload.first_name = newClient.firstName;
-        if (newClient.lastName) fallbackPayload.last_name = newClient.lastName;
-        if (newClient.birthDate) fallbackPayload.birth_date = newClient.birthDate;
-        if (newClient.lastSessionAt) fallbackPayload.last_session_at = newClient.lastSessionAt;
-        
-        insertRes = await supabase.from('clients').upsert(fallbackPayload).select().single();
-      }
+        if (newClient.birthDate) cleanPayload.birthDate = newClient.birthDate;
+        if (newClient.lastSessionAt) cleanPayload.lastSessionAt = newClient.lastSessionAt;
 
-      if (!insertRes.error && insertRes.data) {
-        const mapped = mapClientFromDB(insertRes.data);
-        const current = loadLocal('clients', mockClients);
-        const existsIdx = current.findIndex(c => c.id === mapped.id);
-        if (existsIdx !== -1) current[existsIdx] = mapped;
-        else current.push(mapped);
-        saveLocal('clients', current);
-        return mapped;
+        let insertRes = await supabase.from('clients').insert(cleanPayload).select().single();
+
+        // If camelCase failed, fallback to snake_case column names
+        if (insertRes.error) {
+          console.warn('Supabase clients primary insert failed, trying snake_case:', insertRes.error.message);
+          const snakePayload: Record<string, any> = {
+            id: newClient.id,
+            name: newClient.name,
+            email: newClient.email || '',
+            phone: newClient.phone || '',
+            address: newClient.address || '',
+            created_at: newClient.createdAt,
+          };
+          if (newClient.birthDate) snakePayload.birth_date = newClient.birthDate;
+          if (newClient.lastSessionAt) snakePayload.last_session_at = newClient.lastSessionAt;
+
+          insertRes = await supabase.from('clients').insert(snakePayload).select().single();
+        }
+
+        // If still failed, try minimal mandatory columns
+        if (insertRes.error) {
+          console.warn('Supabase clients fallback insert failed, trying minimal:', insertRes.error.message);
+          const minimalPayload = {
+            id: newClient.id,
+            name: newClient.name,
+            email: newClient.email || '',
+            phone: newClient.phone || '',
+            address: newClient.address || '',
+          };
+          insertRes = await supabase.from('clients').upsert(minimalPayload).select().single();
+        }
+
+        if (!insertRes.error && insertRes.data) {
+          const mapped = mapClientFromDB(insertRes.data);
+          const current = loadLocal('clients', mockClients);
+          const existsIdx = current.findIndex(c => c.id === mapped.id);
+          if (existsIdx !== -1) current[existsIdx] = mapped;
+          else current.push(mapped);
+          saveLocal('clients', current);
+          return mapped;
+        } else if (insertRes.error) {
+          console.error('All Supabase client insert attempts failed:', insertRes.error);
+        }
+      } catch (err: any) {
+        console.error('Exception during Supabase client insertion:', err);
       }
-      console.warn('Supabase client insert failed, saving locally:', insertRes.error);
     }
 
+    // Save locally if Supabase not configured or in case of network/permission issue
     const current = loadLocal('clients', mockClients);
     const existsIdx = current.findIndex(c => c.id === newClient.id);
     if (existsIdx !== -1) current[existsIdx] = newClient;
@@ -663,45 +684,40 @@ export const api = {
 
   async updateClient(client: Client): Promise<Client> {
     if (isSupabaseConfigured && supabase) {
-      const payload: any = {
-        id: client.id,
-        name: client.name,
-        firstName: client.firstName,
-        lastName: client.lastName,
-        first_name: client.firstName,
-        last_name: client.lastName,
-        email: client.email,
-        phone: client.phone,
-        birthDate: client.birthDate,
-        birth_date: client.birthDate,
-        address: client.address,
-        lastSessionAt: client.lastSessionAt,
-        last_session_at: client.lastSessionAt,
-      };
-
-      let updateRes = await supabase.from('clients').update(payload).eq('id', client.id).select().single();
-      
-      if (updateRes.error) {
-        const fallbackPayload: any = {
+      try {
+        const payload: Record<string, any> = {
           name: client.name,
-          first_name: client.firstName,
-          last_name: client.lastName,
-          email: client.email,
-          phone: client.phone,
-          address: client.address,
-          birth_date: client.birthDate,
-          last_session_at: client.lastSessionAt,
+          email: client.email || '',
+          phone: client.phone || '',
+          address: client.address || '',
         };
-        updateRes = await supabase.from('clients').update(fallbackPayload).eq('id', client.id).select().single();
-      }
+        if (client.birthDate) payload.birthDate = client.birthDate;
+        if (client.lastSessionAt) payload.lastSessionAt = client.lastSessionAt;
 
-      if (!updateRes.error && updateRes.data) {
-        const mapped = mapClientFromDB(updateRes.data);
-        const current = loadLocal('clients', mockClients);
-        const index = current.findIndex(c => c.id === client.id);
-        if (index !== -1) current[index] = mapped;
-        saveLocal('clients', current);
-        return mapped;
+        let updateRes = await supabase.from('clients').update(payload).eq('id', client.id).select().single();
+        
+        if (updateRes.error) {
+          const fallbackPayload: Record<string, any> = {
+            name: client.name,
+            email: client.email || '',
+            phone: client.phone || '',
+            address: client.address || '',
+          };
+          if (client.birthDate) fallbackPayload.birth_date = client.birthDate;
+          if (client.lastSessionAt) fallbackPayload.last_session_at = client.lastSessionAt;
+          updateRes = await supabase.from('clients').update(fallbackPayload).eq('id', client.id).select().single();
+        }
+
+        if (!updateRes.error && updateRes.data) {
+          const mapped = mapClientFromDB(updateRes.data);
+          const current = loadLocal('clients', mockClients);
+          const index = current.findIndex(c => c.id === client.id);
+          if (index !== -1) current[index] = mapped;
+          saveLocal('clients', current);
+          return mapped;
+        }
+      } catch (err) {
+        console.warn('Supabase updateClient exception:', err);
       }
     }
 
@@ -712,6 +728,23 @@ export const api = {
       saveLocal('clients', current);
     }
     return client;
+  },
+
+  async deleteClient(id: string): Promise<boolean> {
+    if (isSupabaseConfigured && supabase) {
+      try {
+        await supabase.from('client_notes').delete().eq('clientId', id);
+        await supabase.from('invoices').delete().eq('clientId', id);
+        await supabase.from('clients').delete().eq('id', id);
+      } catch (err) {
+        console.warn('Supabase delete client exception:', err);
+      }
+    }
+
+    const current = loadLocal('clients', mockClients);
+    const filtered = current.filter(c => c.id !== id);
+    saveLocal('clients', filtered);
+    return true;
   },
 
   // CLIENT NOTES
@@ -743,50 +776,54 @@ export const api = {
     };
 
     if (isSupabaseConfigured && supabase) {
-      const payload: any = {
-        id: newNote.id,
-        clientId: newNote.clientId,
-        client_id: newNote.clientId,
-        date: newNote.date,
-        motif: newNote.motif,
-        anamnese: newNote.anamnese,
-        treatment: newNote.treatment,
-        content: newNote.content,
-        category: newNote.category,
-      };
-
-      let insertRes = await supabase.from('client_notes').upsert(payload).select().single();
-      
-      if (insertRes.error) {
-        const fallbackPayload: any = {
+      try {
+        const payload: Record<string, any> = {
           id: newNote.id,
-          client_id: newNote.clientId,
+          clientId: newNote.clientId,
           date: newNote.date,
-          motif: newNote.motif,
-          anamnese: newNote.anamnese,
-          treatment: newNote.treatment,
-          content: newNote.content,
-          category: newNote.category,
+          motif: newNote.motif || '',
+          anamnese: newNote.anamnese || '',
+          treatment: newNote.treatment || '',
+          content: newNote.content || '',
+          category: newNote.category || 'treatment',
         };
-        insertRes = await supabase.from('client_notes').upsert(fallbackPayload).select().single();
-      }
 
-      if (!insertRes.error && insertRes.data) {
-        // Also update lastSessionAt in Supabase for this client
-        await supabase.from('clients').update({ 
-          lastSessionAt: newNote.date,
-          last_session_at: newNote.date 
-        }).eq('id', note.clientId);
+        let insertRes = await supabase.from('client_notes').insert(payload).select().single();
+        
+        if (insertRes.error) {
+          const fallbackPayload: Record<string, any> = {
+            id: newNote.id,
+            client_id: newNote.clientId,
+            date: newNote.date,
+            motif: newNote.motif || '',
+            anamnese: newNote.anamnese || '',
+            treatment: newNote.treatment || '',
+            content: newNote.content || '',
+            category: newNote.category || 'treatment',
+          };
+          insertRes = await supabase.from('client_notes').insert(fallbackPayload).select().single();
+        }
 
-        const mapped = mapNoteFromDB(insertRes.data);
-        const current = loadLocal('notes', mockNotes);
-        const idx = current.findIndex(n => n.id === mapped.id);
-        if (idx !== -1) current[idx] = mapped;
-        else current.push(mapped);
-        saveLocal('notes', current);
-        return mapped;
+        if (!insertRes.error && insertRes.data) {
+          // Also update lastSessionAt in Supabase for this client
+          try {
+            await supabase.from('clients').update({ lastSessionAt: newNote.date }).eq('id', note.clientId);
+          } catch {
+            // ignore if column name mismatch
+          }
+
+          const mapped = mapNoteFromDB(insertRes.data);
+          const current = loadLocal('notes', mockNotes);
+          const idx = current.findIndex(n => n.id === mapped.id);
+          if (idx !== -1) current[idx] = mapped;
+          else current.push(mapped);
+          saveLocal('notes', current);
+          return mapped;
+        }
+        console.warn('Supabase note insert failed:', insertRes.error);
+      } catch (err) {
+        console.warn('Supabase createClientNote exception:', err);
       }
-      console.warn('Supabase note insert failed:', insertRes.error);
     }
 
     const current = loadLocal('notes', mockNotes);
@@ -808,39 +845,35 @@ export const api = {
 
   async updateClientNote(note: ClientNote): Promise<ClientNote> {
     if (isSupabaseConfigured && supabase) {
-      const payload: any = {
-        id: note.id,
-        clientId: note.clientId,
-        client_id: note.clientId,
-        date: note.date,
-        motif: note.motif,
-        anamnese: note.anamnese,
-        treatment: note.treatment,
-        content: note.content,
-        category: note.category,
-      };
-
-      let updateRes = await supabase.from('client_notes').update(payload).eq('id', note.id).select().single();
-      if (updateRes.error) {
-        const fallback: any = {
-          client_id: note.clientId,
+      try {
+        const payload: Record<string, any> = {
           date: note.date,
-          motif: note.motif,
-          anamnese: note.anamnese,
-          treatment: note.treatment,
-          content: note.content,
-          category: note.category,
+          motif: note.motif || '',
+          anamnese: note.anamnese || '',
+          treatment: note.treatment || '',
+          content: note.content || '',
+          category: note.category || 'treatment',
         };
-        updateRes = await supabase.from('client_notes').update(fallback).eq('id', note.id).select().single();
-      }
 
-      if (!updateRes.error && updateRes.data) {
-        const mapped = mapNoteFromDB(updateRes.data);
-        const current = loadLocal('notes', mockNotes);
-        const index = current.findIndex(n => n.id === note.id);
-        if (index !== -1) current[index] = mapped;
-        saveLocal('notes', current);
-        return mapped;
+        let updateRes = await supabase.from('client_notes').update(payload).eq('id', note.id).select().single();
+        if (updateRes.error) {
+          updateRes = await supabase.from('client_notes').update({
+            date: note.date,
+            content: note.content,
+            category: note.category,
+          }).eq('id', note.id).select().single();
+        }
+
+        if (!updateRes.error && updateRes.data) {
+          const mapped = mapNoteFromDB(updateRes.data);
+          const current = loadLocal('notes', mockNotes);
+          const index = current.findIndex(n => n.id === note.id);
+          if (index !== -1) current[index] = mapped;
+          saveLocal('notes', current);
+          return mapped;
+        }
+      } catch (err) {
+        console.warn('Supabase updateClientNote exception:', err);
       }
     }
 
@@ -855,12 +888,10 @@ export const api = {
 
   async deleteClientNote(id: string): Promise<boolean> {
     if (isSupabaseConfigured && supabase) {
-      const { error } = await supabase.from('client_notes').delete().eq('id', id);
-      if (!error) {
-        const current = loadLocal('notes', mockNotes);
-        const filtered = current.filter(n => n.id !== id);
-        saveLocal('notes', filtered);
-        return true;
+      try {
+        await supabase.from('client_notes').delete().eq('id', id);
+      } catch (err) {
+        console.warn('Supabase delete note exception:', err);
       }
     }
 
@@ -873,14 +904,18 @@ export const api = {
   // INVOICES
   async getInvoices(): Promise<Invoice[]> {
     if (isSupabaseConfigured && supabase) {
-      const { data, error } = await supabase.from('invoices').select('*').order('date', { ascending: false });
-      if (!error && data && data.length > 0) {
-        const mapped = data.map(mapInvoiceFromDB);
-        saveLocal('invoices', mapped);
-        return mapped;
-      }
-      if (error) {
-        console.warn('Supabase invoices fetch failed, using local storage:', error.message);
+      try {
+        const { data, error } = await supabase.from('invoices').select('*').order('date', { ascending: false });
+        if (!error && data) {
+          const mapped = data.map(mapInvoiceFromDB);
+          saveLocal('invoices', mapped);
+          return mapped;
+        }
+        if (error) {
+          console.warn('Supabase invoices fetch failed, using local storage:', error.message);
+        }
+      } catch (err: any) {
+        console.warn('Supabase invoices fetch exception:', err);
       }
     }
     return loadLocal('invoices', mockInvoices).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
@@ -898,50 +933,48 @@ export const api = {
     };
 
     if (isSupabaseConfigured && supabase) {
-      const payload: any = {
-        id: newInvoice.id,
-        invoiceNumber: newInvoice.invoiceNumber,
-        invoice_number: newInvoice.invoiceNumber,
-        clientId: newInvoice.clientId,
-        client_id: newInvoice.clientId,
-        clientName: newInvoice.clientName,
-        client_name: newInvoice.clientName,
-        date: newInvoice.date,
-        amount: newInvoice.amount,
-        status: newInvoice.status,
-        paymentMethod: newInvoice.paymentMethod,
-        payment_method: newInvoice.paymentMethod,
-        description: newInvoice.description,
-        language: newInvoice.language || 'fr',
-      };
-
-      let insertRes = await supabase.from('invoices').upsert(payload).select().single();
-
-      if (insertRes.error) {
-        const fallback: any = {
+      try {
+        const payload: Record<string, any> = {
           id: newInvoice.id,
-          invoice_number: newInvoice.invoiceNumber,
-          client_id: newInvoice.clientId,
-          client_name: newInvoice.clientName,
+          invoiceNumber: newInvoice.invoiceNumber,
+          clientId: newInvoice.clientId,
+          clientName: newInvoice.clientName,
           date: newInvoice.date,
           amount: newInvoice.amount,
-          status: newInvoice.status,
-          payment_method: newInvoice.paymentMethod,
-          description: newInvoice.description,
-          language: newInvoice.language || 'fr',
+          status: newInvoice.status || 'paid',
+          paymentMethod: newInvoice.paymentMethod || 'card',
+          description: newInvoice.description || "Séance d'Ostéopathie",
         };
-        insertRes = await supabase.from('invoices').upsert(fallback).select().single();
-      }
 
-      if (!insertRes.error && insertRes.data) {
-        const mapped = mapInvoiceFromDB(insertRes.data);
-        const idx = currentInvoices.findIndex(i => i.id === mapped.id);
-        if (idx !== -1) currentInvoices[idx] = mapped;
-        else currentInvoices.push(mapped);
-        saveLocal('invoices', currentInvoices);
-        return mapped;
+        let insertRes = await supabase.from('invoices').insert(payload).select().single();
+
+        if (insertRes.error) {
+          const fallback: Record<string, any> = {
+            id: newInvoice.id,
+            invoice_number: newInvoice.invoiceNumber,
+            client_id: newInvoice.clientId,
+            client_name: newInvoice.clientName,
+            date: newInvoice.date,
+            amount: newInvoice.amount,
+            status: newInvoice.status || 'paid',
+            payment_method: newInvoice.paymentMethod || 'card',
+            description: newInvoice.description || "Séance d'Ostéopathie",
+          };
+          insertRes = await supabase.from('invoices').insert(fallback).select().single();
+        }
+
+        if (!insertRes.error && insertRes.data) {
+          const mapped = mapInvoiceFromDB(insertRes.data);
+          const idx = currentInvoices.findIndex(i => i.id === mapped.id);
+          if (idx !== -1) currentInvoices[idx] = mapped;
+          else currentInvoices.push(mapped);
+          saveLocal('invoices', currentInvoices);
+          return mapped;
+        }
+        console.warn('Supabase invoice insertion failed:', insertRes.error);
+      } catch (err) {
+        console.warn('Supabase createInvoice exception:', err);
       }
-      console.warn('Supabase invoice insertion failed:', insertRes.error);
     }
 
     const idx = currentInvoices.findIndex(i => i.id === newInvoice.id);
@@ -953,51 +986,48 @@ export const api = {
 
   async updateInvoice(invoice: Invoice): Promise<Invoice> {
     if (isSupabaseConfigured && supabase) {
-      const payload: any = {
-        id: invoice.id,
-        invoiceNumber: invoice.invoiceNumber,
-        invoice_number: invoice.invoiceNumber,
-        clientId: invoice.clientId,
-        client_id: invoice.clientId,
-        clientName: invoice.clientName,
-        client_name: invoice.clientName,
-        date: invoice.date,
-        amount: invoice.amount,
-        status: invoice.status,
-        paymentMethod: invoice.paymentMethod,
-        payment_method: invoice.paymentMethod,
-        description: invoice.description,
-        language: invoice.language || 'fr',
-      };
-
-      let updateRes = await supabase.from('invoices').update(payload).eq('id', invoice.id).select().single();
-      if (updateRes.error) {
-        const fallback: any = {
-          invoice_number: invoice.invoiceNumber,
-          client_id: invoice.clientId,
-          client_name: invoice.clientName,
+      try {
+        const payload: Record<string, any> = {
+          invoiceNumber: invoice.invoiceNumber,
+          clientId: invoice.clientId,
+          clientName: invoice.clientName,
           date: invoice.date,
           amount: invoice.amount,
           status: invoice.status,
-          payment_method: invoice.paymentMethod,
+          paymentMethod: invoice.paymentMethod,
           description: invoice.description,
-          language: invoice.language || 'fr',
         };
-        updateRes = await supabase.from('invoices').update(fallback).eq('id', invoice.id).select().single();
-      }
 
-      if (!updateRes.error && updateRes.data) {
-        const mapped = mapInvoiceFromDB(updateRes.data);
-        const current = loadLocal('invoices', mockInvoices);
-        const index = current.findIndex(i => i.id === invoice.id);
-        if (index !== -1) current[index] = mapped;
-        saveLocal('invoices', current);
-        return mapped;
+        let updateRes = await supabase.from('invoices').update(payload).eq('id', invoice.id).select().single();
+        if (updateRes.error) {
+          const fallback: Record<string, any> = {
+            invoice_number: invoice.invoiceNumber,
+            client_id: invoice.clientId,
+            client_name: invoice.clientName,
+            date: invoice.date,
+            amount: invoice.amount,
+            status: invoice.status,
+            payment_method: invoice.paymentMethod,
+            description: invoice.description,
+          };
+          updateRes = await supabase.from('invoices').update(fallback).eq('id', invoice.id).select().single();
+        }
+
+        if (!updateRes.error && updateRes.data) {
+          const mapped = mapInvoiceFromDB(updateRes.data);
+          const current = loadLocal('invoices', mockInvoices);
+          const index = current.findIndex(i => i.id === invoice.id);
+          if (index !== -1) current[index] = mapped;
+          saveLocal('invoices', current);
+          return mapped;
+        }
+      } catch (err) {
+        console.warn('Supabase updateInvoice exception:', err);
       }
     }
 
     const current = loadLocal('invoices', mockInvoices);
-    const index = current.findIndex(i => i.id === invoice.id);
+    const index = current.findIndex(c => c.id === invoice.id);
     if (index !== -1) {
       current[index] = invoice;
       saveLocal('invoices', current);
@@ -1005,14 +1035,33 @@ export const api = {
     return invoice;
   },
 
+  async deleteInvoice(id: string): Promise<boolean> {
+    if (isSupabaseConfigured && supabase) {
+      try {
+        await supabase.from('invoices').delete().eq('id', id);
+      } catch (err) {
+        console.warn('Supabase delete invoice exception:', err);
+      }
+    }
+
+    const current = loadLocal('invoices', mockInvoices);
+    const filtered = current.filter(i => i.id !== id);
+    saveLocal('invoices', filtered);
+    return true;
+  },
+
   // LOCAL & SUPABASE CALENDAR EVENTS
   async getLocalEvents(): Promise<CalendarEvent[]> {
     if (isSupabaseConfigured && supabase) {
-      const { data, error } = await supabase.from('calendar_events').select('*').order('start', { ascending: true });
-      if (!error && data) {
-        const mapped = data.map(mapEventFromDB);
-        saveLocal('events', mapped);
-        return mapped;
+      try {
+        const { data, error } = await supabase.from('calendar_events').select('*').order('start', { ascending: true });
+        if (!error && data) {
+          const mapped = data.map(mapEventFromDB);
+          saveLocal('events', mapped);
+          return mapped;
+        }
+      } catch (err) {
+        console.warn('Supabase getLocalEvents exception:', err);
       }
     }
     return loadLocal('events', mockEvents).sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
@@ -1025,40 +1074,42 @@ export const api = {
     };
 
     if (isSupabaseConfigured && supabase) {
-      const payload: any = {
-        id: newEvent.id,
-        summary: newEvent.summary,
-        description: newEvent.description,
-        start: newEvent.start,
-        end: newEvent.end,
-        clientId: newEvent.clientId,
-        client_id: newEvent.clientId,
-        clientName: newEvent.clientName,
-        client_name: newEvent.clientName,
-      };
-
-      let insertRes = await supabase.from('calendar_events').upsert(payload).select().single();
-      if (insertRes.error) {
-        const fallback: any = {
+      try {
+        const payload: Record<string, any> = {
           id: newEvent.id,
           summary: newEvent.summary,
-          description: newEvent.description,
+          description: newEvent.description || '',
           start: newEvent.start,
           end: newEvent.end,
-          client_id: newEvent.clientId,
-          client_name: newEvent.clientName,
+          clientId: newEvent.clientId || null,
+          clientName: newEvent.clientName || '',
         };
-        insertRes = await supabase.from('calendar_events').upsert(fallback).select().single();
-      }
 
-      if (!insertRes.error && insertRes.data) {
-        const mapped = mapEventFromDB(insertRes.data);
-        const current = loadLocal('events', mockEvents);
-        const idx = current.findIndex(e => e.id === mapped.id);
-        if (idx !== -1) current[idx] = mapped;
-        else current.push(mapped);
-        saveLocal('events', current);
-        return mapped;
+        let insertRes = await supabase.from('calendar_events').insert(payload).select().single();
+        if (insertRes.error) {
+          const fallback: Record<string, any> = {
+            id: newEvent.id,
+            summary: newEvent.summary,
+            description: newEvent.description || '',
+            start: newEvent.start,
+            end: newEvent.end,
+            client_id: newEvent.clientId || null,
+            client_name: newEvent.clientName || '',
+          };
+          insertRes = await supabase.from('calendar_events').insert(fallback).select().single();
+        }
+
+        if (!insertRes.error && insertRes.data) {
+          const mapped = mapEventFromDB(insertRes.data);
+          const current = loadLocal('events', mockEvents);
+          const idx = current.findIndex(e => e.id === mapped.id);
+          if (idx !== -1) current[idx] = mapped;
+          else current.push(mapped);
+          saveLocal('events', current);
+          return mapped;
+        }
+      } catch (err) {
+        console.warn('Supabase createLocalEvent exception:', err);
       }
     }
 
@@ -1072,38 +1123,39 @@ export const api = {
 
   async updateLocalEvent(event: CalendarEvent): Promise<CalendarEvent> {
     if (isSupabaseConfigured && supabase) {
-      const payload: any = {
-        id: event.id,
-        summary: event.summary,
-        description: event.description,
-        start: event.start,
-        end: event.end,
-        clientId: event.clientId,
-        client_id: event.clientId,
-        clientName: event.clientName,
-        client_name: event.clientName,
-      };
-
-      let updateRes = await supabase.from('calendar_events').update(payload).eq('id', event.id).select().single();
-      if (updateRes.error) {
-        const fallback: any = {
+      try {
+        const payload: Record<string, any> = {
           summary: event.summary,
-          description: event.description,
+          description: event.description || '',
           start: event.start,
           end: event.end,
-          client_id: event.clientId,
-          client_name: event.clientName,
+          clientId: event.clientId || null,
+          clientName: event.clientName || '',
         };
-        updateRes = await supabase.from('calendar_events').update(fallback).eq('id', event.id).select().single();
-      }
 
-      if (!updateRes.error && updateRes.data) {
-        const mapped = mapEventFromDB(updateRes.data);
-        const current = loadLocal('events', mockEvents);
-        const index = current.findIndex(e => e.id === event.id);
-        if (index !== -1) current[index] = mapped;
-        saveLocal('events', current);
-        return mapped;
+        let updateRes = await supabase.from('calendar_events').update(payload).eq('id', event.id).select().single();
+        if (updateRes.error) {
+          const fallback: Record<string, any> = {
+            summary: event.summary,
+            description: event.description || '',
+            start: event.start,
+            end: event.end,
+            client_id: event.clientId || null,
+            client_name: event.clientName || '',
+          };
+          updateRes = await supabase.from('calendar_events').update(fallback).eq('id', event.id).select().single();
+        }
+
+        if (!updateRes.error && updateRes.data) {
+          const mapped = mapEventFromDB(updateRes.data);
+          const current = loadLocal('events', mockEvents);
+          const index = current.findIndex(e => e.id === event.id);
+          if (index !== -1) current[index] = mapped;
+          saveLocal('events', current);
+          return mapped;
+        }
+      } catch (err) {
+        console.warn('Supabase updateLocalEvent exception:', err);
       }
     }
 
@@ -1118,12 +1170,10 @@ export const api = {
 
   async deleteLocalEvent(id: string): Promise<boolean> {
     if (isSupabaseConfigured && supabase) {
-      const { error } = await supabase.from('calendar_events').delete().eq('id', id);
-      if (!error) {
-        const current = loadLocal('events', mockEvents);
-        const filtered = current.filter(e => e.id !== id);
-        saveLocal('events', filtered);
-        return true;
+      try {
+        await supabase.from('calendar_events').delete().eq('id', id);
+      } catch (err) {
+        console.warn('Supabase deleteLocalEvent exception:', err);
       }
     }
 

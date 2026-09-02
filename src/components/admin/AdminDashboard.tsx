@@ -218,11 +218,40 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
         birthDate: newClient.birthDate,
         address: newClient.address,
       });
-      setClients(prev => [...prev, created].sort((a, b) => a.name.localeCompare(b.name)));
+      setClients(prev => {
+        const filtered = prev.filter(c => c.id !== created.id);
+        return [...filtered, created].sort((a, b) => a.name.localeCompare(b.name));
+      });
+      setSelectedClient(created);
       setIsAddClientOpen(false);
       setNewClient({ firstName: '', lastName: '', email: '', phone: '', birthDate: '', address: '' });
     } catch (err) {
       console.error('Failed to create client:', err);
+    }
+  };
+
+  // Delete Client Handler
+  const handleDeleteClient = async (clientId: string) => {
+    const clientToDelete = clients.find(c => c.id === clientId);
+    const clientName = clientToDelete ? clientToDelete.name : '';
+    const confirmMessage = lang === 'fr'
+      ? `Êtes-vous sûr de vouloir supprimer définitivement le patient ${clientName} ?`
+      : lang === 'es'
+      ? `¿Está seguro de que desea eliminar al paciente ${clientName}?`
+      : `Are you sure you want to delete patient ${clientName}?`;
+
+    if (!window.confirm(confirmMessage)) return;
+
+    try {
+      await api.deleteClient(clientId);
+      setClients(prev => prev.filter(c => c.id !== clientId));
+      if (selectedClient?.id === clientId) {
+        setSelectedClient(null);
+      }
+      setIsEditClientOpen(false);
+      setEditingClient(null);
+    } catch (err) {
+      console.error('Failed to delete client:', err);
     }
   };
 
@@ -1102,17 +1131,20 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                 {filteredClients.map(c => {
                   const isSelected = selectedClient?.id === c.id;
                   return (
-                    <button
+                    <div
                       key={c.id}
-                      onClick={() => setSelectedClient(c)}
-                      className={`w-full flex items-center justify-between p-3 rounded-2xl text-left transition-all border ${
+                      className={`group w-full flex items-center justify-between p-3 rounded-2xl transition-all border ${
                         isSelected 
                           ? 'bg-primary/5 border-primary/20 shadow-sm' 
                           : 'border-transparent hover:bg-black/5'
                       }`}
                     >
-                      <div className="flex items-center gap-3 overflow-hidden">
-                        <div className={`w-9 h-9 rounded-full flex items-center justify-center text-xs font-bold ${
+                      <button
+                        type="button"
+                        onClick={() => setSelectedClient(c)}
+                        className="flex-1 flex items-center gap-3 overflow-hidden text-left"
+                      >
+                        <div className={`w-9 h-9 rounded-full flex-shrink-0 flex items-center justify-center text-xs font-bold ${
                           isSelected ? 'bg-primary text-white' : 'bg-primary/10 text-primary'
                         }`}>
                           {c.name.charAt(0)}
@@ -1121,9 +1153,22 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                           <p className="text-xs font-bold truncate">{c.name}</p>
                           <p className="text-[10px] text-gray-500 truncate">{c.phone}</p>
                         </div>
+                      </button>
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDeleteClient(c.id);
+                          }}
+                          className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg opacity-0 group-hover:opacity-100 sm:opacity-0 sm:group-hover:opacity-100 opacity-70 transition-all"
+                          title={lang === 'fr' ? "Supprimer le patient" : "Delete patient"}
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                        <ChevronRight size={14} className={isSelected ? 'text-primary' : 'text-gray-300'} />
                       </div>
-                      <ChevronRight size={14} className={isSelected ? 'text-primary' : 'text-gray-300'} />
-                    </button>
+                    </div>
                   );
                 })}
                 {filteredClients.length === 0 && (
@@ -1158,6 +1203,13 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                               title={lang === 'fr' ? "Modifier la fiche du patient" : lang === 'es' ? "Editar ficha del paciente" : "Edit patient file"}
                             >
                               <Pencil size={14} />
+                            </button>
+                            <button
+                              onClick={() => handleDeleteClient(selectedClient.id)}
+                              className="p-1 hover:bg-red-50 rounded-lg text-gray-400 hover:text-red-500 transition-all"
+                              title={lang === 'fr' ? "Supprimer ce patient" : lang === 'es' ? "Eliminar paciente" : "Delete patient"}
+                            >
+                              <Trash2 size={14} />
                             </button>
                           </div>
                           <p className="text-xs text-gray-500 mt-1">
@@ -2696,23 +2748,34 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                   />
                 </div>
 
-                <div className="flex gap-3 pt-4">
+                <div className="flex items-center justify-between pt-4 gap-3">
                   <button
                     type="button"
-                    onClick={() => {
-                      setIsEditClientOpen(false);
-                      setEditingClient(null);
-                    }}
-                    className="flex-1 py-3 bg-secondary text-gray-600 rounded-2xl text-xs font-bold uppercase tracking-wider hover:bg-black/5 transition-all"
+                    onClick={() => handleDeleteClient(editingClient.id)}
+                    className="px-3 py-3 bg-red-50 hover:bg-red-100 text-red-600 rounded-2xl text-xs font-bold transition-all flex items-center gap-1.5"
+                    title={lang === 'fr' ? 'Supprimer ce patient' : 'Delete patient'}
                   >
-                    {lang === 'fr' ? 'Annuler' : lang === 'es' ? 'Cancelar' : 'Cancel'}
+                    <Trash2 size={14} />
+                    <span>{lang === 'fr' ? 'Supprimer' : 'Delete'}</span>
                   </button>
-                  <button
-                    type="submit"
-                    className="flex-1 py-3 bg-primary text-white rounded-2xl text-xs font-bold uppercase tracking-wider hover:bg-primary/95 transition-all shadow-md"
-                  >
-                    {lang === 'fr' ? 'Enregistrer' : lang === 'es' ? 'Guardar' : 'Save'}
-                  </button>
+                  <div className="flex gap-2 flex-1 justify-end">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsEditClientOpen(false);
+                        setEditingClient(null);
+                      }}
+                      className="px-4 py-3 bg-secondary text-gray-600 rounded-2xl text-xs font-bold uppercase tracking-wider hover:bg-black/5 transition-all"
+                    >
+                      {lang === 'fr' ? 'Annuler' : lang === 'es' ? 'Cancelar' : 'Cancel'}
+                    </button>
+                    <button
+                      type="submit"
+                      className="px-5 py-3 bg-primary text-white rounded-2xl text-xs font-bold uppercase tracking-wider hover:bg-primary/95 transition-all shadow-md"
+                    >
+                      {lang === 'fr' ? 'Enregistrer' : lang === 'es' ? 'Guardar' : 'Save'}
+                    </button>
+                  </div>
                 </div>
               </form>
             </motion.div>
