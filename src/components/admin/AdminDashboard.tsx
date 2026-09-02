@@ -12,8 +12,6 @@ import { api, isSupabaseConfigured, SUPABASE_SQL_SETUP } from '../../lib/supabas
 import SpineLogo from '../SpineLogo';
 import { useTranslation } from '../../App';
 import { Language, translations } from '../../translations';
-import { jsPDF } from 'jspdf';
-import html2canvas from 'html2canvas';
 
 // Recharts imports for beautiful financial analytics
 import { 
@@ -55,7 +53,6 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
   const [calendarViewMode, setCalendarViewMode] = useState<'grid' | 'list'>('grid');
   const [currentCalendarDate, setCurrentCalendarDate] = useState(new Date());
   const [isSyncing, setIsSyncing] = useState(false);
-  const [isExporting, setIsExporting] = useState(false);
   
   // Modals & Selected states
   const [selectedClient, setSelectedClient] = useState<Client | null>(null);
@@ -752,62 +749,6 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
   };
 
   const chartData = getRevenueChartData();
-
-  const handleExportPDF = async (elementId: string, filename: string) => {
-    const element = document.getElementById(elementId);
-    if (!element || isExporting) return;
-
-    setIsExporting(true);
-    try {
-      // Delay to ensure any animations or layout shifts are settled
-      await new Promise(resolve => setTimeout(resolve, 500));
-
-      const canvas = await html2canvas(element, {
-        scale: 2,
-        useCORS: true,
-        allowTaint: true,
-        logging: false,
-        backgroundColor: '#ffffff',
-        imageTimeout: 20000,
-        // Ensure we capture it with a desktop-like width to avoid responsive shifts
-        windowWidth: 1024,
-      });
-      
-      const imgData = canvas.toDataURL('image/jpeg', 0.95);
-      const pdf = new jsPDF({
-        orientation: 'portrait',
-        unit: 'mm',
-        format: 'a4',
-        compress: true
-      });
-
-      const pdfWidth = pdf.internal.pageSize.getWidth();
-      const pdfHeight = pdf.internal.pageSize.getHeight();
-      
-      const imgProps = pdf.getImageProperties(imgData);
-      const ratio = imgProps.width / imgProps.height;
-      
-      // Standard A4 margins (10mm)
-      const margin = 10;
-      const contentWidth = pdfWidth - (2 * margin);
-      const contentHeight = contentWidth / ratio;
-
-      // Center the content on the page
-      const xOffset = margin;
-      const yOffset = margin;
-      
-      pdf.addImage(imgData, 'JPEG', xOffset, yOffset, contentWidth, contentHeight);
-      pdf.save(`${filename}.pdf`);
-    } catch (error) {
-      console.error('Error generating PDF:', error);
-      // Fallback message with clearer instructions
-      alert(lang === 'fr' 
-        ? 'La génération du PDF a échoué sur ce navigateur (souvent dû à des restrictions de sécurité sur iPhone/Safari). \n\nAstuce : Cliquez sur "Imprimer" puis choisissez "Enregistrer comme PDF".' 
-        : 'PDF generation failed on this browser. \n\nTip: Click "Print" and select "Save as PDF" instead.');
-    } finally {
-      setIsExporting(false);
-    }
-  };
 
   // Filter clients based on search query
   const filteredClients = clients.filter(c => 
@@ -3460,21 +3401,6 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
 
                 <div className="flex items-center gap-3">
                   <button
-                    disabled={isExporting}
-                    onClick={async () => {
-                      const filename = `FAC-${selectedInvoiceForPrint.invoiceNumber}-${selectedInvoiceForPrint.clientName.replace(/\s+/g, '_')}`;
-                      await handleExportPDF('receipt-print-area', filename);
-                    }}
-                    className={`flex items-center gap-2 px-4 py-2 bg-secondary text-gray-700 rounded-xl text-xs font-bold uppercase tracking-wider transition-all shadow-sm active:scale-95 ${isExporting ? 'opacity-50 cursor-not-allowed' : 'hover:bg-gray-200'}`}
-                  >
-                    {isExporting ? (
-                      <RefreshCw size={14} className="animate-spin" />
-                    ) : (
-                      <Download size={14} />
-                    )}
-                    {isExporting ? (lang === 'fr' ? 'Export...' : 'Export...') : 'PDF'}
-                  </button>
-                  <button
                     onClick={() => {
                       setTimeout(() => {
                         window.print();
@@ -3613,28 +3539,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
 
                 <div className="flex items-center gap-3">
                   <button
-                    disabled={isExporting}
-                    onClick={async () => {
-                      const period = selectedRecapForPrint.periodType === 'annual' 
-                        ? selectedRecapForPrint.year 
-                        : `${getMonthsList(lang)[selectedRecapForPrint.month]}_${selectedRecapForPrint.year}`;
-                      await handleExportPDF('recap-print-area', `RECAP_${period}`);
-                    }}
-                    className={`flex items-center gap-2 px-4 py-2 bg-secondary text-gray-700 rounded-xl text-xs font-bold uppercase tracking-wider transition-all shadow-sm active:scale-95 ${isExporting ? 'opacity-50 cursor-not-allowed' : 'hover:bg-gray-200'}`}
-                  >
-                    {isExporting ? (
-                      <RefreshCw size={14} className="animate-spin" />
-                    ) : (
-                      <Download size={14} />
-                    )}
-                    {isExporting ? (lang === 'fr' ? 'Export...' : 'Export...') : 'PDF'}
-                  </button>
-                  <button
-                    onClick={() => {
-                      setTimeout(() => {
-                        window.print();
-                      }, 50);
-                    }}
+                    onClick={() => window.print()}
                     className="flex items-center gap-2 px-4 py-2 bg-primary text-white rounded-xl text-xs font-bold uppercase tracking-wider hover:bg-primary/95 transition-all shadow"
                   >
                     <Printer size={14} /> {lang === 'fr' ? 'Imprimer' : lang === 'es' ? 'Imprimir' : 'Print'}

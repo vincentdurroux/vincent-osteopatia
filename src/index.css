@@ -13,83 +13,81 @@
 @media print {
   @page {
     size: A4 portrait;
-    margin: 0;
+    margin: 15mm;
   }
   
-  /* 1. Reset Global Layout */
-  html, body, #root {
-    margin: 0 !important;
-    padding: 0 !important;
+  /* Hide ALL UI elements and non-printable parents */
+  aside, 
+  main, 
+  nav, 
+  footer, 
+  button, 
+  .print\:hidden,
+  .bg-black\/60,
+  [role="dialog"] > div:first-child {
+    display: none !important;
+  }
+
+  /* Reset the entire app hierarchy to be a simple block flow */
+  html, body, #root, #root > div {
+    display: block !important;
+    position: static !important;
     height: auto !important;
     min-height: 0 !important;
     overflow: visible !important;
     background: white !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    width: 100% !important;
   }
 
-  /* 2. Hide Everything that is not for printing */
-  /* We use display: none to completely remove from flow */
-  aside, 
-  main, 
-  .print\:hidden, 
-  .bg-black\/60, 
-  [role="dialog"] > div:first-child,
-  button {
-    display: none !important;
-  }
-
-  /* 3. Reset Fixed/Absolute Containers */
-  /* This targets the dashboard wrapper and the modal wrappers */
-  .fixed, .absolute {
+  /* Target the invoice modal container specifically */
+  .fixed.inset-0.z-\[100\] {
     position: static !important;
     display: block !important;
     width: 100% !important;
     height: auto !important;
     background: white !important;
-    overflow: visible !important;
     padding: 0 !important;
     margin: 0 !important;
-    opacity: 1 !important;
-    transform: none !important;
-    z-index: auto !important;
-    box-shadow: none !important;
+    overflow: visible !important;
   }
 
-  /* 4. Target the specific print areas */
+  /* The actual invoice card/container */
   #receipt-print-area, 
   #recap-print-area {
     display: block !important;
     width: 100% !important;
-    padding: 15mm !important;
     margin: 0 !important;
+    padding: 0 !important;
     background: white !important;
-    box-sizing: border-box !important;
+    page-break-after: avoid !important;
+    page-break-before: avoid !important;
   }
 
-  /* 5. Typography and density */
-  .space-y-8 { gap: 1.5rem !important; }
-  .space-y-6 { gap: 1rem !important; }
-  .space-y-4 { gap: 0.75rem !important; }
-  
-  table { 
-    width: 100% !important; 
-    font-size: 10pt !important; 
-    border-collapse: collapse !important; 
-  }
-  th, td { 
-    padding: 8px 0 !important; 
-    border-bottom: 1px solid #f0f0f0 !important; 
-  }
-
-  /* 6. Ensure colors are printed */
+  /* Force typography and colors */
   * {
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;
+    text-shadow: none !important;
+    box-shadow: none !important;
   }
-  
-  /* Force the patient block background */
+
+  /* Remove UI-specific styling for paper */
+  .rounded-3xl, .rounded-2xl { border-radius: 0 !important; }
+  .shadow-2xl, .shadow-sm, .shadow { box-shadow: none !important; }
+  .border { border: none !important; }
+  .border-b { border-bottom: 1px solid #eee !important; }
+
+  /* Ensure the patient block background is visible */
   .bg-\[\#f4f4ec\] {
     background-color: #f4f4ec !important;
   }
+
+  /* Optimize spacing */
+  .space-y-8 { gap: 1.5rem !important; }
+  .space-y-6 { gap: 1rem !important; }
+  .space-y-4 { gap: 0.5rem !important; }
 }
 
 body {
