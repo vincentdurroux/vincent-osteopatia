@@ -771,14 +771,6 @@ export default function App() {
     if (typeof window !== 'undefined' && window.location.search.includes('admin=true')) {
       localStorage.setItem('vincent-osteopatia-admin', 'true');
       setIsAdminAuthorized(true);
-      // Clean up search params from the URL address bar seamlessly
-      try {
-        const url = new URL(window.location.href);
-        url.searchParams.delete('admin');
-        window.history.replaceState({}, '', url.pathname + url.search);
-      } catch (e) {
-        console.error(e);
-      }
     }
   }, []);
 

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Users, Calendar, FileText, TrendingUp, Plus, Search, Trash2, 
@@ -30,6 +30,27 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
   const { lang, setLang, t } = useTranslation();
   const [receiptLang, setReceiptLang] = useState<Language>('fr');
   const [activeTab, setActiveTab] = useState<TabType>('overview');
+  
+  const [isScrolled, setIsScrolled] = useState(false);
+  const mainRef = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    const mainElement = mainRef.current;
+    if (!mainElement) return;
+
+    const handleScroll = () => {
+      if (mainElement.scrollTop > 40) {
+        setIsScrolled(true);
+      } else {
+        setIsScrolled(false);
+      }
+    };
+
+    mainElement.addEventListener('scroll', handleScroll, { passive: true });
+    return () => {
+      mainElement.removeEventListener('scroll', handleScroll);
+    };
+  }, []);
   const [clients, setClients] = useState<Client[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [localEvents, setLocalEvents] = useState<CalendarEvent[]>([]);
@@ -490,10 +511,12 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
     <div className="fixed inset-0 z-[80] bg-[#fdfdfb] text-gray-800 flex flex-col md:flex-row overflow-hidden">
       
       {/* SIDEBAR */}
-      <aside className="w-full md:w-64 bg-[#f4f4ec] border-b md:border-b-0 md:border-r border-black/5 p-6 flex flex-col justify-between shrink-0">
-        <div className="flex flex-col gap-8">
+      <aside className={`w-full md:w-64 bg-[#f4f4ec] border-b md:border-b-0 md:border-r border-black/5 flex flex-col justify-between shrink-0 transition-all duration-300 ${
+        isScrolled ? 'p-3 pb-1 md:p-6' : 'p-6'
+      }`}>
+        <div className={`flex flex-col transition-all duration-300 ${isScrolled ? 'gap-2 md:gap-8' : 'gap-8'}`}>
           {/* Logo Section */}
-          <div className="flex items-center gap-3">
+          <div className={`items-center gap-3 transition-all duration-300 ${isScrolled ? 'hidden md:flex' : 'flex'}`}>
             <div className="w-10 h-10 bg-primary rounded-full flex items-center justify-center text-white shrink-0">
               <SpineLogo size={22} />
             </div>
@@ -504,7 +527,9 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
           </div>
 
           {/* Practitioner Profile Widget */}
-          <div className="bg-white/50 backdrop-blur-sm p-4 rounded-2xl border border-black/5 flex items-center gap-3">
+          <div className={`bg-white/50 backdrop-blur-sm p-4 rounded-2xl border border-black/5 items-center gap-3 transition-all duration-300 ${
+            isScrolled ? 'hidden md:flex' : 'flex'
+          }`}>
             <div className="w-10 h-10 bg-primary/15 rounded-full flex items-center justify-center text-primary font-bold">
               VD
             </div>
@@ -516,38 +541,10 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
             </div>
           </div>
 
-          {/* Navigation Items */}
-          <nav className="flex flex-row md:flex-col gap-1 overflow-x-auto md:overflow-x-visible pb-2 md:pb-0 scrollbar-none">
-            {[
-              { id: 'overview', label: t.admin.tabs.overview, icon: TrendingUp },
-              { id: 'clients', label: t.admin.tabs.clients, icon: Users },
-              { id: 'calendar', label: t.admin.tabs.calendar, icon: Calendar },
-              { id: 'billing', label: t.admin.tabs.billing, icon: FileText },
-            ].map(item => {
-              const Icon = item.icon;
-              const isActive = activeTab === item.id;
-              return (
-                <button
-                  key={item.id}
-                  onClick={() => setActiveTab(item.id as TabType)}
-                  className={`flex items-center gap-3 px-4 py-3 rounded-xl text-xs font-semibold uppercase tracking-wider transition-all whitespace-nowrap md:w-full ${
-                    isActive 
-                      ? 'bg-primary text-white shadow-md shadow-primary/10' 
-                      : 'text-gray-600 hover:bg-black/5'
-                  }`}
-                >
-                  <Icon size={16} />
-                  <span>{item.label}</span>
-                </button>
-              );
-            })}
-          </nav>
-        </div>
-
-        {/* Footer actions of Sidebar */}
-        <div className="flex flex-col gap-3 mt-6 pt-4 border-t border-black/5">
-          {/* Admin Language Selector */}
-          <div className="flex items-center justify-between px-2 pb-1">
+          {/* Admin Language Selector (Moved to Top) */}
+          <div className={`flex items-center justify-between px-2 pb-1 transition-all duration-300 ${
+            isScrolled ? 'hidden md:flex' : 'flex'
+          }`}>
             <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Langue / Idioma</span>
             <div className="flex items-center gap-1 bg-white/60 p-1 rounded-xl border border-black/5">
               {(['fr', 'en', 'es'] as const).map((l) => (
@@ -567,6 +564,42 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
             </div>
           </div>
 
+          {/* Navigation Items */}
+          <nav className="flex flex-row md:flex-col gap-1 overflow-x-auto md:overflow-x-visible pb-1 md:pb-0 scrollbar-none">
+            {[
+              { id: 'overview', label: t.admin.tabs.overview, icon: TrendingUp },
+              { id: 'clients', label: t.admin.tabs.clients, icon: Users },
+              { id: 'calendar', label: t.admin.tabs.calendar, icon: Calendar },
+              { id: 'billing', label: t.admin.tabs.billing, icon: FileText },
+            ].map(item => {
+              const Icon = item.icon;
+              const isActive = activeTab === item.id;
+              return (
+                <button
+                  key={item.id}
+                  onClick={() => setActiveTab(item.id as TabType)}
+                  className={`flex items-center gap-2 md:gap-3 rounded-xl transition-all whitespace-nowrap md:w-full ${
+                    isScrolled 
+                      ? 'px-3 py-1.5 text-[11px] rounded-lg md:px-4 md:py-3 md:text-xs md:rounded-xl' 
+                      : 'px-4 py-3 rounded-xl text-xs'
+                  } font-semibold uppercase tracking-wider ${
+                    isActive 
+                      ? 'bg-primary text-white shadow-md shadow-primary/10' 
+                      : 'text-gray-600 hover:bg-black/5'
+                  }`}
+                >
+                  <Icon size={16} />
+                  <span>{item.label}</span>
+                </button>
+              );
+            })}
+          </nav>
+        </div>
+
+        {/* Footer actions of Sidebar */}
+        <div className={`flex flex-col gap-3 mt-4 md:mt-6 pt-4 border-t border-black/5 transition-all duration-300 ${
+          isScrolled ? 'hidden md:flex' : 'flex'
+        }`}>
           {/* Cloud Storage State */}
           <div className="text-[10px] text-gray-500 flex items-center gap-1.5 px-2">
             <Shield size={12} className={isSupabaseConfigured ? "text-emerald-500" : "text-amber-500"} />
@@ -588,7 +621,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
       </aside>
 
       {/* MAIN CONTAINER */}
-      <main className="flex-1 overflow-y-auto bg-[#fbfbfa] p-4 sm:p-8 flex flex-col">
+      <main ref={mainRef} className="flex-1 overflow-y-auto bg-[#fbfbfa] p-4 sm:p-8 flex flex-col">
         
         {/* TAB 1: OVERVIEW */}
         {activeTab === 'overview' && (
