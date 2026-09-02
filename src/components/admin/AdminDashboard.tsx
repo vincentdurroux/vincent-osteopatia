@@ -758,10 +758,10 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
   );
 
   return (
-    <div className="fixed inset-0 z-[80] bg-[#fdfdfb] text-gray-800 flex flex-col md:flex-row overflow-hidden">
+    <div className="fixed inset-0 z-[80] bg-[#fdfdfb] text-gray-800 flex flex-col md:flex-row overflow-hidden print:relative print:inset-auto print:overflow-visible print:bg-white">
       
       {/* SIDEBAR */}
-      <aside className="w-full md:w-60 bg-[#f4f4ec] border-b md:border-b-0 md:border-r border-black/5 flex flex-col justify-between shrink-0 p-4 md:p-5">
+      <aside className="w-full md:w-60 bg-[#f4f4ec] border-b md:border-b-0 md:border-r border-black/5 flex flex-col justify-between shrink-0 p-4 md:p-5 print:hidden">
         <div className="flex flex-col gap-4 md:gap-6">
           {/* Logo Section */}
           <div className="flex items-center justify-between">
@@ -833,7 +833,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
       </aside>
 
       {/* MAIN CONTAINER */}
-      <main className="flex-1 overflow-y-auto bg-[#fbfbfa] p-4 sm:p-8 flex flex-col">
+      <main className="flex-1 overflow-y-auto bg-[#fbfbfa] p-4 sm:p-8 flex flex-col print:hidden">
         
         {/* TAB 1: OVERVIEW */}
         {activeTab === 'overview' && (
@@ -3349,13 +3349,13 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
       {/* MODAL: PRINTABLE RECEIPT / MUTUELLE REÇU */}
       <AnimatePresence>
         {selectedInvoiceForPrint && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm overflow-y-auto">
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm overflow-y-auto print:bg-white print:p-0 print:block print:static print:overflow-visible">
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               onClick={() => setSelectedInvoiceForPrint(null)}
-              className="absolute inset-0"
+              className="absolute inset-0 print:hidden"
             />
             
             <motion.div
@@ -3420,7 +3420,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
               </div>
 
               {/* PRINTABLE RECEIPT CORE (Can be styled specifically for printing) */}
-              <div id="receipt-print-area" className="space-y-8 text-xs font-sans print:p-0">
+              <div id="receipt-print-area" className="space-y-6 text-xs font-sans print:p-0 print:space-y-4 print:text-[10pt]">
                 {/* Header Section */}
                 <div className="flex justify-between items-start">
                   <div>
@@ -3438,7 +3438,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                 </div>
 
                 {/* Patient / Destinataire Block */}
-                <div className="bg-[#f4f4ec] p-6 rounded-2xl border border-black/5">
+                <div className="bg-[#f4f4ec] p-4 print:p-3 rounded-2xl border border-black/5">
                   <span className="text-[9px] uppercase tracking-widest font-bold text-primary/60 block mb-2">{translations[receiptLang].invoice.recipient}</span>
                   <h4 className="text-sm font-bold text-gray-800">{selectedInvoiceForPrint.clientName}</h4>
                 </div>
@@ -3482,7 +3482,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                 </div>
 
                 {/* Signature or Certificate footer note */}
-                <div className="pt-12 flex justify-between items-end border-t border-black/5">
+                <div className="pt-8 print:pt-4 flex justify-between items-end border-t border-black/5">
                   <div>
                     <p className="text-[10px] text-gray-400 leading-relaxed max-w-sm">
                       {translations[receiptLang].invoice.receiptDeclaration
@@ -3508,13 +3508,13 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
 
         {/* ACCOUNTING PERIOD RECAP PRINT MODAL */}
         {selectedRecapForPrint && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm overflow-y-auto animate-fadeIn">
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm overflow-y-auto animate-fadeIn print:bg-white print:p-0 print:block print:static print:overflow-visible">
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               onClick={() => setSelectedRecapForPrint(null)}
-              className="absolute inset-0"
+              className="absolute inset-0 print:hidden"
             />
             
             <motion.div
@@ -3554,7 +3554,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
               </div>
 
               {/* PRINTABLE AREA */}
-              <div id="recap-print-area" className="space-y-8 text-xs font-sans print:p-0 text-left">
+              <div id="recap-print-area" className="space-y-6 text-xs font-sans print:p-0 text-left print:space-y-4 print:text-[10pt]">
                 {/* Header */}
                 <div className="flex justify-between items-start border-b border-black/5 pb-6">
                   <div>
