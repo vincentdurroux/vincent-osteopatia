@@ -3349,7 +3349,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: 20 }}
-              className="relative w-full max-w-2xl bg-white rounded-3xl shadow-2xl p-8 sm:p-12 z-10 border border-black/5 my-8"
+              className="relative w-full max-w-2xl bg-white rounded-3xl shadow-2xl p-8 sm:p-12 z-10 border border-black/5 my-8 print:!my-0 print:!p-4 print:!shadow-none print:!border-0"
             >
               {/* Close and Print Actions */}
               <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4 mb-8 pb-4 border-b border-black/5 print:hidden">
@@ -3504,7 +3504,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: 20 }}
-              className="relative w-full max-w-2xl bg-white rounded-3xl shadow-2xl p-8 sm:p-12 z-10 border border-black/5 my-8"
+              className="relative w-full max-w-2xl bg-white rounded-3xl shadow-2xl p-8 sm:p-12 z-10 border border-black/5 my-8 print:!my-0 print:!p-4 print:!shadow-none print:!border-0"
             >
               {/* Actions Bar */}
               <div className="flex justify-between items-center mb-8 pb-4 border-b border-black/5 print:hidden">
