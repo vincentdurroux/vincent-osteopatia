@@ -3,14 +3,11 @@ import { motion, AnimatePresence } from 'motion/react';
 import { 
   Users, Calendar, FileText, TrendingUp, Plus, Search, Trash2, 
   Download, LogOut, ArrowLeft, Check, RefreshCw, Calendar as CalendarIcon, 
-  CreditCard, Shield, Clock, MapPin, Phone, Mail, FileCheck, ExternalLink, Printer,
-  ChevronRight, Pencil, ChevronLeft, LayoutGrid, List, Globe
+  CreditCard, Shield, Clock, MapPin, Phone, Mail, FileCheck, Printer,
+  ChevronRight, Pencil, ChevronLeft, LayoutGrid, List
 } from 'lucide-react';
 import { Client, ClientNote, Invoice, CalendarEvent } from '../../types';
 import { api, isSupabaseConfigured } from '../../lib/supabase';
-import { 
-  googleSignIn, googleSignOut, initAuth, calendarApi, getCachedAccessToken 
-} from '../../lib/googleCalendar';
 import SpineLogo from '../SpineLogo';
 import { useTranslation } from '../../App';
 import { Language, translations } from '../../translations';
@@ -53,16 +50,11 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
   }, []);
   const [clients, setClients] = useState<Client[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
-  const [googleEvents, setGoogleEvents] = useState<CalendarEvent[]>([]);
+  const [events, setEvents] = useState<CalendarEvent[]>([]);
   
-  // Calendar View Mode: 'google_grid' (Month grid like Google Calendar), 'google_embed' (Official Google Calendar Iframe), 'list' (List view)
-  const [calendarViewMode, setCalendarViewMode] = useState<'grid' | 'google_embed' | 'list'>('grid');
+  // Calendar View Mode: 'grid' (Month grid), 'list' (List view)
+  const [calendarViewMode, setCalendarViewMode] = useState<'grid' | 'list'>('grid');
   const [currentCalendarDate, setCurrentCalendarDate] = useState(new Date());
-  
-  // Auth state
-  const [googleUser, setGoogleUser] = useState<any>(null);
-  const [googleToken, setGoogleToken] = useState<string | null>(null);
-  const [isAuthLoading, setIsAuthLoading] = useState(true);
   const [isSyncing, setIsSyncing] = useState(false);
   
   // Modals & Selected states
@@ -137,35 +129,25 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
   // Load baseline app data
   const loadData = async () => {
     try {
-      const allClients = await api.getClients();
-      const allInvoices = await api.getInvoices();
+      setIsSyncing(true);
+      const [allClients, allInvoices, allEvents] = await Promise.all([
+        api.getClients(),
+        api.getInvoices(),
+        api.getLocalEvents(),
+      ]);
       
       setClients(allClients);
       setInvoices(allInvoices);
+      setEvents(allEvents);
     } catch (err) {
       console.error('Error loading admin data:', err);
+    } finally {
+      setIsSyncing(false);
     }
   };
 
   useEffect(() => {
     loadData();
-    
-    // Listen to Google Auth changes
-    const unsubscribe = initAuth(
-      (user, token) => {
-        setGoogleUser(user);
-        setGoogleToken(token);
-        setIsAuthLoading(false);
-        syncGoogleCalendar(token);
-      },
-      () => {
-        setGoogleUser(null);
-        setGoogleToken(null);
-        setIsAuthLoading(false);
-      }
-    );
-    
-    return () => unsubscribe();
   }, []);
 
   useEffect(() => {
@@ -173,54 +155,6 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
       setReceiptLang(selectedInvoiceForPrint.language || lang);
     }
   }, [selectedInvoiceForPrint, lang]);
-
-  const handleGoogleLogin = async () => {
-    try {
-      setIsAuthLoading(true);
-      const res = await googleSignIn();
-      if (res) {
-        setGoogleUser(res.user);
-        setGoogleToken(res.accessToken);
-        syncGoogleCalendar(res.accessToken);
-      }
-    } catch (err) {
-      console.error('Google Sign-In failed:', err);
-    } finally {
-      setIsAuthLoading(false);
-    }
-  };
-
-  const handleGoogleLogout = async () => {
-    const confirmed = window.confirm('Voulez-vous vraiment vous déconnecter de Google Calendar ?');
-    if (!confirmed) return;
-    try {
-      await googleSignOut();
-      setGoogleUser(null);
-      setGoogleToken(null);
-      setGoogleEvents([]);
-    } catch (err) {
-      console.error('Sign out error:', err);
-    }
-  };
-
-  const syncGoogleCalendar = async (token: string) => {
-    if (!token) return;
-    setIsSyncing(true);
-    try {
-      // Load events from 1 month ago to 3 months ahead
-      const start = new Date();
-      start.setMonth(start.getMonth() - 1);
-      const end = new Date();
-      end.setMonth(end.getMonth() + 3);
-      
-      const gEvents = await calendarApi.fetchEvents(token, start.toISOString(), end.toISOString());
-      setGoogleEvents(gEvents);
-    } catch (err) {
-      console.error('Google Calendar sync failed:', err);
-    } finally {
-      setIsSyncing(false);
-    }
-  };
 
   // Create new Client
   const handleAddClient = async (e: React.FormEvent) => {
@@ -434,21 +368,9 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
     }
   };
 
-  // Create new session/appointment on Google Calendar
+  // Create new session/appointment on local / Supabase calendar
   const handleAddEvent = async (e: React.FormEvent) => {
     e.preventDefault();
-
-    if (!googleToken) {
-      const shouldLogin = window.confirm(
-        lang === 'fr' 
-          ? "Pour enregistrer ce rendez-vous, vous devez connecter votre compte Google (vincentosteopath1@gmail.com). Souhaitez-vous vous connecter maintenant ?"
-          : "To save this appointment, please connect your Google account (vincentosteopath1@gmail.com). Connect now?"
-      );
-      if (shouldLogin) {
-        handleGoogleLogin();
-      }
-      return;
-    }
 
     const client = clients.find(c => c.id === newEvent.clientId);
     let summary = newEvent.title;
@@ -460,14 +382,16 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
     const endIso = new Date(`${newEvent.date}T${newEvent.endTime}:00`).toISOString();
     
     try {
-      await calendarApi.createEvent(googleToken, {
+      const created = await api.createLocalEvent({
         summary,
-        description: newEvent.description || "Créé depuis l'application de gestion Vincent Osteopatía.",
+        description: newEvent.description || "Consultation au cabinet Vincent Osteopatía.",
         start: startIso,
         end: endIso,
+        clientId: newEvent.clientId || undefined,
+        clientName: client ? client.name : undefined,
       });
 
-      await syncGoogleCalendar(googleToken);
+      setEvents(prev => [...prev, created].sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime()));
       setIsAddEventOpen(false);
       setNewEvent({
         clientId: '',
@@ -478,80 +402,59 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
         description: '',
       });
     } catch (err: any) {
-      console.error('Failed to book appointment on Google Calendar:', err);
-      if (err?.message === 'TOKEN_EXPIRED') {
-        alert(lang === 'fr' ? "Votre session Google a expiré. Veuillez vous reconnecter." : "Google session expired. Please re-authenticate.");
-        handleGoogleLogin();
-      } else {
-        alert(lang === 'fr' ? "Erreur lors de l'enregistrement du rendez-vous sur Google Calendar." : "Error creating appointment on Google Calendar.");
-      }
+      console.error('Failed to create appointment:', err);
+      alert(lang === 'fr' ? "Erreur lors de l'enregistrement du rendez-vous." : "Error creating appointment.");
     }
   };
 
-  // Update existing Google Calendar event
+  // Update existing Calendar event
   const handleUpdateEvent = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingEvent) return;
-
-    if (!googleToken) {
-      alert(lang === 'fr' ? "Veuillez connecter votre compte Google Calendar." : "Please connect your Google Calendar account.");
-      return;
-    }
 
     const startIso = new Date(`${editingEvent.date}T${editingEvent.startTime}:00`).toISOString();
     const endIso = new Date(`${editingEvent.date}T${editingEvent.endTime}:00`).toISOString();
 
     try {
-      await calendarApi.updateEvent(googleToken, editingEvent.id, {
+      const existing = events.find(ev => ev.id === editingEvent.id);
+      const updated = await api.updateLocalEvent({
+        id: editingEvent.id,
         summary: editingEvent.summary,
         description: editingEvent.description,
         start: startIso,
         end: endIso,
+        clientId: existing?.clientId,
+        clientName: existing?.clientName,
       });
 
-      await syncGoogleCalendar(googleToken);
+      setEvents(prev => prev.map(ev => ev.id === updated.id ? updated : ev).sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime()));
       setIsEditEventOpen(false);
       setEditingEvent(null);
     } catch (err: any) {
-      console.error('Failed to update Google event:', err);
-      if (err?.message === 'TOKEN_EXPIRED') {
-        alert(lang === 'fr' ? "Votre session Google a expiré. Veuillez vous reconnecter." : "Google session expired. Please re-authenticate.");
-        handleGoogleLogin();
-      } else {
-        alert(lang === 'fr' ? "Erreur lors de la modification sur Google Calendar." : "Error updating Google Calendar event.");
-      }
+      console.error('Failed to update event:', err);
+      alert(lang === 'fr' ? "Erreur lors de la modification du rendez-vous." : "Error updating appointment.");
     }
   };
 
-  // Delete Google Calendar event
+  // Delete Calendar event
   const handleDeleteEvent = async (eventId: string) => {
     const confirmed = window.confirm(
       lang === 'fr' 
-        ? 'Voulez-vous supprimer définitivement ce rendez-vous de votre Google Calendar ?' 
-        : 'Do you want to permanently delete this appointment from your Google Calendar?'
+        ? 'Voulez-vous supprimer définitivement ce rendez-vous ?' 
+        : 'Do you want to permanently delete this appointment?'
     );
     if (!confirmed) return;
 
-    if (!googleToken) {
-      alert(lang === 'fr' ? "Veuillez connecter votre compte Google Calendar." : "Please connect your Google Calendar account.");
-      return;
-    }
-
     try {
-      await calendarApi.deleteEvent(googleToken, eventId);
-      await syncGoogleCalendar(googleToken);
+      await api.deleteLocalEvent(eventId);
+      setEvents(prev => prev.filter(ev => ev.id !== eventId));
       if (isEditEventOpen) {
         setIsEditEventOpen(false);
         setEditingEvent(null);
       }
     } catch (err: any) {
-      console.error('Failed to delete Google event:', err);
-      if (err?.message === 'TOKEN_EXPIRED') {
-        alert(lang === 'fr' ? "Votre session Google a expiré. Veuillez vous reconnecter." : "Google session expired. Please re-authenticate.");
-        handleGoogleLogin();
-      } else {
-        alert(lang === 'fr' ? "Erreur lors de la suppression sur Google Calendar." : "Error deleting appointment from Google Calendar.");
-      }
+      console.error('Failed to delete event:', err);
+      alert(lang === 'fr' ? "Erreur lors de la suppression." : "Error deleting appointment.");
     }
   };
 
@@ -729,47 +632,30 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                 <h2 className="text-3xl font-serif font-bold text-primary">{t.admin.overview.title}</h2>
                 <p className="text-sm text-gray-500">
                   {lang === 'fr' 
-                    ? "Statistiques de performance du cabinet et synchronisation." 
+                    ? "Statistiques de performance du cabinet et gestion locale." 
                     : lang === 'es' 
-                      ? "Estadísticas de rendimiento de la clínica y sincronización." 
-                      : "Clinic performance statistics and synchronization."}
+                      ? "Estadísticas de rendimiento de la clínica y gestión local." 
+                      : "Clinic performance statistics and management."}
                 </p>
               </div>
               
-              {/* Google Sync Button */}
+              {/* Database / Cloud Status Badge */}
               <div>
-                {googleUser ? (
-                  <div className="flex items-center gap-3 bg-emerald-50 border border-emerald-200/50 px-4 py-2 rounded-2xl">
-                    <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
-                    <div className="text-left">
-                      <p className="text-xs font-bold text-emerald-800">{t.admin.overview.googleLinked}</p>
-                      <p className="text-[10px] text-emerald-600 truncate max-w-[150px]">{googleUser.email}</p>
-                    </div>
-                    <button 
-                      onClick={handleGoogleLogout}
-                      className="p-1 hover:bg-emerald-100 rounded-full transition-colors text-emerald-700"
-                      title="Déconnexion Google"
-                    >
-                      <LogOut size={14} />
-                    </button>
+                <div className="flex items-center gap-3 bg-white border border-black/5 shadow-2xs px-4 py-2.5 rounded-2xl">
+                  <div className={`w-2.5 h-2.5 rounded-full ${isSupabaseConfigured ? 'bg-emerald-500' : 'bg-primary'}`} />
+                  <div className="text-left">
+                    <p className="text-xs font-bold text-gray-800">
+                      {isSupabaseConfigured 
+                        ? (lang === 'fr' ? 'Supabase Connecté' : 'Supabase Connected') 
+                        : (lang === 'fr' ? 'Mode Local Actif' : 'Active Local Mode')}
+                    </p>
+                    <p className="text-[10px] text-gray-500">
+                      {isSupabaseConfigured 
+                        ? (lang === 'fr' ? 'Données synchronisées' : 'Data synchronized')
+                        : (lang === 'fr' ? 'Sauvegarde locale instantanée' : 'Instant local storage')}
+                    </p>
                   </div>
-                ) : (
-                  <button
-                    onClick={handleGoogleLogin}
-                    disabled={isAuthLoading}
-                    className="gsi-material-button text-xs font-semibold flex items-center gap-2 bg-white hover:bg-gray-50 border border-gray-200 shadow-sm px-4 py-2.5 rounded-2xl transition-all"
-                  >
-                    <div className="gsi-material-button-icon shrink-0">
-                      <svg version="1.1" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" style={{ display: "block", width: "16px", height: "16px" }}>
-                        <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"></path>
-                        <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"></path>
-                        <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"></path>
-                        <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"></path>
-                      </svg>
-                    </div>
-                    <span>{isAuthLoading ? (lang === 'fr' ? 'Connexion...' : lang === 'es' ? 'Conectando...' : 'Connecting...') : t.admin.overview.syncGoogle}</span>
-                  </button>
-                )}
+                </div>
               </div>
             </div>
 
@@ -1350,7 +1236,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
           </div>
         )}
 
-        {/* TAB 3: CALENDAR SYNC */}
+        {/* TAB 3: CALENDAR */}
         {activeTab === 'calendar' && (
           <div className="space-y-6 flex-1">
             
@@ -1360,28 +1246,26 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                 <div className="flex items-center gap-3">
                   <h3 className="text-xl font-bold font-serif text-primary flex items-center gap-2">
                     <CalendarIcon className="text-primary" size={22} />
-                    {lang === 'fr' ? 'Google Calendar - Cabinet' : lang === 'es' ? 'Google Calendar - Clínica' : 'Clinic Google Calendar'}
+                    {lang === 'fr' ? 'Agenda du Cabinet' : lang === 'es' ? 'Agenda de la Clínica' : 'Clinic Calendar'}
                   </h3>
-                  {googleUser ? (
-                    <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
-                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-                      Google Connecté
-                    </span>
-                  ) : (
-                    <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-200">
-                      Non connecté
-                    </span>
-                  )}
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                    {isSupabaseConfigured 
+                      ? (lang === 'fr' ? "Enregistré sur Supabase Cloud" : lang === 'es' ? "Guardado en Supabase Cloud" : "Saved on Supabase Cloud")
+                      : (lang === 'fr' ? "Agenda Local" : lang === 'es' ? "Agenda Local" : "Local Calendar")}
+                  </span>
                 </div>
                 <p className="text-xs text-gray-500 mt-1">
-                  {googleUser 
-                    ? (lang === 'fr' ? `Synchronisé en direct avec : ${googleUser.email}` : lang === 'es' ? `Sincronizado en directo con: ${googleUser.email}` : `Synchronized live with: ${googleUser.email}`)
-                    : (lang === 'fr' ? "Connectez vincentosteopath1@gmail.com pour charger, ajouter et modifier vos rendez-vous Google Calendar." : lang === 'es' ? "Conecte vincentosteopath1@gmail.com para cargar, agregar y modificar sus citas de Google Calendar." : "Connect vincentosteopath1@gmail.com to load, add and edit your Google Calendar appointments.")}
+                  {lang === 'fr' 
+                    ? "Gérez l'ensemble de vos consultations et créneaux directement depuis votre application." 
+                    : lang === 'es' 
+                      ? "Gestione todas sus consultas y horarios directamente desde su aplicación." 
+                      : "Manage all your appointments and time slots directly in your application."}
                 </p>
               </div>
 
               <div className="flex flex-wrap items-center gap-2.5 w-full lg:w-auto justify-between lg:justify-end">
-                {/* View Switcher: Grid (Google Style) vs List vs Official Embed */}
+                {/* View Switcher: Grid vs List */}
                 <div className="flex items-center bg-[#f4f4ec] p-1 rounded-2xl border border-black/5">
                   <button
                     onClick={() => setCalendarViewMode('grid')}
@@ -1405,50 +1289,17 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                     <List size={14} />
                     <span>{lang === 'fr' ? "Liste" : lang === 'es' ? "Lista" : "List View"}</span>
                   </button>
-                  <button
-                    onClick={() => setCalendarViewMode('google_embed')}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
-                      calendarViewMode === 'google_embed' 
-                        ? 'bg-white text-primary shadow-sm' 
-                        : 'text-gray-600 hover:text-gray-900'
-                    }`}
-                  >
-                    <ExternalLink size={14} />
-                    <span>Google Web</span>
-                  </button>
                 </div>
 
-                {googleUser ? (
-                  <div className="flex items-center gap-2">
-                    {googleToken && (
-                      <button 
-                        onClick={() => syncGoogleCalendar(googleToken)}
-                        disabled={isSyncing}
-                        className="flex items-center gap-1.5 px-3 py-2 bg-white border border-gray-200 hover:bg-gray-50 rounded-2xl transition-all text-xs font-bold text-gray-700 disabled:opacity-50 shadow-sm"
-                        title={lang === 'fr' ? "Actualiser l'agenda" : "Refresh calendar"}
-                      >
-                        <RefreshCw size={14} className={isSyncing ? "animate-spin text-primary" : ""} />
-                        <span>{lang === 'fr' ? "Actualiser" : "Refresh"}</span>
-                      </button>
-                    )}
-                    <button
-                      onClick={handleGoogleLogout}
-                      className="text-xs px-3 py-2 bg-gray-100 text-gray-700 hover:text-rose-600 rounded-2xl font-medium transition-colors"
-                      title={lang === 'fr' ? "Déconnecter Google" : "Disconnect Google"}
-                    >
-                      {lang === 'fr' ? "Changer de compte" : "Switch Account"}
-                    </button>
-                  </div>
-                ) : (
-                  <button
-                    onClick={handleGoogleLogin}
-                    disabled={isAuthLoading}
-                    className="flex items-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl text-xs font-bold transition-all shadow-md"
-                  >
-                    <Globe size={14} />
-                    <span>Connecter Google Calendar</span>
-                  </button>
-                )}
+                <button 
+                  onClick={loadData}
+                  disabled={isSyncing}
+                  className="flex items-center gap-1.5 px-3 py-2 bg-white border border-gray-200 hover:bg-gray-50 rounded-2xl transition-all text-xs font-bold text-gray-700 disabled:opacity-50 shadow-sm"
+                  title={lang === 'fr' ? "Actualiser l'agenda" : "Refresh calendar"}
+                >
+                  <RefreshCw size={14} className={isSyncing ? "animate-spin text-primary" : ""} />
+                  <span>{lang === 'fr' ? "Actualiser" : "Refresh"}</span>
+                </button>
 
                 <button
                   onClick={() => setIsAddEventOpen(true)}
@@ -1459,35 +1310,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
               </div>
             </div>
 
-            {/* If not connected to Google, show banner */}
-            {!googleUser && (
-              <div className="bg-amber-50 border border-amber-200 p-5 rounded-3xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-                <div className="flex items-start gap-3">
-                  <div className="w-10 h-10 rounded-2xl bg-amber-100 text-amber-800 flex items-center justify-center shrink-0">
-                    <CalendarIcon size={20} />
-                  </div>
-                  <div>
-                    <h4 className="text-sm font-bold text-amber-900">
-                      {lang === 'fr' ? "Connexion Google Calendar requise" : "Google Calendar connection required"}
-                    </h4>
-                    <p className="text-xs text-amber-700 mt-0.5">
-                      {lang === 'fr' 
-                        ? "Pour ajouter, modifier et supprimer vos consultations directement depuis votre site, connectez votre compte Google (vincentosteopath1@gmail.com)." 
-                        : "To add, edit and delete appointments directly from your website, please connect your Google account."}
-                    </p>
-                  </div>
-                </div>
-                <button
-                  onClick={handleGoogleLogin}
-                  disabled={isAuthLoading}
-                  className="px-5 py-2.5 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold rounded-2xl transition-all shrink-0 shadow-sm"
-                >
-                  {lang === 'fr' ? "Se connecter avec Google" : "Sign in with Google"}
-                </button>
-              </div>
-            )}
-
-            {/* VIEW 1: GOOGLE STYLE MONTH/DAY GRID */}
+            {/* VIEW 1: MONTH/DAY GRID */}
             {calendarViewMode === 'grid' && (
               <div className="bg-white p-6 rounded-3xl border border-black/5 shadow-sm space-y-6">
                 
@@ -1606,7 +1429,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                         <div className="grid grid-cols-7 gap-2">
                           {allDays.map((cell, idx) => {
                             // Find events for this day
-                            const dayEvents = googleEvents.filter(ev => {
+                            const dayEvents = events.filter(ev => {
                               try {
                                 const evDate = new Date(ev.start);
                                 const y = evDate.getFullYear();
@@ -1695,44 +1518,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
               </div>
             )}
 
-            {/* VIEW 2: OFFICIAL GOOGLE CALENDAR EMBED */}
-            {calendarViewMode === 'google_embed' && (
-              <div className="bg-white p-6 rounded-3xl border border-black/5 shadow-sm space-y-4">
-                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-                  <div>
-                    <h4 className="text-sm font-bold text-gray-800">
-                      {lang === 'fr' ? "Interface Web Google Calendar intégrée" : "Integrated Google Calendar Web Interface"}
-                    </h4>
-                    <p className="text-xs text-gray-500">
-                      {lang === 'fr' ? "Visualisation directe et interactive de votre agenda Google Calendar en direct." : "Direct interactive live view of your Google Calendar."}
-                    </p>
-                  </div>
-                  <a
-                    href="https://calendar.google.com/calendar/u/0/r"
-                    target="_blank"
-                    rel="noreferrer"
-                    className="flex items-center gap-1.5 px-3.5 py-1.5 bg-primary/10 hover:bg-primary/15 text-primary text-xs font-bold rounded-xl transition-all"
-                  >
-                    <span>{lang === 'fr' ? "Ouvrir dans Google Calendar" : "Open in Google Calendar"}</span>
-                    <ExternalLink size={13} />
-                  </a>
-                </div>
-
-                <div className="w-full h-[650px] rounded-2xl overflow-hidden border border-black/10 bg-[#f9f9f9]">
-                  <iframe
-                    src={`https://calendar.google.com/calendar/embed?src=${encodeURIComponent(googleUser?.email || 'vincentosteopath1@gmail.com')}&ctz=Europe%2FMadrid&hl=${lang === 'es' ? 'es' : lang === 'fr' ? 'fr' : 'en'}&showTitle=0&showNav=1&showDate=1&showPrint=0&showTabs=1&showCalendars=0`}
-                    style={{ border: 0 }}
-                    width="100%"
-                    height="100%"
-                    frameBorder="0"
-                    scrolling="no"
-                    title="Google Calendar Direct Embed"
-                  />
-                </div>
-              </div>
-            )}
-
-            {/* VIEW 3: APPOINTMENT LIST & CABINET HOURS */}
+            {/* VIEW 2: APPOINTMENT LIST & CABINET HOURS */}
             {calendarViewMode === 'list' && (
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                 
@@ -1740,13 +1526,13 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                 <div className="bg-white p-6 rounded-3xl border border-black/5 shadow-sm lg:col-span-2 flex flex-col">
                   <div className="flex items-center justify-between mb-4">
                     <h4 className="text-xs font-bold uppercase tracking-wider text-primary flex items-center gap-2">
-                      <CalendarIcon size={14} /> {lang === 'fr' ? "Prochains rendez-vous cliniques (Google Calendar)" : "Upcoming Google Calendar Appointments"}
+                      <CalendarIcon size={14} /> {lang === 'fr' ? "Prochains rendez-vous cliniques" : "Upcoming Clinical Appointments"}
                     </h4>
-                    <span className="text-[11px] font-bold text-gray-400">{googleEvents.length} rdv(s)</span>
+                    <span className="text-[11px] font-bold text-gray-400">{events.length} rdv(s)</span>
                   </div>
 
                   <div className="space-y-3 overflow-y-auto max-h-[60vh] pr-1">
-                    {googleEvents.map(event => (
+                    {events.map(event => (
                       <div 
                         key={event.id} 
                         onClick={() => openEditEventModal(event)}
@@ -1757,9 +1543,8 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                             <CalendarIcon size={18} />
                           </div>
                           <div>
-                            <h5 className="text-xs font-bold text-gray-800 leading-tight flex items-center gap-1.5">
+                            <h5 className="text-xs font-bold text-gray-800 leading-tight">
                               {event.summary} 
-                              <span className="text-[8px] bg-emerald-200 text-emerald-800 px-1.5 py-0.5 rounded-full uppercase tracking-widest font-extrabold font-sans">Google</span>
                             </h5>
                             <p className="text-[10px] text-gray-500 mt-1 flex items-center gap-1">
                               <Clock size={12} /> {new Date(event.start).toLocaleDateString(lang === 'fr' ? 'fr-FR' : lang === 'es' ? 'es-ES' : 'en-US', { weekday: 'long', day: 'numeric', month: 'short' })} • {new Date(event.start).toLocaleTimeString(lang === 'fr' ? 'fr-FR' : lang === 'es' ? 'es-ES' : 'en-US', { hour: '2-digit', minute: '2-digit' })} - {new Date(event.end).toLocaleTimeString(lang === 'fr' ? 'fr-FR' : lang === 'es' ? 'es-ES' : 'en-US', { hour: '2-digit', minute: '2-digit' })}
@@ -1795,19 +1580,17 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                       </div>
                     ))}
 
-                    {googleEvents.length === 0 && (
+                    {events.length === 0 && (
                       <div className="text-center py-12">
                         <p className="text-xs text-gray-400">
-                          {lang === 'fr' ? "Aucun rendez-vous Google Calendar trouvé." : "No Google Calendar appointments found."}
+                          {lang === 'fr' ? "Aucun rendez-vous enregistré pour le moment." : "No appointments scheduled at the moment."}
                         </p>
-                        {!googleUser && (
-                          <button
-                            onClick={handleGoogleLogin}
-                            className="mt-3 px-4 py-2 bg-primary text-white text-xs font-bold rounded-xl"
-                          >
-                            Connecter Google Calendar
-                          </button>
-                        )}
+                        <button
+                          onClick={() => setIsAddEventOpen(true)}
+                          className="mt-3 px-4 py-2 bg-primary text-white text-xs font-bold rounded-xl"
+                        >
+                          {lang === 'fr' ? "Ajouter un premier rendez-vous" : "Add first appointment"}
+                        </button>
                       </div>
                     )}
                   </div>
@@ -1839,10 +1622,10 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
 
                   <div className="pt-4 border-t border-black/5 space-y-3">
                     <h4 className="text-xs font-bold uppercase tracking-wider text-primary">
-                      {lang === 'fr' ? "Synchronisation directe" : "Direct Synchronization"}
+                      {lang === 'fr' ? "Sauvegarde & Synchronisation" : "Save & Sync"}
                     </h4>
                     <p className="text-[11px] text-gray-500 leading-relaxed font-medium">
-                      {lang === 'fr' ? "Tous les rendez-vous que vous ajoutez ou modifiez ici sont directement synchronisés sur votre compte Google Calendar en temps réel." : "All appointments created or modified here are synchronized to your Google Calendar account in real time."}
+                      {lang === 'fr' ? "Toutes vos modifications et ajouts de rendez-vous sont instantanément enregistrés de manière sécurisée." : "All your appointment additions and edits are instantly and securely saved."}
                     </p>
                   </div>
                 </div>
@@ -2149,7 +1932,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                     {lang === 'fr' ? 'Nouveau Rendez-vous' : lang === 'es' ? 'Nueva Cita' : 'New Appointment'}
                   </h3>
                   <p className="text-xs text-gray-500 mt-0.5">
-                    {lang === 'fr' ? 'Ajout direct sur votre Google Calendar' : 'Direct add to your Google Calendar'}
+                    {lang === 'fr' ? 'Enregistrement sur votre agenda' : 'Saved to your calendar'}
                   </p>
                 </div>
                 <div className="w-8 h-8 rounded-full bg-emerald-100 text-emerald-800 flex items-center justify-center">
@@ -2260,10 +2043,10 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                   </button>
                   <button
                     type="submit"
-                    className="flex-1 py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl text-xs font-bold uppercase tracking-wider transition-all shadow-md flex items-center justify-center gap-1.5"
+                    className="flex-1 py-3 bg-primary hover:bg-primary/95 text-white rounded-2xl text-xs font-bold uppercase tracking-wider transition-all shadow-md flex items-center justify-center gap-1.5"
                   >
                     <CalendarIcon size={14} />
-                    <span>{lang === 'fr' ? 'Créer sur Google Calendar' : 'Create in Google Calendar'}</span>
+                    <span>{lang === 'fr' ? 'Créer le rendez-vous' : 'Create appointment'}</span>
                   </button>
                 </div>
               </form>
@@ -2272,7 +2055,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
         )}
       </AnimatePresence>
 
-      {/* MODAL: EDIT EVENT (GOOGLE CALENDAR) */}
+      {/* MODAL: EDIT EVENT */}
       <AnimatePresence>
         {isEditEventOpen && editingEvent && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
@@ -2298,7 +2081,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                     {lang === 'fr' ? 'Modifier le Rendez-vous' : lang === 'es' ? 'Modificar Cita' : 'Edit Appointment'}
                   </h3>
                   <p className="text-xs text-gray-500 mt-0.5">
-                    {lang === 'fr' ? 'Synchronisé avec Google Calendar' : 'Synced with Google Calendar'}
+                    {lang === 'fr' ? 'Mise à jour dans votre agenda' : 'Update in your calendar'}
                   </p>
                 </div>
                 <button

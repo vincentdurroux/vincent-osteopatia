@@ -1,8 +1,25 @@
 import { createClient } from '@supabase/supabase-js';
 import { Client, ClientNote, Invoice, CalendarEvent } from '../types';
 
-const supabaseUrl = (import.meta as any).env?.VITE_SUPABASE_URL || '';
-const supabaseAnonKey = (import.meta as any).env?.VITE_SUPABASE_ANON_KEY || '';
+const getEnvVar = (key: string): string => {
+  const metaEnv = (import.meta as any).env;
+  if (metaEnv && metaEnv[key]) return metaEnv[key];
+  if (typeof process !== 'undefined' && process.env && process.env[key]) return process.env[key] as string;
+  return '';
+};
+
+const supabaseUrl = 
+  getEnvVar('SUPABASE_URL') || 
+  getEnvVar('VITE_SUPABASE_URL') || 
+  getEnvVar('NEXT_PUBLIC_SUPABASE_URL') || 
+  '';
+
+const supabaseAnonKey = 
+  getEnvVar('SUPABASE_ANON_KEY') || 
+  getEnvVar('VITE_SUPABASE_ANON_KEY') || 
+  getEnvVar('SUPABASE_PUBLISHABLE_KEY') || 
+  getEnvVar('NEXT_PUBLIC_SUPABASE_ANON_KEY') || 
+  '';
 
 export const isSupabaseConfigured = !!(supabaseUrl && supabaseAnonKey);
 
@@ -458,8 +475,12 @@ export const api = {
     return invoice;
   },
 
-  // LOCAL CALENDAR EVENTS (FALLBACK OR SYNCHRONIZED ACROSS SYSTEM)
+  // LOCAL & SUPABASE CALENDAR EVENTS
   async getLocalEvents(): Promise<CalendarEvent[]> {
+    if (isSupabaseConfigured && supabase) {
+      const { data, error } = await supabase.from('calendar_events').select('*').order('start', { ascending: true });
+      if (!error && data) return data as CalendarEvent[];
+    }
     return loadLocal('events', mockEvents).sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
   },
 
@@ -468,13 +489,39 @@ export const api = {
       ...event,
       id: crypto.randomUUID(),
     };
+
+    if (isSupabaseConfigured && supabase) {
+      const { data, error } = await supabase.from('calendar_events').insert(newEvent).select().single();
+      if (!error && data) return data as CalendarEvent;
+    }
+
     const current = loadLocal('events', mockEvents);
     current.push(newEvent);
     saveLocal('events', current);
     return newEvent;
   },
 
+  async updateLocalEvent(event: CalendarEvent): Promise<CalendarEvent> {
+    if (isSupabaseConfigured && supabase) {
+      const { data, error } = await supabase.from('calendar_events').update(event).eq('id', event.id).select().single();
+      if (!error && data) return data as CalendarEvent;
+    }
+
+    const current = loadLocal('events', mockEvents);
+    const index = current.findIndex(e => e.id === event.id);
+    if (index !== -1) {
+      current[index] = event;
+      saveLocal('events', current);
+    }
+    return event;
+  },
+
   async deleteLocalEvent(id: string): Promise<boolean> {
+    if (isSupabaseConfigured && supabase) {
+      const { error } = await supabase.from('calendar_events').delete().eq('id', id);
+      if (!error) return true;
+    }
+
     const current = loadLocal('events', mockEvents);
     const filtered = current.filter(e => e.id !== id);
     saveLocal('events', filtered);

@@ -1,38 +1,74 @@
-import { initializeApp } from 'firebase/app';
-import { getAuth, signInWithPopup, GoogleAuthProvider, onAuthStateChanged, User } from 'firebase/auth';
-import firebaseConfig from '../../firebase-applet-config.json';
+import { supabase, isSupabaseConfigured } from './supabase';
 import { CalendarEvent } from '../types';
 
-const app = initializeApp(firebaseConfig);
-export const auth = getAuth(app);
-
-const provider = new GoogleAuthProvider();
-provider.addScope('https://www.googleapis.com/auth/calendar.events');
-provider.addScope('https://www.googleapis.com/auth/calendar.readonly');
-provider.setCustomParameters({
-  prompt: 'select_account'
-});
+export interface SupabaseGoogleUser {
+  id: string;
+  email?: string;
+  user_metadata?: {
+    full_name?: string;
+    avatar_url?: string;
+    name?: string;
+    [key: string]: any;
+  };
+}
 
 const STORAGE_KEY = 'vincent_gcal_token';
 
 let cachedAccessToken: string | null = typeof window !== 'undefined' ? localStorage.getItem(STORAGE_KEY) : null;
-let isSigningIn = false;
 
-// Initialize auth state listener.
+// Initialize auth state listener via Supabase
 export const initAuth = (
-  onAuthSuccess?: (user: User, token: string) => void,
+  onAuthSuccess?: (user: SupabaseGoogleUser, token: string) => void,
   onAuthFailure?: () => void
 ) => {
-  return onAuthStateChanged(auth, async (user: User | null) => {
-    if (user) {
-      const token = cachedAccessToken || (typeof window !== 'undefined' ? localStorage.getItem(STORAGE_KEY) : null);
-      if (token) {
-        cachedAccessToken = token;
-        if (onAuthSuccess) onAuthSuccess(user, token);
-      } else {
-        if (onAuthFailure) onAuthFailure();
+  if (!supabase) {
+    // If Supabase not configured or local mode, check cached token
+    const token = cachedAccessToken || (typeof window !== 'undefined' ? localStorage.getItem(STORAGE_KEY) : null);
+    if (token && onAuthSuccess) {
+      onAuthSuccess({ id: 'local-user', email: 'vincentosteopath1@gmail.com' }, token);
+    } else if (onAuthFailure) {
+      onAuthFailure();
+    }
+    return () => {};
+  }
+
+  // 1. Check initial session
+  supabase.auth.getSession().then(({ data: { session } }) => {
+    if (session) {
+      const providerToken = session.provider_token || cachedAccessToken || (typeof window !== 'undefined' ? localStorage.getItem(STORAGE_KEY) : null);
+      if (session.provider_token && typeof window !== 'undefined') {
+        localStorage.setItem(STORAGE_KEY, session.provider_token);
+        cachedAccessToken = session.provider_token;
+      }
+      if (providerToken && onAuthSuccess) {
+        onAuthSuccess(session.user as SupabaseGoogleUser, providerToken);
+      } else if (onAuthFailure) {
+        onAuthFailure();
       }
     } else {
+      const token = cachedAccessToken || (typeof window !== 'undefined' ? localStorage.getItem(STORAGE_KEY) : null);
+      if (token && onAuthSuccess) {
+        onAuthSuccess({ id: 'local-user', email: 'vincentosteopath1@gmail.com' }, token);
+      } else if (onAuthFailure) {
+        onAuthFailure();
+      }
+    }
+  });
+
+  // 2. Listen for auth changes
+  const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+    if (session) {
+      const providerToken = session.provider_token || cachedAccessToken || (typeof window !== 'undefined' ? localStorage.getItem(STORAGE_KEY) : null);
+      if (session.provider_token && typeof window !== 'undefined') {
+        localStorage.setItem(STORAGE_KEY, session.provider_token);
+        cachedAccessToken = session.provider_token;
+      }
+      if (providerToken && onAuthSuccess) {
+        onAuthSuccess(session.user as SupabaseGoogleUser, providerToken);
+      } else if (onAuthFailure) {
+        onAuthFailure();
+      }
+    } else if (event === 'SIGNED_OUT') {
       cachedAccessToken = null;
       if (typeof window !== 'undefined') {
         localStorage.removeItem(STORAGE_KEY);
@@ -40,27 +76,34 @@ export const initAuth = (
       if (onAuthFailure) onAuthFailure();
     }
   });
+
+  return () => {
+    subscription.unsubscribe();
+  };
 };
 
-// Sign in with Google Popup and retrieve Access Token for Calendar API
-export const googleSignIn = async (): Promise<{ user: User; accessToken: string } | null> => {
-  try {
-    isSigningIn = true;
-    const result = await signInWithPopup(auth, provider);
-    const credential = GoogleAuthProvider.credentialFromResult(result);
-    if (!credential?.accessToken) {
-      throw new Error('Failed to get access token from Google Auth.');
-    }
-    cachedAccessToken = credential.accessToken;
-    if (typeof window !== 'undefined') {
-      localStorage.setItem(STORAGE_KEY, credential.accessToken);
-    }
-    return { user: result.user, accessToken: cachedAccessToken };
-  } catch (error: any) {
-    console.error('Error during Google sign-in:', error);
+// Sign in with Google using Supabase OAuth
+export const googleSignIn = async (): Promise<void> => {
+  if (!supabase) {
+    alert('Veuillez configurer Supabase dans Vercel (VITE_SUPABASE_URL et VITE_SUPABASE_ANON_KEY).');
+    return;
+  }
+
+  const { error } = await supabase.auth.signInWithOAuth({
+    provider: 'google',
+    options: {
+      scopes: 'https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/calendar.readonly',
+      redirectTo: typeof window !== 'undefined' ? window.location.href : undefined,
+      queryParams: {
+        access_type: 'offline',
+        prompt: 'select_account',
+      },
+    },
+  });
+
+  if (error) {
+    console.error('Supabase Google OAuth error:', error);
     throw error;
-  } finally {
-    isSigningIn = false;
   }
 };
 
@@ -69,7 +112,9 @@ export const getCachedAccessToken = (): string | null => {
 };
 
 export const googleSignOut = async () => {
-  await auth.signOut();
+  if (supabase) {
+    await supabase.auth.signOut();
+  }
   cachedAccessToken = null;
   if (typeof window !== 'undefined') {
     localStorage.removeItem(STORAGE_KEY);
