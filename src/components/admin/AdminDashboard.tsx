@@ -12,6 +12,8 @@ import { api, isSupabaseConfigured, SUPABASE_SQL_SETUP } from '../../lib/supabas
 import SpineLogo from '../SpineLogo';
 import { useTranslation } from '../../App';
 import { Language, translations } from '../../translations';
+import jsPDF from 'jspdf';
+import html2canvas from 'html2canvas';
 
 // Recharts imports for beautiful financial analytics
 import { 
@@ -749,6 +751,36 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
   };
 
   const chartData = getRevenueChartData();
+
+  const handleExportPDF = async (elementId: string, filename: string) => {
+    const element = document.getElementById(elementId);
+    if (!element) return;
+
+    try {
+      const canvas = await html2canvas(element, {
+        scale: 2,
+        useCORS: true,
+        logging: false,
+        backgroundColor: '#ffffff'
+      });
+      
+      const imgData = canvas.toDataURL('image/png');
+      const pdf = new jsPDF({
+        orientation: 'portrait',
+        unit: 'mm',
+        format: 'a4'
+      });
+
+      const imgProps = pdf.getImageProperties(imgData);
+      const pdfWidth = pdf.internal.pageSize.getWidth();
+      const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
+      
+      pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
+      pdf.save(`${filename}.pdf`);
+    } catch (error) {
+      console.error('Error generating PDF:', error);
+    }
+  };
 
   // Filter clients based on search query
   const filteredClients = clients.filter(c => 
@@ -3401,6 +3433,15 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
 
                 <div className="flex items-center gap-3">
                   <button
+                    onClick={async () => {
+                      const filename = `FAC-${selectedInvoiceForPrint.invoiceNumber}-${selectedInvoiceForPrint.clientName.replace(/\s+/g, '_')}`;
+                      await handleExportPDF('receipt-print-area', filename);
+                    }}
+                    className="flex items-center gap-2 px-4 py-2 bg-secondary text-gray-700 rounded-xl text-xs font-bold uppercase tracking-wider hover:bg-gray-200 transition-all shadow-sm active:scale-95"
+                  >
+                    <Download size={14} /> PDF
+                  </button>
+                  <button
                     onClick={() => {
                       setTimeout(() => {
                         window.print();
@@ -3539,7 +3580,22 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
 
                 <div className="flex items-center gap-3">
                   <button
-                    onClick={() => window.print()}
+                    onClick={async () => {
+                      const period = selectedRecapForPrint.periodType === 'annual' 
+                        ? selectedRecapForPrint.year 
+                        : `${getMonthsList(lang)[selectedRecapForPrint.month]}_${selectedRecapForPrint.year}`;
+                      await handleExportPDF('recap-print-area', `RECAP_${period}`);
+                    }}
+                    className="flex items-center gap-2 px-4 py-2 bg-secondary text-gray-700 rounded-xl text-xs font-bold uppercase tracking-wider hover:bg-gray-200 transition-all shadow-sm active:scale-95"
+                  >
+                    <Download size={14} /> PDF
+                  </button>
+                  <button
+                    onClick={() => {
+                      setTimeout(() => {
+                        window.print();
+                      }, 50);
+                    }}
                     className="flex items-center gap-2 px-4 py-2 bg-primary text-white rounded-xl text-xs font-bold uppercase tracking-wider hover:bg-primary/95 transition-all shadow"
                   >
                     <Printer size={14} /> {lang === 'fr' ? 'Imprimer' : lang === 'es' ? 'Imprimir' : 'Print'}
