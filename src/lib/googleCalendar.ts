@@ -13,7 +13,9 @@ provider.setCustomParameters({
   prompt: 'select_account'
 });
 
-let cachedAccessToken: string | null = null;
+const STORAGE_KEY = 'vincent_gcal_token';
+
+let cachedAccessToken: string | null = typeof window !== 'undefined' ? localStorage.getItem(STORAGE_KEY) : null;
 let isSigningIn = false;
 
 // Initialize auth state listener.
@@ -23,16 +25,18 @@ export const initAuth = (
 ) => {
   return onAuthStateChanged(auth, async (user: User | null) => {
     if (user) {
-      if (cachedAccessToken) {
-        if (onAuthSuccess) onAuthSuccess(user, cachedAccessToken);
+      const token = cachedAccessToken || (typeof window !== 'undefined' ? localStorage.getItem(STORAGE_KEY) : null);
+      if (token) {
+        cachedAccessToken = token;
+        if (onAuthSuccess) onAuthSuccess(user, token);
       } else {
-        // If we have a user but no cached token (e.g. page refresh),
-        // we'll need them to sign in again to get a fresh token.
-        cachedAccessToken = null;
         if (onAuthFailure) onAuthFailure();
       }
     } else {
       cachedAccessToken = null;
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem(STORAGE_KEY);
+      }
       if (onAuthFailure) onAuthFailure();
     }
   });
@@ -48,6 +52,9 @@ export const googleSignIn = async (): Promise<{ user: User; accessToken: string 
       throw new Error('Failed to get access token from Google Auth.');
     }
     cachedAccessToken = credential.accessToken;
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(STORAGE_KEY, credential.accessToken);
+    }
     return { user: result.user, accessToken: cachedAccessToken };
   } catch (error: any) {
     console.error('Error during Google sign-in:', error);
@@ -58,12 +65,15 @@ export const googleSignIn = async (): Promise<{ user: User; accessToken: string 
 };
 
 export const getCachedAccessToken = (): string | null => {
-  return cachedAccessToken;
+  return cachedAccessToken || (typeof window !== 'undefined' ? localStorage.getItem(STORAGE_KEY) : null);
 };
 
 export const googleSignOut = async () => {
   await auth.signOut();
   cachedAccessToken = null;
+  if (typeof window !== 'undefined') {
+    localStorage.removeItem(STORAGE_KEY);
+  }
 };
 
 // ==========================================
@@ -81,6 +91,13 @@ export const calendarApi = {
       });
 
       if (!res.ok) {
+        if (res.status === 401) {
+          if (typeof window !== 'undefined') {
+            localStorage.removeItem(STORAGE_KEY);
+          }
+          cachedAccessToken = null;
+          throw new Error('TOKEN_EXPIRED');
+        }
         throw new Error(`Google Calendar API error: ${res.statusText}`);
       }
 
@@ -137,6 +154,13 @@ export const calendarApi = {
       });
 
       if (!res.ok) {
+        if (res.status === 401) {
+          if (typeof window !== 'undefined') {
+            localStorage.removeItem(STORAGE_KEY);
+          }
+          cachedAccessToken = null;
+          throw new Error('TOKEN_EXPIRED');
+        }
         const errText = await res.text();
         throw new Error(`Failed to create Google Calendar event: ${res.statusText} - ${errText}`);
       }
@@ -156,6 +180,50 @@ export const calendarApi = {
     }
   },
 
+  async updateEvent(accessToken: string, eventId: string, event: Partial<Omit<CalendarEvent, 'id'>>): Promise<CalendarEvent> {
+    try {
+      const body: any = {};
+      if (event.summary !== undefined) body.summary = event.summary;
+      if (event.description !== undefined) body.description = event.description;
+      if (event.start) body.start = { dateTime: event.start };
+      if (event.end) body.end = { dateTime: event.end };
+
+      const res = await fetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events/${eventId}`, {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(body),
+      });
+
+      if (!res.ok) {
+        if (res.status === 401) {
+          if (typeof window !== 'undefined') {
+            localStorage.removeItem(STORAGE_KEY);
+          }
+          cachedAccessToken = null;
+          throw new Error('TOKEN_EXPIRED');
+        }
+        const errText = await res.text();
+        throw new Error(`Failed to update Google Calendar event: ${res.statusText} - ${errText}`);
+      }
+
+      const data = await res.json();
+      return {
+        id: data.id,
+        summary: data.summary,
+        description: data.description || '',
+        start: data.start?.dateTime || data.start?.date || (event.start as string),
+        end: data.end?.dateTime || data.end?.date || (event.end as string),
+        isGoogleEvent: true,
+      };
+    } catch (error) {
+      console.error('Error updating Google Calendar event:', error);
+      throw error;
+    }
+  },
+
   async deleteEvent(accessToken: string, eventId: string): Promise<boolean> {
     try {
       const res = await fetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events/${eventId}`, {
@@ -164,6 +232,13 @@ export const calendarApi = {
       });
 
       if (!res.ok) {
+        if (res.status === 401) {
+          if (typeof window !== 'undefined') {
+            localStorage.removeItem(STORAGE_KEY);
+          }
+          cachedAccessToken = null;
+          throw new Error('TOKEN_EXPIRED');
+        }
         throw new Error(`Failed to delete Google Calendar event: ${res.statusText}`);
       }
 

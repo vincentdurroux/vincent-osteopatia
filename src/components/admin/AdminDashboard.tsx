@@ -53,7 +53,6 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
   }, []);
   const [clients, setClients] = useState<Client[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
-  const [localEvents, setLocalEvents] = useState<CalendarEvent[]>([]);
   const [googleEvents, setGoogleEvents] = useState<CalendarEvent[]>([]);
   
   // Calendar View Mode: 'google_grid' (Month grid like Google Calendar), 'google_embed' (Official Google Calendar Iframe), 'list' (List view)
@@ -109,6 +108,16 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
     description: '',
   });
 
+  const [isEditEventOpen, setIsEditEventOpen] = useState(false);
+  const [editingEvent, setEditingEvent] = useState<{
+    id: string;
+    summary: string;
+    date: string;
+    startTime: string;
+    endTime: string;
+    description: string;
+  } | null>(null);
+
   const [selectedInvoiceForPrint, setSelectedInvoiceForPrint] = useState<Invoice | null>(null);
 
   // Edit states
@@ -130,11 +139,9 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
     try {
       const allClients = await api.getClients();
       const allInvoices = await api.getInvoices();
-      const allLocalEvents = await api.getLocalEvents();
       
       setClients(allClients);
       setInvoices(allInvoices);
-      setLocalEvents(allLocalEvents);
     } catch (err) {
       console.error('Error loading admin data:', err);
     }
@@ -393,43 +400,74 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
     }
   };
 
-  // Create new session/appointment
+  // Helper to open edit event modal
+  const openEditEventModal = (event: CalendarEvent) => {
+    try {
+      const startDate = new Date(event.start);
+      const endDate = new Date(event.end);
+      
+      const pad = (n: number) => n < 10 ? '0' + n : String(n);
+      const year = startDate.getFullYear();
+      const month = pad(startDate.getMonth() + 1);
+      const day = pad(startDate.getDate());
+      const dateStr = `${year}-${month}-${day}`;
+      
+      const startHour = pad(startDate.getHours());
+      const startMin = pad(startDate.getMinutes());
+      const startTimeStr = `${startHour}:${startMin}`;
+
+      const endHour = pad(endDate.getHours());
+      const endMin = pad(endDate.getMinutes());
+      const endTimeStr = `${endHour}:${endMin}`;
+
+      setEditingEvent({
+        id: event.id,
+        summary: event.summary,
+        date: dateStr,
+        startTime: startTimeStr,
+        endTime: endTimeStr,
+        description: event.description || '',
+      });
+      setIsEditEventOpen(true);
+    } catch (err) {
+      console.error('Error opening edit event modal:', err);
+    }
+  };
+
+  // Create new session/appointment on Google Calendar
   const handleAddEvent = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newEvent.clientId) return;
-    
+
+    if (!googleToken) {
+      const shouldLogin = window.confirm(
+        lang === 'fr' 
+          ? "Pour enregistrer ce rendez-vous, vous devez connecter votre compte Google (vincentosteopath1@gmail.com). Souhaitez-vous vous connecter maintenant ?"
+          : "To save this appointment, please connect your Google account (vincentosteopath1@gmail.com). Connect now?"
+      );
+      if (shouldLogin) {
+        handleGoogleLogin();
+      }
+      return;
+    }
+
     const client = clients.find(c => c.id === newEvent.clientId);
-    if (!client) return;
+    let summary = newEvent.title;
+    if (client) {
+      summary = `${client.name} - ${newEvent.title}`;
+    }
     
-    const startIso = `${newEvent.date}T${newEvent.startTime}:00`;
-    const endIso = `${newEvent.date}T${newEvent.endTime}:00`;
-    
-    const summary = `${client.name} - ${newEvent.title}`;
+    const startIso = new Date(`${newEvent.date}T${newEvent.startTime}:00`).toISOString();
+    const endIso = new Date(`${newEvent.date}T${newEvent.endTime}:00`).toISOString();
     
     try {
-      // 1. Create local database representation
-      const createdLocal = await api.createLocalEvent({
+      await calendarApi.createEvent(googleToken, {
         summary,
-        description: newEvent.description,
-        start: new Date(startIso).toISOString(),
-        end: new Date(endIso).toISOString(),
-        clientId: client.id,
-        clientName: client.name,
+        description: newEvent.description || "Créé depuis l'application de gestion Vincent Osteopatía.",
+        start: startIso,
+        end: endIso,
       });
-      setLocalEvents(prev => [...prev, createdLocal]);
-      
-      // 2. If Google authenticated, sync to real Google Calendar
-      if (googleToken) {
-        await calendarApi.createEvent(googleToken, {
-          summary,
-          description: newEvent.description || "Créé depuis l'application de gestion Vincent Osteopatía.",
-          start: new Date(startIso).toISOString(),
-          end: new Date(endIso).toISOString(),
-        });
-        // Reload Google events
-        await syncGoogleCalendar(googleToken);
-      }
-      
+
+      await syncGoogleCalendar(googleToken);
       setIsAddEventOpen(false);
       setNewEvent({
         clientId: '',
@@ -439,26 +477,81 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
         endTime: '11:00',
         description: '',
       });
-    } catch (err) {
-      console.error('Failed to book appointment:', err);
-      alert('Une erreur s\'est produite lors de la création du rendez-vous.');
+    } catch (err: any) {
+      console.error('Failed to book appointment on Google Calendar:', err);
+      if (err?.message === 'TOKEN_EXPIRED') {
+        alert(lang === 'fr' ? "Votre session Google a expiré. Veuillez vous reconnecter." : "Google session expired. Please re-authenticate.");
+        handleGoogleLogin();
+      } else {
+        alert(lang === 'fr' ? "Erreur lors de l'enregistrement du rendez-vous sur Google Calendar." : "Error creating appointment on Google Calendar.");
+      }
     }
   };
 
-  const handleDeleteEvent = async (eventId: string, isGoogle: boolean) => {
-    const confirmed = window.confirm('Voulez-vous supprimer ce rendez-vous ?');
-    if (!confirmed) return;
+  // Update existing Google Calendar event
+  const handleUpdateEvent = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingEvent) return;
+
+    if (!googleToken) {
+      alert(lang === 'fr' ? "Veuillez connecter votre compte Google Calendar." : "Please connect your Google Calendar account.");
+      return;
+    }
+
+    const startIso = new Date(`${editingEvent.date}T${editingEvent.startTime}:00`).toISOString();
+    const endIso = new Date(`${editingEvent.date}T${editingEvent.endTime}:00`).toISOString();
 
     try {
-      if (isGoogle && googleToken) {
-        await calendarApi.deleteEvent(googleToken, eventId);
-        await syncGoogleCalendar(googleToken);
+      await calendarApi.updateEvent(googleToken, editingEvent.id, {
+        summary: editingEvent.summary,
+        description: editingEvent.description,
+        start: startIso,
+        end: endIso,
+      });
+
+      await syncGoogleCalendar(googleToken);
+      setIsEditEventOpen(false);
+      setEditingEvent(null);
+    } catch (err: any) {
+      console.error('Failed to update Google event:', err);
+      if (err?.message === 'TOKEN_EXPIRED') {
+        alert(lang === 'fr' ? "Votre session Google a expiré. Veuillez vous reconnecter." : "Google session expired. Please re-authenticate.");
+        handleGoogleLogin();
       } else {
-        await api.deleteLocalEvent(eventId);
-        setLocalEvents(prev => prev.filter(e => e.id !== eventId));
+        alert(lang === 'fr' ? "Erreur lors de la modification sur Google Calendar." : "Error updating Google Calendar event.");
       }
-    } catch (err) {
-      console.error('Failed to delete event:', err);
+    }
+  };
+
+  // Delete Google Calendar event
+  const handleDeleteEvent = async (eventId: string) => {
+    const confirmed = window.confirm(
+      lang === 'fr' 
+        ? 'Voulez-vous supprimer définitivement ce rendez-vous de votre Google Calendar ?' 
+        : 'Do you want to permanently delete this appointment from your Google Calendar?'
+    );
+    if (!confirmed) return;
+
+    if (!googleToken) {
+      alert(lang === 'fr' ? "Veuillez connecter votre compte Google Calendar." : "Please connect your Google Calendar account.");
+      return;
+    }
+
+    try {
+      await calendarApi.deleteEvent(googleToken, eventId);
+      await syncGoogleCalendar(googleToken);
+      if (isEditEventOpen) {
+        setIsEditEventOpen(false);
+        setEditingEvent(null);
+      }
+    } catch (err: any) {
+      console.error('Failed to delete Google event:', err);
+      if (err?.message === 'TOKEN_EXPIRED') {
+        alert(lang === 'fr' ? "Votre session Google a expiré. Veuillez vous reconnecter." : "Google session expired. Please re-authenticate.");
+        handleGoogleLogin();
+      } else {
+        alert(lang === 'fr' ? "Erreur lors de la suppression sur Google Calendar." : "Error deleting appointment from Google Calendar.");
+      }
     }
   };
 
@@ -1269,17 +1362,21 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                     <CalendarIcon className="text-primary" size={22} />
                     {lang === 'fr' ? 'Google Calendar - Cabinet' : lang === 'es' ? 'Google Calendar - Clínica' : 'Clinic Google Calendar'}
                   </h3>
-                  {googleUser && (
+                  {googleUser ? (
                     <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
                       <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
                       Google Connecté
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-200">
+                      Non connecté
                     </span>
                   )}
                 </div>
                 <p className="text-xs text-gray-500 mt-1">
                   {googleUser 
-                    ? (lang === 'fr' ? `Synchronisé en temps réel avec : ${googleUser.email}` : lang === 'es' ? `Sincronizado en tiempo real con: ${googleUser.email}` : `Synchronized in real-time with: ${googleUser.email}`)
-                    : (lang === 'fr' ? "Connectez vincentosteopath1@gmail.com pour voir et modifier vos rendez-vous Google Calendar." : lang === 'es' ? "Conecte vincentosteopath1@gmail.com para ver y modificar sus citas de Google Calendar." : "Connect vincentosteopath1@gmail.com to view and manage your Google Calendar events.")}
+                    ? (lang === 'fr' ? `Synchronisé en direct avec : ${googleUser.email}` : lang === 'es' ? `Sincronizado en directo con: ${googleUser.email}` : `Synchronized live with: ${googleUser.email}`)
+                    : (lang === 'fr' ? "Connectez vincentosteopath1@gmail.com pour charger, ajouter et modifier vos rendez-vous Google Calendar." : lang === 'es' ? "Conecte vincentosteopath1@gmail.com para cargar, agregar y modificar sus citas de Google Calendar." : "Connect vincentosteopath1@gmail.com to load, add and edit your Google Calendar appointments.")}
                 </p>
               </div>
 
@@ -1323,43 +1420,72 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
 
                 {googleUser ? (
                   <div className="flex items-center gap-2">
-                    <button
-                      onClick={handleGoogleLogout}
-                      className="text-xs px-3 py-2 bg-gray-100 text-gray-700 hover:text-rose-600 rounded-2xl font-medium transition-colors"
-                      title={lang === 'fr' ? "Déconnecter Google" : lang === 'es' ? "Desconectar Google" : "Disconnect Google"}
-                    >
-                      {lang === 'fr' ? "Changer de compte" : lang === 'es' ? "Cambiar cuenta" : "Switch Account"}
-                    </button>
                     {googleToken && (
                       <button 
                         onClick={() => syncGoogleCalendar(googleToken)}
                         disabled={isSyncing}
-                        className="p-2 bg-white border border-gray-200 hover:bg-gray-50 rounded-2xl transition-all text-gray-700 disabled:opacity-50 shadow-sm"
-                        title={lang === 'fr' ? "Actualiser l'agenda" : lang === 'es' ? "Actualizar agenda" : "Refresh calendar"}
+                        className="flex items-center gap-1.5 px-3 py-2 bg-white border border-gray-200 hover:bg-gray-50 rounded-2xl transition-all text-xs font-bold text-gray-700 disabled:opacity-50 shadow-sm"
+                        title={lang === 'fr' ? "Actualiser l'agenda" : "Refresh calendar"}
                       >
-                        <RefreshCw size={15} className={isSyncing ? "animate-spin text-primary" : ""} />
+                        <RefreshCw size={14} className={isSyncing ? "animate-spin text-primary" : ""} />
+                        <span>{lang === 'fr' ? "Actualiser" : "Refresh"}</span>
                       </button>
                     )}
+                    <button
+                      onClick={handleGoogleLogout}
+                      className="text-xs px-3 py-2 bg-gray-100 text-gray-700 hover:text-rose-600 rounded-2xl font-medium transition-colors"
+                      title={lang === 'fr' ? "Déconnecter Google" : "Disconnect Google"}
+                    >
+                      {lang === 'fr' ? "Changer de compte" : "Switch Account"}
+                    </button>
                   </div>
                 ) : (
                   <button
                     onClick={handleGoogleLogin}
                     disabled={isAuthLoading}
-                    className="flex items-center gap-2 px-3.5 py-2 bg-white border border-gray-200 text-gray-800 rounded-2xl text-xs font-bold hover:bg-gray-50 transition-all shadow-sm"
+                    className="flex items-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl text-xs font-bold transition-all shadow-md"
                   >
-                    <Globe size={14} className="text-primary" />
-                    <span>Connecter vincentosteopath1@gmail.com</span>
+                    <Globe size={14} />
+                    <span>Connecter Google Calendar</span>
                   </button>
                 )}
 
                 <button
                   onClick={() => setIsAddEventOpen(true)}
-                  className="flex items-center gap-2 px-4 py-2 bg-primary text-white rounded-2xl text-xs font-bold uppercase tracking-wider hover:bg-primary/95 transition-all shadow-md shadow-primary/10"
+                  className="flex items-center gap-2 px-4 py-2.5 bg-primary text-white rounded-2xl text-xs font-bold uppercase tracking-wider hover:bg-primary/95 transition-all shadow-md shadow-primary/10"
                 >
                   <Plus size={16} /> {lang === 'fr' ? "Nouveau RDV" : lang === 'es' ? "Nueva Cita" : "New Appointment"}
                 </button>
               </div>
             </div>
+
+            {/* If not connected to Google, show banner */}
+            {!googleUser && (
+              <div className="bg-amber-50 border border-amber-200 p-5 rounded-3xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                <div className="flex items-start gap-3">
+                  <div className="w-10 h-10 rounded-2xl bg-amber-100 text-amber-800 flex items-center justify-center shrink-0">
+                    <CalendarIcon size={20} />
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-bold text-amber-900">
+                      {lang === 'fr' ? "Connexion Google Calendar requise" : "Google Calendar connection required"}
+                    </h4>
+                    <p className="text-xs text-amber-700 mt-0.5">
+                      {lang === 'fr' 
+                        ? "Pour ajouter, modifier et supprimer vos consultations directement depuis votre site, connectez votre compte Google (vincentosteopath1@gmail.com)." 
+                        : "To add, edit and delete appointments directly from your website, please connect your Google account."}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={handleGoogleLogin}
+                  disabled={isAuthLoading}
+                  className="px-5 py-2.5 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold rounded-2xl transition-all shrink-0 shadow-sm"
+                >
+                  {lang === 'fr' ? "Se connecter avec Google" : "Sign in with Google"}
+                </button>
+              </div>
+            )}
 
             {/* VIEW 1: GOOGLE STYLE MONTH/DAY GRID */}
             {calendarViewMode === 'grid' && (
@@ -1406,15 +1532,9 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-4 text-xs text-gray-500">
-                    <div className="flex items-center gap-1.5">
-                      <span className="w-3 h-3 rounded-md bg-emerald-500"></span>
-                      <span>Google Calendar</span>
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      <span className="w-3 h-3 rounded-md bg-primary"></span>
-                      <span>{lang === 'fr' ? "Cabinet Local" : "Local App"}</span>
-                    </div>
+                  <div className="flex items-center gap-3 text-xs text-gray-500">
+                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
+                    <span>{lang === 'fr' ? "Cliquez sur un jour pour ajouter un RDV, ou sur un créneau pour le modifier" : "Click on a day to add, or an event to edit"}</span>
                   </div>
                 </div>
 
@@ -1438,10 +1558,9 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                       const year = currentCalendarDate.getFullYear();
                       const month = currentCalendarDate.getMonth();
                       
-                      // First day of month (1 = Monday, 0 = Sunday in JS getDay())
                       const firstDayDate = new Date(year, month, 1);
-                      let startDay = firstDayDate.getDay(); // 0 is Sun, 1 is Mon
-                      startDay = startDay === 0 ? 6 : startDay - 1; // convert to 0 = Mon
+                      let startDay = firstDayDate.getDay();
+                      startDay = startDay === 0 ? 6 : startDay - 1; // 0 = Monday
                       
                       const daysInMonth = new Date(year, month + 1, 0).getDate();
                       const daysInPrevMonth = new Date(year, month, 0).getDate();
@@ -1451,33 +1570,49 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                       // Leading days from prev month
                       for (let i = startDay - 1; i >= 0; i--) {
                         const dayNum = daysInPrevMonth - i;
-                        const dStr = new Date(year, month - 1, dayNum).toISOString().split('T')[0];
-                        allDays.push({ day: dayNum, currentMonth: false, dateString: dStr });
+                        const prevMonthDate = new Date(year, month - 1, dayNum);
+                        const y = prevMonthDate.getFullYear();
+                        const m = String(prevMonthDate.getMonth() + 1).padStart(2, '0');
+                        const d = String(dayNum).padStart(2, '0');
+                        allDays.push({ day: dayNum, currentMonth: false, dateString: `${y}-${m}-${d}` });
                       }
 
                       // Current month days
                       for (let i = 1; i <= daysInMonth; i++) {
-                        const dStr = new Date(year, month, i).toISOString().split('T')[0];
-                        allDays.push({ day: i, currentMonth: true, dateString: dStr });
+                        const m = String(month + 1).padStart(2, '0');
+                        const d = String(i).padStart(2, '0');
+                        allDays.push({ day: i, currentMonth: true, dateString: `${year}-${m}-${d}` });
                       }
 
-                      // Trailing days to complete 35 or 42 grid cells
+                      // Trailing days to complete grid cells
                       const remaining = (7 - (allDays.length % 7)) % 7;
                       for (let i = 1; i <= remaining; i++) {
-                        const dStr = new Date(year, month + 1, i).toISOString().split('T')[0];
-                        allDays.push({ day: i, currentMonth: false, dateString: dStr });
+                        const nextMonthDate = new Date(year, month + 1, i);
+                        const y = nextMonthDate.getFullYear();
+                        const m = String(nextMonthDate.getMonth() + 1).padStart(2, '0');
+                        const d = String(i).padStart(2, '0');
+                        allDays.push({ day: i, currentMonth: false, dateString: `${y}-${m}-${d}` });
                       }
 
-                      const todayStr = new Date().toISOString().split('T')[0];
+                      const todayStr = (() => {
+                        const now = new Date();
+                        const y = now.getFullYear();
+                        const m = String(now.getMonth() + 1).padStart(2, '0');
+                        const d = String(now.getDate()).padStart(2, '0');
+                        return `${y}-${m}-${d}`;
+                      })();
 
                       return (
                         <div className="grid grid-cols-7 gap-2">
                           {allDays.map((cell, idx) => {
                             // Find events for this day
-                            const dayEvents = [...googleEvents, ...localEvents].filter(ev => {
+                            const dayEvents = googleEvents.filter(ev => {
                               try {
-                                const evDate = new Date(ev.start).toISOString().split('T')[0];
-                                return evDate === cell.dateString;
+                                const evDate = new Date(ev.start);
+                                const y = evDate.getFullYear();
+                                const m = String(evDate.getMonth() + 1).padStart(2, '0');
+                                const d = String(evDate.getDate()).padStart(2, '0');
+                                return `${y}-${m}-${d}` === cell.dateString;
                               } catch (e) {
                                 return false;
                               }
@@ -1489,14 +1624,13 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                               <div
                                 key={idx}
                                 onClick={() => {
-                                  // Pre-fill modal date
                                   setNewEvent(prev => ({
                                     ...prev,
                                     date: cell.dateString
                                   }));
                                   setIsAddEventOpen(true);
                                 }}
-                                className={`min-h-[105px] p-2 rounded-2xl border transition-all cursor-pointer flex flex-col justify-between ${
+                                className={`min-h-[115px] p-2 rounded-2xl border transition-all cursor-pointer flex flex-col justify-between group/cell ${
                                   cell.currentMonth 
                                     ? isToday 
                                       ? 'bg-primary/5 border-primary/40 shadow-sm' 
@@ -1512,17 +1646,21 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                   }`}>
                                     {cell.day}
                                   </span>
-                                  {dayEvents.length > 0 && (
-                                    <span className="text-[10px] font-bold text-gray-400">
-                                      {dayEvents.length} {dayEvents.length === 1 ? 'rdv' : 'rdvs'}
+                                  <div className="flex items-center gap-1">
+                                    {dayEvents.length > 0 && (
+                                      <span className="text-[10px] font-bold text-gray-400">
+                                        {dayEvents.length} {dayEvents.length === 1 ? 'rdv' : 'rdvs'}
+                                      </span>
+                                    )}
+                                    <span className="opacity-0 group-hover/cell:opacity-100 text-primary p-0.5 rounded transition-opacity" title="Ajouter un RDV">
+                                      <Plus size={12} />
                                     </span>
-                                  )}
+                                  </div>
                                 </div>
 
                                 {/* Events snippets in cell */}
                                 <div className="mt-1 space-y-1 overflow-hidden">
-                                  {dayEvents.slice(0, 2).map((ev, evIdx) => {
-                                    const isGoogle = googleEvents.some(g => g.id === ev.id);
+                                  {dayEvents.slice(0, 3).map((ev, evIdx) => {
                                     const timeStr = new Date(ev.start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
                                     return (
@@ -1530,21 +1668,19 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                         key={evIdx}
                                         onClick={(e) => {
                                           e.stopPropagation();
+                                          openEditEventModal(ev);
                                         }}
-                                        className={`px-2 py-1 rounded-lg text-[10px] font-bold truncate leading-tight flex items-center justify-between ${
-                                          isGoogle 
-                                            ? 'bg-emerald-100/80 text-emerald-900 border border-emerald-200' 
-                                            : 'bg-primary/10 text-primary border border-primary/20'
-                                        }`}
-                                        title={`${timeStr} - ${ev.summary}`}
+                                        className="px-2 py-1 rounded-lg text-[10px] font-bold truncate leading-tight flex items-center justify-between bg-emerald-100/90 hover:bg-emerald-200 text-emerald-900 border border-emerald-300/80 transition-colors shadow-2xs"
+                                        title={`${timeStr} - ${ev.summary} (Cliquer pour modifier)`}
                                       >
                                         <span className="truncate">{timeStr} {ev.summary}</span>
+                                        <Pencil size={10} className="shrink-0 opacity-60 hover:opacity-100 ml-1" />
                                       </div>
                                     );
                                   })}
-                                  {dayEvents.length > 2 && (
+                                  {dayEvents.length > 3 && (
                                     <p className="text-[9px] font-bold text-gray-500 pl-1">
-                                      +{dayEvents.length - 2} {lang === 'fr' ? 'autre(s)' : 'more'}
+                                      +{dayEvents.length - 3} {lang === 'fr' ? 'autre(s)' : 'more'}
                                     </p>
                                   )}
                                 </div>
@@ -1602,72 +1738,77 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                 
                 {/* Left col: Appointment list */}
                 <div className="bg-white p-6 rounded-3xl border border-black/5 shadow-sm lg:col-span-2 flex flex-col">
-                  <h4 className="text-xs font-bold uppercase tracking-wider text-primary mb-4 flex items-center gap-2">
-                    <CalendarIcon size={14} /> {lang === 'fr' ? "Prochains rendez-vous cliniques" : lang === 'es' ? "Próximas citas clínicas" : "Upcoming clinical appointments"}
-                  </h4>
+                  <div className="flex items-center justify-between mb-4">
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-primary flex items-center gap-2">
+                      <CalendarIcon size={14} /> {lang === 'fr' ? "Prochains rendez-vous cliniques (Google Calendar)" : "Upcoming Google Calendar Appointments"}
+                    </h4>
+                    <span className="text-[11px] font-bold text-gray-400">{googleEvents.length} rdv(s)</span>
+                  </div>
 
                   <div className="space-y-3 overflow-y-auto max-h-[60vh] pr-1">
-                    
-                    {/* Google Calendar Events */}
-                    {googleUser && googleEvents.map(event => (
-                      <div key={event.id} className="p-4 rounded-2xl bg-emerald-50/40 border border-emerald-100 flex items-start justify-between group">
+                    {googleEvents.map(event => (
+                      <div 
+                        key={event.id} 
+                        onClick={() => openEditEventModal(event)}
+                        className="p-4 rounded-2xl bg-emerald-50/40 hover:bg-emerald-50/80 border border-emerald-100/90 flex items-start justify-between group cursor-pointer transition-colors"
+                      >
                         <div className="flex items-start gap-3">
-                          <div className="w-9 h-9 rounded-xl bg-emerald-100 text-emerald-800 flex items-center justify-center shrink-0">
+                          <div className="w-9 h-9 rounded-xl bg-emerald-100 text-emerald-800 flex items-center justify-center shrink-0 mt-0.5">
                             <CalendarIcon size={18} />
                           </div>
                           <div>
                             <h5 className="text-xs font-bold text-gray-800 leading-tight flex items-center gap-1.5">
-                              {event.summary} <span className="text-[8px] bg-emerald-200 text-emerald-800 px-1.5 py-0.5 rounded-full uppercase tracking-widest font-extrabold font-sans">Google</span>
+                              {event.summary} 
+                              <span className="text-[8px] bg-emerald-200 text-emerald-800 px-1.5 py-0.5 rounded-full uppercase tracking-widest font-extrabold font-sans">Google</span>
                             </h5>
                             <p className="text-[10px] text-gray-500 mt-1 flex items-center gap-1">
-                              <Clock size={12} /> {new Date(event.start).toLocaleDateString(lang === 'fr' ? 'fr-FR' : lang === 'es' ? 'es-ES' : 'en-US', { weekday: 'long', day: 'numeric', month: 'short' })} • {new Date(event.start).toLocaleTimeString(lang === 'fr' ? 'fr-FR' : lang === 'es' ? 'es-ES' : 'en-US', { hour: '2-digit', minute: '2-digit' })}
+                              <Clock size={12} /> {new Date(event.start).toLocaleDateString(lang === 'fr' ? 'fr-FR' : lang === 'es' ? 'es-ES' : 'en-US', { weekday: 'long', day: 'numeric', month: 'short' })} • {new Date(event.start).toLocaleTimeString(lang === 'fr' ? 'fr-FR' : lang === 'es' ? 'es-ES' : 'en-US', { hour: '2-digit', minute: '2-digit' })} - {new Date(event.end).toLocaleTimeString(lang === 'fr' ? 'fr-FR' : lang === 'es' ? 'es-ES' : 'en-US', { hour: '2-digit', minute: '2-digit' })}
                             </p>
                             {event.description && <p className="text-[10px] text-gray-400 mt-2 italic leading-relaxed">{event.description}</p>}
                           </div>
                         </div>
 
-                        <button
-                          onClick={() => handleDeleteEvent(event.id, true)}
-                          className="opacity-0 group-hover:opacity-100 p-1.5 hover:bg-rose-50 text-rose-500 rounded-lg transition-all shrink-0"
-                          title={lang === 'fr' ? "Supprimer ce rendez-vous" : lang === 'es' ? "Eliminar esta cita" : "Delete this appointment"}
-                        >
-                          <Trash2 size={13} />
-                        </button>
-                      </div>
-                    ))}
-
-                    {/* Local Backup Events */}
-                    {localEvents.map(event => (
-                      <div key={event.id} className="p-4 rounded-2xl bg-primary/5 border border-primary/10 flex items-start justify-between group">
-                        <div className="flex items-start gap-3">
-                          <div className="w-9 h-9 rounded-xl bg-primary/10 text-primary flex items-center justify-center shrink-0">
-                            <CalendarIcon size={18} />
-                          </div>
-                          <div>
-                            <h5 className="text-xs font-bold text-gray-800 leading-tight">
-                              {event.summary}
-                            </h5>
-                            <p className="text-[10px] text-gray-500 mt-1 flex items-center gap-1">
-                              <Clock size={12} /> {new Date(event.start).toLocaleDateString(lang === 'fr' ? 'fr-FR' : lang === 'es' ? 'es-ES' : 'en-US', { weekday: 'long', day: 'numeric', month: 'short' })} • {new Date(event.start).toLocaleTimeString(lang === 'fr' ? 'fr-FR' : lang === 'es' ? 'es-ES' : 'en-US', { hour: '2-digit', minute: '2-digit' })}
-                            </p>
-                            {event.description && <p className="text-[10px] text-gray-400 mt-2 italic leading-relaxed">{event.description}</p>}
-                          </div>
+                        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openEditEventModal(event);
+                            }}
+                            className="p-1.5 hover:bg-emerald-100 text-emerald-800 rounded-lg transition-all"
+                            title={lang === 'fr' ? "Modifier" : "Edit"}
+                          >
+                            <Pencil size={13} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDeleteEvent(event.id);
+                            }}
+                            className="p-1.5 hover:bg-rose-100 text-rose-600 rounded-lg transition-all"
+                            title={lang === 'fr' ? "Supprimer ce rendez-vous" : "Delete this appointment"}
+                          >
+                            <Trash2 size={13} />
+                          </button>
                         </div>
-
-                        <button
-                          onClick={() => handleDeleteEvent(event.id, false)}
-                          className="opacity-0 group-hover:opacity-100 p-1.5 hover:bg-rose-50 text-rose-500 rounded-lg transition-all shrink-0"
-                          title={lang === 'fr' ? "Supprimer ce rendez-vous" : lang === 'es' ? "Eliminar esta cita" : "Delete this appointment"}
-                        >
-                          <Trash2 size={13} />
-                        </button>
                       </div>
                     ))}
 
-                    {googleEvents.length === 0 && localEvents.length === 0 && (
-                      <p className="text-xs text-center text-gray-400 py-12">
-                        {lang === 'fr' ? "Aucun rendez-vous planifié dans les prochains jours." : lang === 'es' ? "No hay citas programadas para los próximos días." : "No appointments scheduled for the upcoming days."}
-                      </p>
+                    {googleEvents.length === 0 && (
+                      <div className="text-center py-12">
+                        <p className="text-xs text-gray-400">
+                          {lang === 'fr' ? "Aucun rendez-vous Google Calendar trouvé." : "No Google Calendar appointments found."}
+                        </p>
+                        {!googleUser && (
+                          <button
+                            onClick={handleGoogleLogin}
+                            className="mt-3 px-4 py-2 bg-primary text-white text-xs font-bold rounded-xl"
+                          >
+                            Connecter Google Calendar
+                          </button>
+                        )}
+                      </div>
                     )}
                   </div>
                 </div>
@@ -1698,10 +1839,10 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
 
                   <div className="pt-4 border-t border-black/5 space-y-3">
                     <h4 className="text-xs font-bold uppercase tracking-wider text-primary">
-                      {lang === 'fr' ? "Instructions Synchro" : lang === 'es' ? "Instrucciones de Sincronización" : "Sync Instructions"}
+                      {lang === 'fr' ? "Synchronisation directe" : "Direct Synchronization"}
                     </h4>
                     <p className="text-[11px] text-gray-500 leading-relaxed font-medium">
-                      {lang === 'fr' ? "Lorsque vous ajoutez un rendez-vous depuis cet espace, il est instantanément créé sur votre application Google Calendar réelle, vous permettant de le recevoir sur votre smartphone en temps réel." : lang === 'es' ? "Cuando agrega una cita desde este espacio, se crea instantáneamente en su aplicación Google Calendar real, lo que le permite recibirla en su teléfono inteligente en tiempo real." : "When you add an appointment from this space, it is instantly created on your real Google Calendar application, allowing you to receive it on your smartphone in real time."}
+                      {lang === 'fr' ? "Tous les rendez-vous que vous ajoutez ou modifiez ici sont directement synchronisés sur votre compte Google Calendar en temps réel." : "All appointments created or modified here are synchronized to your Google Calendar account in real time."}
                     </p>
                   </div>
                 </div>
@@ -1985,7 +2126,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
         )}
       </AnimatePresence>
 
-      {/* MODAL: BLOCK / PLAN EVENT */}
+      {/* MODAL: BLOCK / PLAN EVENT (GOOGLE CALENDAR) */}
       <AnimatePresence>
         {isAddEventOpen && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
@@ -2002,29 +2143,53 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
               exit={{ opacity: 0, scale: 0.95 }}
               className="relative w-full max-w-md bg-white rounded-3xl shadow-2xl p-8 z-10 border border-black/5"
             >
-              <h3 className="text-xl font-serif font-bold text-primary mb-6">Bloquer un rendez-vous</h3>
+              <div className="flex items-center justify-between mb-6">
+                <div>
+                  <h3 className="text-xl font-serif font-bold text-primary">
+                    {lang === 'fr' ? 'Nouveau Rendez-vous' : lang === 'es' ? 'Nueva Cita' : 'New Appointment'}
+                  </h3>
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    {lang === 'fr' ? 'Ajout direct sur votre Google Calendar' : 'Direct add to your Google Calendar'}
+                  </p>
+                </div>
+                <div className="w-8 h-8 rounded-full bg-emerald-100 text-emerald-800 flex items-center justify-center">
+                  <CalendarIcon size={16} />
+                </div>
+              </div>
               
               <form onSubmit={handleAddEvent} className="space-y-4">
                 <div>
-                  <label className="text-[10px] uppercase tracking-wider font-bold text-gray-400 block mb-1">Patient</label>
+                  <label className="text-[10px] uppercase tracking-wider font-bold text-gray-400 block mb-1">
+                    {lang === 'fr' ? 'Patient associé (facultatif)' : 'Associated Patient (Optional)'}
+                  </label>
                   <select
-                    required
                     value={newEvent.clientId}
-                    onChange={(e) => setNewEvent(prev => ({ ...prev, clientId: e.target.value }))}
+                    onChange={(e) => {
+                      const selectedId = e.target.value;
+                      const selectedCl = clients.find(c => c.id === selectedId);
+                      setNewEvent(prev => ({
+                        ...prev,
+                        clientId: selectedId,
+                        title: selectedCl ? `Consultation Ostéopathie - ${selectedCl.name}` : prev.title
+                      }));
+                    }}
                     className="w-full p-2.5 bg-secondary rounded-xl border border-black/5 text-xs focus:outline-none focus:ring-1 focus:ring-primary focus:bg-white transition-all"
                   >
-                    <option value="">-- Sélectionnez un patient --</option>
+                    <option value="">-- Aucun ou patient non répertorié --</option>
                     {clients.map(c => (
-                      <option key={c.id} value={c.id}>{c.name}</option>
+                      <option key={c.id} value={c.id}>{c.name} ({c.phone || c.email})</option>
                     ))}
                   </select>
                 </div>
 
                 <div>
-                  <label className="text-[10px] uppercase tracking-wider font-bold text-gray-400 block mb-1">Intitulé de la consultation</label>
+                  <label className="text-[10px] uppercase tracking-wider font-bold text-gray-400 block mb-1">
+                    {lang === 'fr' ? 'Intitulé de la consultation' : 'Appointment Title'} *
+                  </label>
                   <input
                     type="text"
                     required
+                    placeholder="Ex: Consultation - Jean Dupont"
                     value={newEvent.title}
                     onChange={(e) => setNewEvent(prev => ({ ...prev, title: e.target.value }))}
                     className="w-full p-2.5 bg-secondary rounded-xl border border-black/5 text-xs focus:outline-none focus:ring-1 focus:ring-primary focus:bg-white transition-all"
@@ -2033,7 +2198,9 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
 
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="text-[10px] uppercase tracking-wider font-bold text-gray-400 block mb-1">Date</label>
+                    <label className="text-[10px] uppercase tracking-wider font-bold text-gray-400 block mb-1">
+                      {lang === 'fr' ? 'Date' : 'Date'} *
+                    </label>
                     <input
                       type="date"
                       required
@@ -2044,7 +2211,9 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                   </div>
                   <div className="grid grid-cols-2 gap-2">
                     <div>
-                      <label className="text-[10px] uppercase tracking-wider font-bold text-gray-400 block mb-1">Début</label>
+                      <label className="text-[10px] uppercase tracking-wider font-bold text-gray-400 block mb-1">
+                        {lang === 'fr' ? 'Début' : 'Start'} *
+                      </label>
                       <input
                         type="time"
                         required
@@ -2054,7 +2223,9 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                       />
                     </div>
                     <div>
-                      <label className="text-[10px] uppercase tracking-wider font-bold text-gray-400 block mb-1">Fin</label>
+                      <label className="text-[10px] uppercase tracking-wider font-bold text-gray-400 block mb-1">
+                        {lang === 'fr' ? 'Fin' : 'End'} *
+                      </label>
                       <input
                         type="time"
                         required
@@ -2067,9 +2238,12 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                 </div>
 
                 <div>
-                  <label className="text-[10px] uppercase tracking-wider font-bold text-gray-400 block mb-1">Note complémentaire (facultatif)</label>
+                  <label className="text-[10px] uppercase tracking-wider font-bold text-gray-400 block mb-1">
+                    {lang === 'fr' ? 'Note / Motif de consultation' : 'Notes / Reason'}
+                  </label>
                   <textarea
                     value={newEvent.description}
+                    placeholder={lang === 'fr' ? 'Motif, antécédents, remarques...' : 'Reason, notes...'}
                     onChange={(e) => setNewEvent(prev => ({ ...prev, description: e.target.value }))}
                     rows={3}
                     className="w-full p-3 bg-secondary rounded-xl border border-black/5 text-xs focus:outline-none focus:ring-1 focus:ring-primary focus:bg-white transition-all resize-none"
@@ -2082,13 +2256,144 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                     onClick={() => setIsAddEventOpen(false)}
                     className="flex-1 py-3 bg-secondary text-gray-600 rounded-2xl text-xs font-bold uppercase tracking-wider hover:bg-black/5 transition-all"
                   >
-                    Annuler
+                    {lang === 'fr' ? 'Annuler' : 'Cancel'}
+                  </button>
+                  <button
+                    type="submit"
+                    className="flex-1 py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl text-xs font-bold uppercase tracking-wider transition-all shadow-md flex items-center justify-center gap-1.5"
+                  >
+                    <CalendarIcon size={14} />
+                    <span>{lang === 'fr' ? 'Créer sur Google Calendar' : 'Create in Google Calendar'}</span>
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* MODAL: EDIT EVENT (GOOGLE CALENDAR) */}
+      <AnimatePresence>
+        {isEditEventOpen && editingEvent && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => {
+                setIsEditEventOpen(false);
+                setEditingEvent(null);
+              }}
+              className="absolute inset-0 bg-black/40 backdrop-blur-sm"
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="relative w-full max-w-md bg-white rounded-3xl shadow-2xl p-8 z-10 border border-black/5"
+            >
+              <div className="flex items-center justify-between mb-6">
+                <div>
+                  <h3 className="text-xl font-serif font-bold text-primary">
+                    {lang === 'fr' ? 'Modifier le Rendez-vous' : lang === 'es' ? 'Modificar Cita' : 'Edit Appointment'}
+                  </h3>
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    {lang === 'fr' ? 'Synchronisé avec Google Calendar' : 'Synced with Google Calendar'}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => handleDeleteEvent(editingEvent.id)}
+                  className="p-2 text-rose-500 hover:bg-rose-50 rounded-xl transition-all"
+                  title={lang === 'fr' ? 'Supprimer ce rendez-vous' : 'Delete appointment'}
+                >
+                  <Trash2 size={18} />
+                </button>
+              </div>
+              
+              <form onSubmit={handleUpdateEvent} className="space-y-4">
+                <div>
+                  <label className="text-[10px] uppercase tracking-wider font-bold text-gray-400 block mb-1">
+                    {lang === 'fr' ? 'Intitulé de la consultation' : 'Appointment Title'} *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={editingEvent.title}
+                    onChange={(e) => setEditingEvent(prev => prev ? { ...prev, title: e.target.value } : null)}
+                    className="w-full p-2.5 bg-secondary rounded-xl border border-black/5 text-xs focus:outline-none focus:ring-1 focus:ring-primary focus:bg-white transition-all"
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-[10px] uppercase tracking-wider font-bold text-gray-400 block mb-1">
+                      {lang === 'fr' ? 'Date' : 'Date'} *
+                    </label>
+                    <input
+                      type="date"
+                      required
+                      value={editingEvent.date}
+                      onChange={(e) => setEditingEvent(prev => prev ? { ...prev, date: e.target.value } : null)}
+                      className="w-full p-2.5 bg-secondary rounded-xl border border-black/5 text-xs focus:outline-none focus:ring-1 focus:ring-primary focus:bg-white transition-all"
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="text-[10px] uppercase tracking-wider font-bold text-gray-400 block mb-1">
+                        {lang === 'fr' ? 'Début' : 'Start'} *
+                      </label>
+                      <input
+                        type="time"
+                        required
+                        value={editingEvent.startTime}
+                        onChange={(e) => setEditingEvent(prev => prev ? { ...prev, startTime: e.target.value } : null)}
+                        className="w-full p-2.5 bg-secondary rounded-xl border border-black/5 text-xs focus:outline-none focus:ring-1 focus:ring-primary focus:bg-white transition-all"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] uppercase tracking-wider font-bold text-gray-400 block mb-1">
+                        {lang === 'fr' ? 'Fin' : 'End'} *
+                      </label>
+                      <input
+                        type="time"
+                        required
+                        value={editingEvent.endTime}
+                        onChange={(e) => setEditingEvent(prev => prev ? { ...prev, endTime: e.target.value } : null)}
+                        className="w-full p-2.5 bg-secondary rounded-xl border border-black/5 text-xs focus:outline-none focus:ring-1 focus:ring-primary focus:bg-white transition-all"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-[10px] uppercase tracking-wider font-bold text-gray-400 block mb-1">
+                    {lang === 'fr' ? 'Note / Motif de consultation' : 'Notes / Reason'}
+                  </label>
+                  <textarea
+                    value={editingEvent.description}
+                    onChange={(e) => setEditingEvent(prev => prev ? { ...prev, description: e.target.value } : null)}
+                    rows={3}
+                    className="w-full p-3 bg-secondary rounded-xl border border-black/5 text-xs focus:outline-none focus:ring-1 focus:ring-primary focus:bg-white transition-all resize-none"
+                  ></textarea>
+                </div>
+
+                <div className="flex gap-3 pt-4">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsEditEventOpen(false);
+                      setEditingEvent(null);
+                    }}
+                    className="flex-1 py-3 bg-secondary text-gray-600 rounded-2xl text-xs font-bold uppercase tracking-wider hover:bg-black/5 transition-all"
+                  >
+                    {lang === 'fr' ? 'Fermer' : 'Close'}
                   </button>
                   <button
                     type="submit"
                     className="flex-1 py-3 bg-primary text-white rounded-2xl text-xs font-bold uppercase tracking-wider hover:bg-primary/95 transition-all shadow-md"
                   >
-                    {googleToken ? 'Créer & Synchro Google' : 'Planifier'}
+                    {lang === 'fr' ? 'Enregistrer' : 'Save'}
                   </button>
                 </div>
               </form>
