@@ -76,14 +76,34 @@ const LanguageSelector = () => {
   );
 };
 
-const Navbar = () => {
+const Navbar = ({ onSecretAdmin }: { onSecretAdmin?: () => void }) => {
   const { t } = useTranslation();
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [clickCount, setClickCount] = useState(0);
+
+  const handleLogoClick = () => {
+    setClickCount(prev => {
+      const next = prev + 1;
+      if (next >= 3) {
+        if (onSecretAdmin) onSecretAdmin();
+        return 0;
+      }
+      return next;
+    });
+    // Reset count after 1.5 seconds if not reached 3
+    setTimeout(() => {
+      setClickCount(0);
+    }, 1500);
+  };
 
   return (
     <nav className="fixed top-0 left-0 right-0 z-50 bg-[#f5f5f0]/90 backdrop-blur-md border-b border-black/5">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 h-20 flex items-center justify-between">
-        <div className="flex items-center gap-2">
+        <div 
+          onClick={handleLogoClick}
+          className="flex items-center gap-2 cursor-pointer select-none"
+          title="Vincent Osteopatía"
+        >
           <div className="w-10 h-10 sm:w-12 sm:h-12 bg-primary rounded-full flex items-center justify-center text-white shrink-0">
             <SpineLogo size={24} className="sm:w-7 sm:h-7" />
           </div>
@@ -762,21 +782,33 @@ export default function App() {
 
   const [isAdminAuthorized, setIsAdminAuthorized] = useState(() => {
     if (typeof window !== 'undefined') {
-      return window.location.search.includes('admin=true');
+      return window.location.search.includes('admin=true') || window.location.hash.includes('admin');
     }
     return false;
   });
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
-      setIsAdminAuthorized(window.location.search.includes('admin=true'));
+      const isAuth = window.location.search.includes('admin=true') || window.location.hash.includes('admin');
+      setIsAdminAuthorized(isAuth);
+
+      // Dynamic robots meta tag protection: If any admin parameter is present, enforce noindex, nofollow
+      let metaRobots = document.querySelector('meta[name="robots"]') as HTMLMetaElement | null;
+      if (isAuth) {
+        if (!metaRobots) {
+          metaRobots = document.createElement('meta');
+          metaRobots.setAttribute('name', 'robots');
+          document.head.appendChild(metaRobots);
+        }
+        metaRobots.setAttribute('content', 'noindex, nofollow, noarchive');
+      }
     }
   }, []);
 
   return (
     <LanguageContext.Provider value={{ lang, setLang, t: translations[lang] }}>
       <div className="min-h-screen">
-        <Navbar />
+        <Navbar onSecretAdmin={() => setIsPasscodeOpen(true)} />
         <Hero onOpenBooking={() => setIsBookingModalOpen(true)} />
         <Services />
         <About />

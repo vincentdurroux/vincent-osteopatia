@@ -1,0 +1,10 @@
+User-agent: *
+Disallow: /*?*admin=*
+Disallow: /*?admin=*
+Disallow: /*admin=true*
+Disallow: /*?tab=*
+
+# Allow all other content
+Allow: /
+
+Sitemap: https://www.osteovalencia.com/sitemap.xml

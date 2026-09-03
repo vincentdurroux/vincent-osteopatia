@@ -20,6 +20,8 @@ CREATE TABLE IF NOT EXISTS public.clients (
     "firstName" TEXT,
     "lastName" TEXT,
     "name" TEXT NOT NULL,
+    "dni" TEXT,
+    dni TEXT,
     "email" TEXT,
     "phone" TEXT,
     "birthDate" TEXT,
@@ -27,6 +29,10 @@ CREATE TABLE IF NOT EXISTS public.clients (
     "lastSessionAt" TEXT,
     "address" TEXT
 );
+
+-- Si la table clients existe déjà dans votre Supabase, ajoutez simplement cette colonne :
+ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS "dni" TEXT;
+ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS dni TEXT;
 
 -- Activation de RLS
 ALTER TABLE public.clients ENABLE ROW LEVEL SECURITY;
@@ -107,11 +113,11 @@ CREATE INDEX IF NOT EXISTS idx_invoices_date ON public.invoices("date" DESC);
 -- =========================================================================
 
 -- Insertion des patients de test
-INSERT INTO public.clients (id, "firstName", "lastName", "name", "email", "phone", "birthDate", "address", "createdAt", "lastSessionAt") VALUES
-('c1', 'Marie', 'Laurent', 'Marie Laurent', 'marie.laurent@gmail.com', '+33 6 12 34 56 78', '1988-04-12', 'Calle del Mar 14, L''Eliana', '2026-01-10T10:00:00Z', '2026-08-25T14:30:00Z'),
-('c2', 'Jean-Pierre', 'Petit', 'Jean-Pierre Petit', 'jp.petit@yahoo.fr', '+34 612 987 654', '1964-11-03', 'Avenida de las Cortes 45, Valencia', '2026-02-15T09:00:00Z', '2026-08-28T11:00:00Z'),
-('c3', 'Lucas', 'Mercier (Bébé)', 'Lucas Mercier (Bébé)', 'sophie.mercier@gmail.com', '+33 6 88 55 44 22', '2025-10-05', 'Calle Mayor 8, L''Eliana', '2026-05-20T16:00:00Z', '2026-08-30T10:00:00Z'),
-('c4', 'Sofía', 'Benítez', 'Sofía Benítez', 'sofia.benitez@outlook.com', '+34 654 321 098', '1995-07-22', 'Gran Vía de les Corts 112, Valencia', '2026-03-05T11:00:00Z', '2026-08-20T17:00:00Z')
+INSERT INTO public.clients (id, "firstName", "lastName", "name", "dni", "email", "phone", "birthDate", "address", "createdAt", "lastSessionAt") VALUES
+('c1', 'Marie', 'Laurent', 'Marie Laurent', '48765432A', 'marie.laurent@gmail.com', '+33 6 12 34 56 78', '1988-04-12', 'Calle del Mar 14, L''Eliana', '2026-01-10T10:00:00Z', '2026-08-25T14:30:00Z'),
+('c2', 'Jean-Pierre', 'Petit', 'Jean-Pierre Petit', 'Y1234567X', 'jp.petit@yahoo.fr', '+34 612 987 654', '1964-11-03', 'Avenida de las Cortes 45, Valencia', '2026-02-15T09:00:00Z', '2026-08-28T11:00:00Z'),
+('c3', 'Lucas', 'Mercier (Bébé)', 'Lucas Mercier (Bébé)', '', 'sophie.mercier@gmail.com', '+33 6 88 55 44 22', '2025-10-05', 'Calle Mayor 8, L''Eliana', '2026-05-20T16:00:00Z', '2026-08-30T10:00:00Z'),
+('c4', 'Sofía', 'Benítez', 'Sofía Benítez', '53987123K', 'sofia.benitez@outlook.com', '+34 654 321 098', '1995-07-22', 'Gran Vía de les Corts 112, Valencia', '2026-03-05T11:00:00Z', '2026-08-20T17:00:00Z')
 ON CONFLICT (id) DO NOTHING;
 
 -- Insertion des notes cliniques de test

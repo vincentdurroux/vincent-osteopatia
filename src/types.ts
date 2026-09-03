@@ -5,10 +5,15 @@ export interface Client {
   name: string;
   email: string;
   phone: string;
+  dni?: string;
   birthDate?: string;
   createdAt: string;
   lastSessionAt?: string;
   address?: string;
+  hasBono?: boolean;
+  bonoType?: string;
+  defaultDiscount?: number;
+  bonoSessionsRemaining?: number;
 }
 
 export interface ClientNote {
@@ -29,6 +34,10 @@ export interface Invoice {
   clientName: string;
   date: string;
   amount: number;
+  originalAmount?: number;
+  discountAmount?: number;
+  discountType?: 'bono' | 'custom' | 'none';
+  discountLabel?: string;
   status: 'paid' | 'pending';
   paymentMethod?: 'cash' | 'card' | 'transfer';
   description: string;

@@ -41,6 +41,7 @@ const mockClients: Client[] = [
     firstName: 'Marie',
     lastName: 'Laurent',
     name: 'Marie Laurent',
+    dni: '48765432A',
     email: 'marie.laurent@gmail.com',
     phone: '+33 6 12 34 56 78',
     birthDate: '1988-04-12',
@@ -53,6 +54,7 @@ const mockClients: Client[] = [
     firstName: 'Jean-Pierre',
     lastName: 'Petit',
     name: 'Jean-Pierre Petit',
+    dni: 'Y1234567X',
     email: 'jp.petit@yahoo.fr',
     phone: '+34 612 987 654',
     birthDate: '1964-11-03',
@@ -65,6 +67,7 @@ const mockClients: Client[] = [
     firstName: 'Lucas',
     lastName: 'Mercier (Bébé)',
     name: 'Lucas Mercier (Bébé)',
+    dni: '',
     email: 'sophie.mercier@gmail.com',
     phone: '+33 6 88 55 44 22',
     birthDate: '2025-10-05',
@@ -77,12 +80,17 @@ const mockClients: Client[] = [
     firstName: 'Sofía',
     lastName: 'Benítez',
     name: 'Sofía Benítez',
+    dni: '53987123K',
     email: 'sofia.benitez@outlook.com',
     phone: '+34 654 321 098',
     birthDate: '1995-07-22',
     address: 'Gran Vía de les Corts 112, Valencia',
     createdAt: '2026-03-05T11:00:00Z',
     lastSessionAt: '2026-08-20T17:00:00Z',
+    hasBono: true,
+    bonoType: 'Bono 3 séances',
+    defaultDiscount: 10,
+    bonoSessionsRemaining: 2,
   }
 ];
 
@@ -173,6 +181,10 @@ const mockInvoices: Invoice[] = [
     clientName: 'Sofía Benítez',
     date: '2026-08-20',
     amount: 160,
+    originalAmount: 180,
+    discountAmount: 20,
+    discountType: 'bono',
+    discountLabel: 'Bono 3 séances',
     status: 'paid',
     paymentMethod: 'card',
     description: 'Forfait Ostéopathie - 3 séances',
@@ -326,12 +338,17 @@ export function mapClientFromDB(c: any): Client {
     firstName: firstName || '',
     lastName: lastName || '',
     name,
+    dni: c.dni || c.nie || c.nif || c["dni"] || '',
     email: c.email || '',
     phone: c.phone || '',
     birthDate: c.birthDate || c.birth_date || '',
     address: c.address || '',
     createdAt: c.createdAt || c.created_at || new Date().toISOString(),
     lastSessionAt: c.lastSessionAt || c.last_session_at,
+    hasBono: Boolean(c.hasBono || c.has_bono),
+    bonoType: c.bonoType || c.bono_type || '',
+    defaultDiscount: c.defaultDiscount !== undefined ? Number(c.defaultDiscount) : (c.default_discount !== undefined ? Number(c.default_discount) : undefined),
+    bonoSessionsRemaining: c.bonoSessionsRemaining !== undefined ? Number(c.bonoSessionsRemaining) : (c.bono_sessions_remaining !== undefined ? Number(c.bono_sessions_remaining) : undefined),
   };
 }
 
@@ -356,6 +373,10 @@ export function mapInvoiceFromDB(i: any): Invoice {
     clientName: i.clientName || i.client_name || i.clientname || '',
     date: i.date || new Date().toISOString().split('T')[0],
     amount: Number(i.amount) || 0,
+    originalAmount: i.originalAmount !== undefined ? Number(i.originalAmount) : (i.original_amount !== undefined ? Number(i.original_amount) : undefined),
+    discountAmount: i.discountAmount !== undefined ? Number(i.discountAmount) : (i.discount_amount !== undefined ? Number(i.discount_amount) : undefined),
+    discountType: i.discountType || i.discount_type || undefined,
+    discountLabel: i.discountLabel || i.discount_label || undefined,
     status: i.status || 'paid',
     paymentMethod: i.paymentMethod || i.payment_method || i.paymentmethod || 'card',
     description: i.description || "Séance d'Ostéopathie",
@@ -390,6 +411,8 @@ CREATE TABLE IF NOT EXISTS public.clients (
     "lastName" TEXT,
     first_name TEXT,
     last_name TEXT,
+    dni TEXT,
+    "dni" TEXT,
     email TEXT,
     phone TEXT,
     "birthDate" TEXT,
@@ -398,8 +421,20 @@ CREATE TABLE IF NOT EXISTS public.clients (
     "createdAt" TIMESTAMPTZ DEFAULT NOW(),
     created_at TIMESTAMPTZ DEFAULT NOW(),
     "lastSessionAt" TIMESTAMPTZ,
-    last_session_at TIMESTAMPTZ
+    last_session_at TIMESTAMPTZ,
+    "hasBono" BOOLEAN DEFAULT FALSE,
+    has_bono BOOLEAN DEFAULT FALSE,
+    "bonoType" TEXT,
+    bono_type TEXT,
+    "defaultDiscount" NUMERIC,
+    default_discount NUMERIC,
+    "bonoSessionsRemaining" NUMERIC,
+    bono_sessions_remaining NUMERIC
 );
+
+-- Si la table clients existe déjà sur votre Supabase, exécutez cette ligne pour ajouter la colonne DNI / NIE :
+ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS dni TEXT;
+ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS "dni" TEXT;
 
 -- 2. TABLE DES NOTES CLINIQUES & CONSULTATIONS
 CREATE TABLE IF NOT EXISTS public.client_notes (
@@ -636,8 +671,13 @@ export const api = {
           address: newClient.address || '',
           createdAt: newClient.createdAt,
         };
+        if (newClient.dni) cleanPayload.dni = newClient.dni;
         if (newClient.birthDate) cleanPayload.birthDate = newClient.birthDate;
         if (newClient.lastSessionAt) cleanPayload.lastSessionAt = newClient.lastSessionAt;
+        if (newClient.hasBono !== undefined) cleanPayload.hasBono = newClient.hasBono;
+        if (newClient.bonoType) cleanPayload.bonoType = newClient.bonoType;
+        if (newClient.defaultDiscount !== undefined) cleanPayload.defaultDiscount = newClient.defaultDiscount;
+        if (newClient.bonoSessionsRemaining !== undefined) cleanPayload.bonoSessionsRemaining = newClient.bonoSessionsRemaining;
 
         let insertRes = await supabase.from('clients').insert(cleanPayload).select().single();
 
@@ -654,8 +694,13 @@ export const api = {
             address: newClient.address || '',
             created_at: newClient.createdAt,
           };
+          if (newClient.dni) snakePayload.dni = newClient.dni;
           if (newClient.birthDate) snakePayload.birth_date = newClient.birthDate;
           if (newClient.lastSessionAt) snakePayload.last_session_at = newClient.lastSessionAt;
+          if (newClient.hasBono !== undefined) snakePayload.has_bono = newClient.hasBono;
+          if (newClient.bonoType) snakePayload.bono_type = newClient.bonoType;
+          if (newClient.defaultDiscount !== undefined) snakePayload.default_discount = newClient.defaultDiscount;
+          if (newClient.bonoSessionsRemaining !== undefined) snakePayload.bono_sessions_remaining = newClient.bonoSessionsRemaining;
 
           insertRes = await supabase.from('clients').insert(snakePayload).select().single();
         }
@@ -663,13 +708,14 @@ export const api = {
         // If still failed, try minimal mandatory columns
         if (insertRes.error) {
           console.warn('Supabase clients fallback insert failed, trying minimal:', insertRes.error.message);
-          const minimalPayload = {
+          const minimalPayload: Record<string, any> = {
             id: newClient.id,
             name: newClient.name,
             email: newClient.email || '',
             phone: newClient.phone || '',
             address: newClient.address || '',
           };
+          if (newClient.dni) minimalPayload.dni = newClient.dni;
           insertRes = await supabase.from('clients').upsert(minimalPayload).select().single();
         }
 
@@ -709,8 +755,13 @@ export const api = {
           phone: client.phone || '',
           address: client.address || '',
         };
+        if (client.dni !== undefined) payload.dni = client.dni;
         if (client.birthDate) payload.birthDate = client.birthDate;
         if (client.lastSessionAt) payload.lastSessionAt = client.lastSessionAt;
+        if (client.hasBono !== undefined) payload.hasBono = client.hasBono;
+        if (client.bonoType !== undefined) payload.bonoType = client.bonoType;
+        if (client.defaultDiscount !== undefined) payload.defaultDiscount = client.defaultDiscount;
+        if (client.bonoSessionsRemaining !== undefined) payload.bonoSessionsRemaining = client.bonoSessionsRemaining;
 
         let updateRes = await supabase.from('clients').update(payload).eq('id', client.id).select().single();
         
@@ -723,8 +774,13 @@ export const api = {
             phone: client.phone || '',
             address: client.address || '',
           };
+          if (client.dni !== undefined) fallbackPayload.dni = client.dni;
           if (client.birthDate) fallbackPayload.birth_date = client.birthDate;
           if (client.lastSessionAt) fallbackPayload.last_session_at = client.lastSessionAt;
+          if (client.hasBono !== undefined) fallbackPayload.has_bono = client.hasBono;
+          if (client.bonoType !== undefined) fallbackPayload.bono_type = client.bonoType;
+          if (client.defaultDiscount !== undefined) fallbackPayload.default_discount = client.defaultDiscount;
+          if (client.bonoSessionsRemaining !== undefined) fallbackPayload.bono_sessions_remaining = client.bonoSessionsRemaining;
           updateRes = await supabase.from('clients').update(fallbackPayload).eq('id', client.id).select().single();
         }
 
@@ -964,6 +1020,10 @@ export const api = {
           status: newInvoice.status || 'paid',
           paymentMethod: newInvoice.paymentMethod || 'card',
           description: newInvoice.description || "Séance d'Ostéopathie",
+          ...(newInvoice.originalAmount !== undefined ? { originalAmount: newInvoice.originalAmount } : {}),
+          ...(newInvoice.discountAmount !== undefined ? { discountAmount: newInvoice.discountAmount } : {}),
+          ...(newInvoice.discountType ? { discountType: newInvoice.discountType } : {}),
+          ...(newInvoice.discountLabel ? { discountLabel: newInvoice.discountLabel } : {}),
           ...(newInvoice.noteId ? { noteId: newInvoice.noteId } : {}),
         };
 
@@ -980,6 +1040,10 @@ export const api = {
             status: newInvoice.status || 'paid',
             payment_method: newInvoice.paymentMethod || 'card',
             description: newInvoice.description || "Séance d'Ostéopathie",
+            ...(newInvoice.originalAmount !== undefined ? { original_amount: newInvoice.originalAmount } : {}),
+            ...(newInvoice.discountAmount !== undefined ? { discount_amount: newInvoice.discountAmount } : {}),
+            ...(newInvoice.discountType ? { discount_type: newInvoice.discountType } : {}),
+            ...(newInvoice.discountLabel ? { discount_label: newInvoice.discountLabel } : {}),
             ...(newInvoice.noteId ? { note_id: newInvoice.noteId } : {}),
           };
           insertRes = await supabase.from('invoices').insert(fallback).select().single();
@@ -1018,6 +1082,10 @@ export const api = {
           status: invoice.status,
           paymentMethod: invoice.paymentMethod,
           description: invoice.description,
+          ...(invoice.originalAmount !== undefined ? { originalAmount: invoice.originalAmount } : {}),
+          ...(invoice.discountAmount !== undefined ? { discountAmount: invoice.discountAmount } : {}),
+          ...(invoice.discountType ? { discountType: invoice.discountType } : {}),
+          ...(invoice.discountLabel ? { discountLabel: invoice.discountLabel } : {}),
         };
 
         let updateRes = await supabase.from('invoices').update(payload).eq('id', invoice.id).select().single();
@@ -1031,6 +1099,10 @@ export const api = {
             status: invoice.status,
             payment_method: invoice.paymentMethod,
             description: invoice.description,
+            ...(invoice.originalAmount !== undefined ? { original_amount: invoice.originalAmount } : {}),
+            ...(invoice.discountAmount !== undefined ? { discount_amount: invoice.discountAmount } : {}),
+            ...(invoice.discountType ? { discount_type: invoice.discountType } : {}),
+            ...(invoice.discountLabel ? { discount_label: invoice.discountLabel } : {}),
           };
           updateRes = await supabase.from('invoices').update(fallback).eq('id', invoice.id).select().single();
         }
