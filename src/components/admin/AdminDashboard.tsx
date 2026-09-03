@@ -185,6 +185,23 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
     count: number;
   } | null>(null);
 
+  // Custom Confirmation Dialog State (Works reliably across iframes, Google AI Studio, and deployed sites)
+  const [confirmDialog, setConfirmDialog] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    confirmText?: string;
+    cancelText?: string;
+    isDangerous?: boolean;
+    isLoading?: boolean;
+    onConfirm: () => Promise<void> | void;
+  }>({
+    isOpen: false,
+    title: '',
+    message: '',
+    onConfirm: () => {},
+  });
+
   // Supabase Diagnostics & Synchronization states
   const [isSupabaseModalOpen, setIsSupabaseModalOpen] = useState(false);
   const [isDiagnosing, setIsDiagnosing] = useState(false);
@@ -324,28 +341,35 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
   };
 
   // Delete Client Handler
-  const handleDeleteClient = async (clientId: string) => {
+  const handleDeleteClient = (clientId: string) => {
     const clientToDelete = clients.find(c => c.id === clientId);
     const clientName = clientToDelete ? clientToDelete.name : '';
-    const confirmMessage = lang === 'fr'
-      ? `Êtes-vous sûr de vouloir supprimer définitivement le patient ${clientName} ?`
-      : lang === 'es'
-      ? `¿Está seguro de que desea eliminar al paciente ${clientName}?`
-      : `Are you sure you want to delete patient ${clientName}?`;
 
-    if (!window.confirm(confirmMessage)) return;
-
-    try {
-      await api.deleteClient(clientId);
-      setClients(prev => prev.filter(c => c.id !== clientId));
-      if (selectedClient?.id === clientId) {
-        setSelectedClient(null);
-      }
-      setIsEditClientOpen(false);
-      setEditingClient(null);
-    } catch (err) {
-      console.error('Failed to delete client:', err);
-    }
+    setConfirmDialog({
+      isOpen: true,
+      title: lang === 'fr' ? 'Supprimer le patient' : lang === 'es' ? 'Eliminar paciente' : 'Delete patient',
+      message: lang === 'fr'
+        ? `Êtes-vous sûr de vouloir supprimer définitivement le patient "${clientName}" et l'historique associé ? Cette action est irréversible.`
+        : lang === 'es'
+        ? `¿Está seguro de que desea eliminar definitivamente al paciente "${clientName}"?`
+        : `Are you sure you want to permanently delete patient "${clientName}"?`,
+      confirmText: lang === 'fr' ? 'Supprimer le patient' : lang === 'es' ? 'Eliminar' : 'Delete patient',
+      cancelText: lang === 'fr' ? 'Annuler' : lang === 'es' ? 'Cancelar' : 'Cancel',
+      isDangerous: true,
+      onConfirm: async () => {
+        try {
+          await api.deleteClient(clientId);
+          setClients(prev => prev.filter(c => c.id !== clientId));
+          if (selectedClient?.id === clientId) {
+            setSelectedClient(null);
+          }
+          setIsEditClientOpen(false);
+          setEditingClient(null);
+        } catch (err) {
+          console.error('Failed to delete client:', err);
+        }
+      },
+    });
   };
 
   // Load notes when client changes
@@ -390,21 +414,58 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
   };
 
   // Delete client Note with confirmation
-  const handleDeleteNote = async (noteId: string) => {
-    const confirmMsg = lang === 'fr' 
-      ? 'Êtes-vous sûr de vouloir supprimer cette note clinique définitivement ?'
-      : lang === 'es'
-      ? '¿Está seguro de que desea eliminar esta nota clínica definitivamente?'
-      : 'Are you sure you want to permanently delete this clinical note?';
-    const confirmed = window.confirm(confirmMsg);
-    if (!confirmed) return;
-    
-    try {
-      await api.deleteClientNote(noteId);
-      setClientNotes(prev => prev.filter(n => n.id !== noteId));
-    } catch (err) {
-      console.error('Failed to delete note:', err);
-    }
+  const handleDeleteNote = (noteId: string) => {
+    setConfirmDialog({
+      isOpen: true,
+      title: lang === 'fr' ? 'Supprimer la note clinique' : lang === 'es' ? 'Eliminar nota clínica' : 'Delete clinical note',
+      message: lang === 'fr' 
+        ? 'Êtes-vous certain de vouloir supprimer cette note clinique définitivement ?'
+        : lang === 'es'
+        ? '¿Está seguro de que desea eliminar esta nota clínica definitivamente?'
+        : 'Are you sure you want to permanently delete this clinical note?',
+      confirmText: lang === 'fr' ? 'Supprimer' : lang === 'es' ? 'Eliminar' : 'Delete',
+      cancelText: lang === 'fr' ? 'Annuler' : lang === 'es' ? 'Cancelar' : 'Cancel',
+      isDangerous: true,
+      onConfirm: async () => {
+        try {
+          await api.deleteClientNote(noteId);
+          setClientNotes(prev => prev.filter(n => n.id !== noteId));
+        } catch (err) {
+          console.error('Failed to delete note:', err);
+        }
+      },
+    });
+  };
+
+  // Delete Invoice with confirmation
+  const handleDeleteInvoice = (invoiceId: string) => {
+    const inv = invoices.find(i => i.id === invoiceId);
+    const invLabel = inv ? `#${inv.invoiceNumber} (${inv.clientName} - ${inv.amount}€)` : '';
+
+    setConfirmDialog({
+      isOpen: true,
+      title: lang === 'fr' ? 'Supprimer la facture' : lang === 'es' ? 'Eliminar factura' : 'Delete invoice',
+      message: lang === 'fr' 
+        ? `Êtes-vous certain de vouloir supprimer définitivement la facture ${invLabel} ? Cette action est irréversible.`
+        : lang === 'es'
+        ? `¿Está seguro de que desea eliminar definitivamente la factura ${invLabel}?`
+        : `Are you sure you want to permanently delete invoice ${invLabel}?`,
+      confirmText: lang === 'fr' ? 'Supprimer la facture' : lang === 'es' ? 'Eliminar' : 'Delete invoice',
+      cancelText: lang === 'fr' ? 'Annuler' : lang === 'es' ? 'Cancelar' : 'Cancel',
+      isDangerous: true,
+      onConfirm: async () => {
+        try {
+          await api.deleteInvoice(invoiceId);
+          setInvoices(prev => prev.filter(i => i.id !== invoiceId));
+          if (isEditInvoiceOpen && editingInvoice?.id === invoiceId) {
+            setIsEditInvoiceOpen(false);
+            setEditingInvoice(null);
+          }
+        } catch (err) {
+          console.error('Invoice deletion failed:', err);
+        }
+      },
+    });
   };
 
   // Create invoice
@@ -891,28 +952,34 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
   };
 
   // Delete Calendar event
-  const handleDeleteEvent = async (eventId: string) => {
-    console.log("Delete attempt for event:", eventId);
-    const confirmed = window.confirm(
-      lang === 'fr' 
-        ? 'Voulez-vous supprimer définitivement ce rendez-vous ?' 
-        : 'Do you want to permanently delete this appointment?'
-    );
-    console.log("Confirmed:", confirmed);
-    if (!confirmed) return;
+  const handleDeleteEvent = (eventId: string) => {
+    const eventToDelete = events.find(ev => ev.id === eventId);
+    const eventTitle = eventToDelete ? eventToDelete.summary : '';
 
-    try {
-      await api.deleteLocalEvent(eventId);
-      console.log("Deletion successful");
-      setEvents(prev => prev.filter(ev => ev.id !== eventId));
-      if (isEditEventOpen) {
-        setIsEditEventOpen(false);
-        setEditingEvent(null);
-      }
-    } catch (err: any) {
-      console.error('Failed to delete event:', err);
-      alert(lang === 'fr' ? "Erreur lors de la suppression." : "Error deleting appointment.");
-    }
+    setConfirmDialog({
+      isOpen: true,
+      title: lang === 'fr' ? 'Supprimer le rendez-vous' : lang === 'es' ? 'Eliminar cita' : 'Delete appointment',
+      message: lang === 'fr' 
+        ? `Êtes-vous certain de vouloir supprimer définitivement le rendez-vous "${eventTitle}" ?`
+        : lang === 'es'
+        ? `¿Está seguro de que desea eliminar definitivamente la cita "${eventTitle}"?`
+        : `Are you sure you want to permanently delete appointment "${eventTitle}"?`,
+      confirmText: lang === 'fr' ? 'Supprimer le RDV' : lang === 'es' ? 'Eliminar' : 'Delete appointment',
+      cancelText: lang === 'fr' ? 'Annuler' : lang === 'es' ? 'Cancelar' : 'Cancel',
+      isDangerous: true,
+      onConfirm: async () => {
+        try {
+          await api.deleteLocalEvent(eventId);
+          setEvents(prev => prev.filter(ev => ev.id !== eventId));
+          if (isEditEventOpen) {
+            setIsEditEventOpen(false);
+            setEditingEvent(null);
+          }
+        } catch (err: any) {
+          console.error('Failed to delete event:', err);
+        }
+      },
+    });
   };
 
   // CALCULATE KPI METRICS
@@ -2438,12 +2505,6 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                     <CalendarIcon className="text-primary" size={22} />
                     {lang === 'fr' ? 'Agenda du Cabinet' : lang === 'es' ? 'Agenda de la Clínica' : 'Clinic Calendar'}
                   </h3>
-                  <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
-                    {isSupabaseConfigured 
-                      ? (lang === 'fr' ? "Enregistré sur Supabase Cloud" : lang === 'es' ? "Guardado en Supabase Cloud" : "Saved on Supabase Cloud")
-                      : (lang === 'fr' ? "Agenda Local" : lang === 'es' ? "Agenda Local" : "Local Calendar")}
-                  </span>
                 </div>
                 <p className="text-xs text-gray-500 mt-1">
                   {lang === 'fr' 
@@ -3178,20 +3239,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                               </span>
                             </button>
                             <button
-                              onClick={async () => {
-                                console.log("Delete attempt for invoice:", inv.id);
-                                const confirmed = window.confirm(translations[lang].admin.billing.deleteConfirm);
-                                console.log("Confirmed:", confirmed);
-                                if (confirmed) {
-                                  try {
-                                    await api.deleteInvoice(inv.id);
-                                    console.log("Invoice deletion successful");
-                                    setInvoices(prev => prev.filter(i => i.id !== inv.id));
-                                  } catch (err) {
-                                    console.error("Invoice deletion failed:", err);
-                                  }
-                                }
-                              }}
+                              onClick={() => handleDeleteInvoice(inv.id)}
                               className="p-1.5 hover:bg-red-50 text-gray-500 hover:text-red-500 rounded-lg transition-all inline-flex items-center"
                               title={translations[lang].admin.billing.delete}
                             >
@@ -4634,23 +4682,34 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                   </select>
                 </div>
 
-                <div className="flex gap-3 pt-4">
+                <div className="flex items-center justify-between pt-4 gap-3">
                   <button
                     type="button"
-                    onClick={() => {
-                      setIsEditInvoiceOpen(false);
-                      setEditingInvoice(null);
-                    }}
-                    className="flex-1 py-3 bg-secondary text-gray-600 rounded-2xl text-xs font-bold uppercase tracking-wider hover:bg-black/5 transition-all"
+                    onClick={() => handleDeleteInvoice(editingInvoice.id)}
+                    className="px-3 py-3 bg-red-50 hover:bg-red-100 text-red-600 rounded-2xl text-xs font-bold transition-all flex items-center gap-1.5"
+                    title={lang === 'fr' ? 'Supprimer cette facture' : 'Delete invoice'}
                   >
-                    {lang === 'fr' ? 'Annuler' : lang === 'es' ? 'Cancelar' : 'Cancel'}
+                    <Trash2 size={14} />
+                    <span>{lang === 'fr' ? 'Supprimer' : 'Delete'}</span>
                   </button>
-                  <button
-                    type="submit"
-                    className="flex-1 py-3 bg-primary text-white rounded-2xl text-xs font-bold uppercase tracking-wider hover:bg-primary/95 transition-all shadow-md"
-                  >
-                    {lang === 'fr' ? 'Enregistrer' : lang === 'es' ? 'Guardar' : 'Save'}
-                  </button>
+                  <div className="flex gap-2 flex-1 justify-end">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsEditInvoiceOpen(false);
+                        setEditingInvoice(null);
+                      }}
+                      className="px-4 py-3 bg-secondary text-gray-600 rounded-2xl text-xs font-bold uppercase tracking-wider hover:bg-black/5 transition-all"
+                    >
+                      {lang === 'fr' ? 'Annuler' : lang === 'es' ? 'Cancelar' : 'Cancel'}
+                    </button>
+                    <button
+                      type="submit"
+                      className="px-5 py-3 bg-primary text-white rounded-2xl text-xs font-bold uppercase tracking-wider hover:bg-primary/95 transition-all shadow-md"
+                    >
+                      {lang === 'fr' ? 'Enregistrer' : lang === 'es' ? 'Guardar' : 'Save'}
+                    </button>
+                  </div>
                 </div>
               </form>
             </motion.div>
@@ -5240,6 +5299,75 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
           </div>
         )}
 
+        {/* MODAL: CUSTOM IN-APP CONFIRMATION DIALOG (Guaranteed to work in iframe, Google AI Studio, and Deployed sites) */}
+        {confirmDialog.isOpen && (
+          <div className="fixed inset-0 z-[120] flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => {
+                if (!confirmDialog.isLoading) {
+                  setConfirmDialog(prev => ({ ...prev, isOpen: false }));
+                }
+              }}
+              className="absolute inset-0 bg-black/50 backdrop-blur-xs"
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 10 }}
+              className="relative w-full max-w-sm bg-white rounded-3xl shadow-2xl p-6 z-10 border border-black/10 text-left"
+            >
+              <div className="flex items-start gap-3.5 mb-4">
+                <div className={`w-10 h-10 rounded-2xl flex items-center justify-center shrink-0 ${
+                  confirmDialog.isDangerous ? 'bg-rose-50 text-rose-600' : 'bg-primary/10 text-primary'
+                }`}>
+                  {confirmDialog.isDangerous ? <AlertTriangle size={20} /> : <FileText size={20} />}
+                </div>
+                <div>
+                  <h4 className="text-base font-bold text-gray-900 font-serif">
+                    {confirmDialog.title}
+                  </h4>
+                  <p className="text-xs text-gray-500 mt-1 leading-relaxed">
+                    {confirmDialog.message}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-black/5">
+                <button
+                  type="button"
+                  disabled={confirmDialog.isLoading}
+                  onClick={() => setConfirmDialog(prev => ({ ...prev, isOpen: false }))}
+                  className="px-4 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl text-xs font-bold transition-all disabled:opacity-50"
+                >
+                  {confirmDialog.cancelText || (lang === 'fr' ? 'Annuler' : lang === 'es' ? 'Cancelar' : 'Cancel')}
+                </button>
+                <button
+                  type="button"
+                  disabled={confirmDialog.isLoading}
+                  onClick={async () => {
+                    setConfirmDialog(prev => ({ ...prev, isLoading: true }));
+                    try {
+                      await confirmDialog.onConfirm();
+                    } finally {
+                      setConfirmDialog(prev => ({ ...prev, isLoading: false, isOpen: false }));
+                    }
+                  }}
+                  className={`px-4 py-2.5 text-white rounded-xl text-xs font-bold transition-all shadow-sm flex items-center gap-1.5 disabled:opacity-50 ${
+                    confirmDialog.isDangerous 
+                      ? 'bg-rose-600 hover:bg-rose-700' 
+                      : 'bg-primary hover:bg-primary/95'
+                  }`}
+                >
+                  {confirmDialog.isLoading && <RefreshCw size={13} className="animate-spin" />}
+                  <span>{confirmDialog.confirmText || (lang === 'fr' ? 'Confirmer' : lang === 'es' ? 'Confirmar' : 'Confirm')}</span>
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
       </AnimatePresence>
 
     </div>
