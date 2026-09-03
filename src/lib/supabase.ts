@@ -6,10 +6,9 @@ const DEFAULT_SUPABASE_URL = 'https://lnlemynayesjduntoran.supabase.co';
 const DEFAULT_SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxubGVteW5heWVzamR1bnRvcmFuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjczNDAyMDgsImV4cCI6MjA4MjkxNjIwOH0.3b9fFgeWTXen1fsOO0xMdM5Fd3PTxYs41UxlPapo0ZU';
 
 // Note: Vite bundler requires explicit static property access (import.meta.env.VITE_...)
-// Dynamic access like import.meta.env[key] gets stripped during Vite production build.
 const metaEnv = (import.meta as any).env || {};
 
-const supabaseUrl = 
+export const supabaseUrl = 
   metaEnv.VITE_SUPABASE_URL ||
   metaEnv.SUPABASE_URL ||
   metaEnv.NEXT_PUBLIC_SUPABASE_URL ||
@@ -17,7 +16,7 @@ const supabaseUrl =
   (typeof process !== 'undefined' && process.env?.SUPABASE_URL) ||
   DEFAULT_SUPABASE_URL;
 
-const supabaseAnonKey = 
+export const supabaseAnonKey = 
   metaEnv.VITE_SUPABASE_ANON_KEY ||
   metaEnv.SUPABASE_ANON_KEY ||
   metaEnv.SUPABASE_PUBLISHABLE_KEY ||
@@ -29,11 +28,21 @@ const supabaseAnonKey =
 export const isSupabaseConfigured = !!(supabaseUrl && supabaseAnonKey);
 
 export const supabase = isSupabaseConfigured
-  ? createClient(supabaseUrl, supabaseAnonKey)
+  ? createClient(supabaseUrl, supabaseAnonKey, {
+      auth: { persistSession: true, autoRefreshToken: true },
+    })
   : null;
 
+// Track last Supabase write status for UI diagnostics
+export let lastSupabaseStatus: {
+  lastAction?: string;
+  success?: boolean;
+  error?: string;
+  timestamp?: string;
+} = {};
+
 // ==========================================
-// SEED DATA FOR LOCAL STORAGE
+// SEED DATA FOR LOCAL STORAGE FALLBACK
 // ==========================================
 const mockClients: Client[] = [
   {
@@ -200,7 +209,6 @@ const mockInvoices: Invoice[] = [
     paymentMethod: 'card',
     description: 'Séance d\'Ostéopathie (1h)',
   },
-  // Adding historic bills for beautiful charts (monthly and annual distribution)
   {
     id: 'i_h1',
     invoiceNumber: 'FAC-2026-021',
@@ -326,13 +334,12 @@ export function mapClientFromDB(c: any): Client {
   let lastName = c.lastName || c.last_name;
 
   if ((!firstName || !lastName) && c.name) {
-    const parts = c.name.split(' ');
-    // Assuming format "LASTNAME Firstname"
+    const parts = String(c.name).split(' ');
     lastName = parts[0] || '';
     firstName = parts.slice(1).join(' ') || '';
   }
 
-  const name = c.name || `${lastName.toUpperCase()} ${firstName}`.trim();
+  const name = c.name || `${(lastName || '').toUpperCase()} ${firstName || ''}`.trim() || 'Patient sans nom';
   return {
     id: String(c.id),
     firstName: firstName || '',
@@ -397,50 +404,245 @@ export function mapEventFromDB(e: any): CalendarEvent {
   };
 }
 
-// SQL SCRIPT FOR SUPABASE SETUP
+// ==========================================
+// RESILIENT SELF-HEALING DATABASE EXECUTOR
+// ==========================================
+
+/**
+ * Extracts a missing column name from PostgreSQL / PostgREST error messages.
+ * Examples:
+ * - 'column "dni" of relation "clients" does not exist'
+ * - "Could not find the 'dni' column of 'clients' in the schema cache"
+ * - 'column "birth_date" does not exist'
+ */
+function extractMissingColumn(errorMsg: string): string | null {
+  if (!errorMsg) return null;
+  const match1 = errorMsg.match(/column ["']?([a-zA-Z0-9_]+)["']? of relation/i);
+  if (match1 && match1[1]) return match1[1];
+
+  const match2 = errorMsg.match(/Could not find the ['"]([a-zA-Z0-9_]+)['"] column/i);
+  if (match2 && match2[1]) return match2[1];
+
+  const match3 = errorMsg.match(/column ["']?([a-zA-Z0-9_]+)["']? does not exist/i);
+  if (match3 && match3[1]) return match3[1];
+
+  return null;
+}
+
+/**
+ * Executes an insert or upsert operation with automated self-healing retry.
+ * If Supabase complains about non-existent columns in the table, it removes the missing column
+ * and retries automatically until successful.
+ */
+async function executeResilientInsert(
+  table: string,
+  candidatePayloads: Record<string, any>[]
+): Promise<{ data: any | null; error: any | null; success: boolean }> {
+  if (!isSupabaseConfigured || !supabase) {
+    return { data: null, error: new Error('Supabase client not initialized'), success: false };
+  }
+
+  let lastError: any = null;
+
+  for (const initialPayload of candidatePayloads) {
+    let currentPayload = { ...initialPayload };
+    let attempts = 0;
+    const maxAttempts = Object.keys(currentPayload).length + 2;
+
+    while (attempts < maxAttempts) {
+      attempts++;
+      try {
+        // Try insert with .select().single()
+        const res = await supabase.from(table).insert(currentPayload).select().single();
+        if (!res.error && res.data) {
+          lastSupabaseStatus = {
+            lastAction: `Insert ${table}`,
+            success: true,
+            timestamp: new Date().toISOString(),
+          };
+          return { data: res.data, error: null, success: true };
+        }
+
+        // If .select() failed (e.g. RLS SELECT restriction), try a plain insert
+        if (res.error) {
+          lastError = res.error;
+          const msg = res.error.message || '';
+
+          // 1. Missing column error -> strip column & retry
+          const missingCol = extractMissingColumn(msg);
+          if (missingCol && missingCol in currentPayload) {
+            console.warn(`[Supabase Auto-Heal] Column "${missingCol}" does not exist in "${table}". Stripping and retrying.`);
+            delete currentPayload[missingCol];
+            continue;
+          }
+
+          // 2. Try plain insert without .select() if it was an RLS policy issue with select
+          if (msg.includes('row-level security') || res.error.code === 'PGRST116' || res.error.code === '42501') {
+            const plainRes = await supabase.from(table).insert(currentPayload);
+            if (!plainRes.error) {
+              lastSupabaseStatus = {
+                lastAction: `Plain insert ${table}`,
+                success: true,
+                timestamp: new Date().toISOString(),
+              };
+              return { data: currentPayload, error: null, success: true };
+            }
+          }
+
+          // 3. ID type mismatch (e.g. integer primary key) -> try without id if generated
+          if (msg.includes('invalid input syntax for type integer') || msg.includes('invalid input syntax for type bigint')) {
+            if ('id' in currentPayload) {
+              console.warn(`[Supabase Auto-Heal] Table "${table}" uses integer IDs. Stripping string UUID and retrying.`);
+              delete currentPayload.id;
+              continue;
+            }
+          }
+
+          // Non-recoverable error for this payload, break to next candidate payload
+          break;
+        }
+      } catch (err: any) {
+        lastError = err;
+        break;
+      }
+    }
+  }
+
+  lastSupabaseStatus = {
+    lastAction: `Insert ${table}`,
+    success: false,
+    error: lastError?.message || 'Database error',
+    timestamp: new Date().toISOString(),
+  };
+
+  return { data: null, error: lastError, success: false };
+}
+
+/**
+ * Executes an update operation with automated self-healing retry.
+ */
+async function executeResilientUpdate(
+  table: string,
+  id: string,
+  candidatePayloads: Record<string, any>[]
+): Promise<{ data: any | null; error: any | null; success: boolean }> {
+  if (!isSupabaseConfigured || !supabase) {
+    return { data: null, error: new Error('Supabase client not initialized'), success: false };
+  }
+
+  let lastError: any = null;
+
+  for (const initialPayload of candidatePayloads) {
+    let currentPayload = { ...initialPayload };
+    let attempts = 0;
+    const maxAttempts = Object.keys(currentPayload).length + 2;
+
+    while (attempts < maxAttempts) {
+      attempts++;
+      try {
+        const res = await supabase.from(table).update(currentPayload).eq('id', id).select().single();
+        if (!res.error && res.data) {
+          lastSupabaseStatus = {
+            lastAction: `Update ${table}`,
+            success: true,
+            timestamp: new Date().toISOString(),
+          };
+          return { data: res.data, error: null, success: true };
+        }
+
+        if (res.error) {
+          lastError = res.error;
+          const msg = res.error.message || '';
+
+          const missingCol = extractMissingColumn(msg);
+          if (missingCol && missingCol in currentPayload) {
+            console.warn(`[Supabase Auto-Heal] Column "${missingCol}" does not exist in "${table}". Stripping and retrying.`);
+            delete currentPayload[missingCol];
+            continue;
+          }
+
+          // Plain update without select
+          if (msg.includes('row-level security') || res.error.code === 'PGRST116' || res.error.code === '42501') {
+            const plainRes = await supabase.from(table).update(currentPayload).eq('id', id);
+            if (!plainRes.error) {
+              return { data: { id, ...currentPayload }, error: null, success: true };
+            }
+          }
+
+          break;
+        }
+      } catch (err: any) {
+        lastError = err;
+        break;
+      }
+    }
+  }
+
+  lastSupabaseStatus = {
+    lastAction: `Update ${table}`,
+    success: false,
+    error: lastError?.message || 'Update error',
+    timestamp: new Date().toISOString(),
+  };
+
+  return { data: null, error: lastError, success: false };
+}
+
+// ==========================================
+// SQL SCRIPT FOR SUPABASE SETUP & UPGRADE
+// ==========================================
 export const SUPABASE_SQL_SETUP = `-- ==============================================================================
--- SCRIPT COMPLET DE CRÉATION DES TABLES SUPABASE (CABINET D'OSTÉOPATHIE)
+-- SCRIPT COMPLET DE CRÉATION & MISE À NIVEAU DES TABLES (CABINET VINCENT OSTÉOPATHIE)
 -- À exécuter dans Supabase : Menu gauche > SQL Editor > New query > Run
+-- Ce script est idempotent (peut être relancé en toute sécurité sans perdre de données).
 -- ==============================================================================
 
 -- 1. TABLE DES PATIENTS (CLIENTS)
 CREATE TABLE IF NOT EXISTS public.clients (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
-    "firstName" TEXT,
-    "lastName" TEXT,
     first_name TEXT,
     last_name TEXT,
     dni TEXT,
-    "dni" TEXT,
     email TEXT,
     phone TEXT,
-    "birthDate" TEXT,
     birth_date TEXT,
     address TEXT,
-    "createdAt" TIMESTAMPTZ DEFAULT NOW(),
     created_at TIMESTAMPTZ DEFAULT NOW(),
-    "lastSessionAt" TIMESTAMPTZ,
     last_session_at TIMESTAMPTZ,
-    "hasBono" BOOLEAN DEFAULT FALSE,
     has_bono BOOLEAN DEFAULT FALSE,
-    "bonoType" TEXT,
     bono_type TEXT,
-    "defaultDiscount" NUMERIC,
     default_discount NUMERIC,
-    "bonoSessionsRemaining" NUMERIC,
     bono_sessions_remaining NUMERIC
 );
 
--- Si la table clients existe déjà sur votre Supabase, exécutez cette ligne pour ajouter la colonne DNI / NIE :
+-- Mises à jour des colonnes si la table clients existe déjà sur votre Supabase :
+ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS first_name TEXT;
+ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS last_name TEXT;
+ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS "firstName" TEXT;
+ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS "lastName" TEXT;
 ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS dni TEXT;
 ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS "dni" TEXT;
+ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS birth_date TEXT;
+ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS "birthDate" TEXT;
+ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS address TEXT;
+ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();
+ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS "createdAt" TIMESTAMPTZ DEFAULT NOW();
+ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS last_session_at TIMESTAMPTZ;
+ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS "lastSessionAt" TIMESTAMPTZ;
+ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS has_bono BOOLEAN DEFAULT FALSE;
+ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS "hasBono" BOOLEAN DEFAULT FALSE;
+ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS bono_type TEXT;
+ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS "bonoType" TEXT;
+ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS default_discount NUMERIC;
+ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS "defaultDiscount" NUMERIC;
+ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS bono_sessions_remaining NUMERIC;
+ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS "bonoSessionsRemaining" NUMERIC;
 
--- 2. TABLE DES NOTES CLINIQUES & CONSULTATIONS
+-- 2. TABLE DES NOTES CLINIQUES & DOSSIERS PATIENTS
 CREATE TABLE IF NOT EXISTS public.client_notes (
     id TEXT PRIMARY KEY,
-    "clientId" TEXT NOT NULL,
-    client_id TEXT,
+    client_id TEXT NOT NULL,
     date TIMESTAMPTZ NOT NULL,
     motif TEXT,
     anamnese TEXT,
@@ -450,24 +652,55 @@ CREATE TABLE IF NOT EXISTS public.client_notes (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+ALTER TABLE public.client_notes ADD COLUMN IF NOT EXISTS "clientId" TEXT;
+ALTER TABLE public.client_notes ADD COLUMN IF NOT EXISTS client_id TEXT;
+ALTER TABLE public.client_notes ADD COLUMN IF NOT EXISTS motif TEXT;
+ALTER TABLE public.client_notes ADD COLUMN IF NOT EXISTS anamnese TEXT;
+ALTER TABLE public.client_notes ADD COLUMN IF NOT EXISTS treatment TEXT;
+ALTER TABLE public.client_notes ADD COLUMN IF NOT EXISTS content TEXT;
+ALTER TABLE public.client_notes ADD COLUMN IF NOT EXISTS category TEXT DEFAULT 'treatment';
+ALTER TABLE public.client_notes ADD COLUMN IF NOT EXISTS date TIMESTAMPTZ;
+
 -- 3. TABLE DES FACTURES & REÇUS D'HONORAIRES
 CREATE TABLE IF NOT EXISTS public.invoices (
     id TEXT PRIMARY KEY,
-    "invoiceNumber" TEXT NOT NULL,
-    invoice_number TEXT,
-    "clientId" TEXT NOT NULL,
-    client_id TEXT,
-    "clientName" TEXT NOT NULL,
-    client_name TEXT,
+    invoice_number TEXT NOT NULL,
+    client_id TEXT NOT NULL,
+    client_name TEXT NOT NULL,
     date TEXT NOT NULL,
     amount NUMERIC NOT NULL,
+    original_amount NUMERIC,
+    discount_amount NUMERIC,
+    discount_type TEXT,
+    discount_label TEXT,
     status TEXT DEFAULT 'paid',
-    "paymentMethod" TEXT DEFAULT 'card',
     payment_method TEXT DEFAULT 'card',
     description TEXT,
     language TEXT DEFAULT 'fr',
+    note_id TEXT,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS "invoiceNumber" TEXT;
+ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS invoice_number TEXT;
+ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS "clientId" TEXT;
+ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS client_id TEXT;
+ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS "clientName" TEXT;
+ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS client_name TEXT;
+ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS original_amount NUMERIC;
+ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS "originalAmount" NUMERIC;
+ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS discount_amount NUMERIC;
+ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS "discountAmount" NUMERIC;
+ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS discount_type TEXT;
+ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS "discountType" TEXT;
+ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS discount_label TEXT;
+ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS "discountLabel" TEXT;
+ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS payment_method TEXT DEFAULT 'card';
+ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS "paymentMethod" TEXT DEFAULT 'card';
+ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS description TEXT;
+ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS language TEXT DEFAULT 'fr';
+ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS note_id TEXT;
+ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS "noteId" TEXT;
 
 -- 4. TABLE DE L'AGENDA & RENDEZ-VOUS
 CREATE TABLE IF NOT EXISTS public.calendar_events (
@@ -476,14 +709,21 @@ CREATE TABLE IF NOT EXISTS public.calendar_events (
     description TEXT,
     start TIMESTAMPTZ NOT NULL,
     "end" TIMESTAMPTZ NOT NULL,
-    "clientId" TEXT,
     client_id TEXT,
-    "clientName" TEXT,
     client_name TEXT,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 5. ACTIVATION RLS & AUTORISATIONS EN LECTURE/ÉCRITURE
+ALTER TABLE public.calendar_events ADD COLUMN IF NOT EXISTS "clientId" TEXT;
+ALTER TABLE public.calendar_events ADD COLUMN IF NOT EXISTS client_id TEXT;
+ALTER TABLE public.calendar_events ADD COLUMN IF NOT EXISTS "clientName" TEXT;
+ALTER TABLE public.calendar_events ADD COLUMN IF NOT EXISTS client_name TEXT;
+ALTER TABLE public.calendar_events ADD COLUMN IF NOT EXISTS summary TEXT;
+ALTER TABLE public.calendar_events ADD COLUMN IF NOT EXISTS description TEXT;
+ALTER TABLE public.calendar_events ADD COLUMN IF NOT EXISTS start TIMESTAMPTZ;
+ALTER TABLE public.calendar_events ADD COLUMN IF NOT EXISTS "end" TIMESTAMPTZ;
+
+-- 5. POLITIQUES DE SÉCURITÉ ROW LEVEL SECURITY (RLS) & DROITS D'ACCÈS
 ALTER TABLE public.clients ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.client_notes ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.invoices ENABLE ROW LEVEL SECURITY;
@@ -492,17 +732,23 @@ ALTER TABLE public.calendar_events ENABLE ROW LEVEL SECURITY;
 DO $$ 
 BEGIN
     DROP POLICY IF EXISTS "Accès total clients" ON public.clients;
-    CREATE POLICY "Accès total clients" ON public.clients FOR ALL USING (true) WITH CHECK (true);
+    CREATE POLICY "Accès total clients" ON public.clients FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
     
     DROP POLICY IF EXISTS "Accès total notes" ON public.client_notes;
-    CREATE POLICY "Accès total notes" ON public.client_notes FOR ALL USING (true) WITH CHECK (true);
+    CREATE POLICY "Accès total notes" ON public.client_notes FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
     
     DROP POLICY IF EXISTS "Accès total factures" ON public.invoices;
-    CREATE POLICY "Accès total factures" ON public.invoices FOR ALL USING (true) WITH CHECK (true);
+    CREATE POLICY "Accès total factures" ON public.invoices FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
     
     DROP POLICY IF EXISTS "Accès total agenda" ON public.calendar_events;
-    CREATE POLICY "Accès total agenda" ON public.calendar_events FOR ALL USING (true) WITH CHECK (true);
+    CREATE POLICY "Accès total agenda" ON public.calendar_events FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
 END $$;
+
+-- 6. PERMISSIONS EXPLICITES POUR LE RÔLE PUBLIC ANON & AUTHENTICATED
+GRANT ALL ON public.clients TO anon, authenticated;
+GRANT ALL ON public.client_notes TO anon, authenticated;
+GRANT ALL ON public.invoices TO anon, authenticated;
+GRANT ALL ON public.calendar_events TO anon, authenticated;
 `;
 
 // ==========================================
@@ -517,6 +763,7 @@ export const api = {
     invoices: boolean;
     calendarEvents: boolean;
     errorSummary?: string;
+    projectUrl?: string;
   }> {
     if (!isSupabaseConfigured || !supabase) {
       return {
@@ -525,7 +772,7 @@ export const api = {
         clientNotes: false,
         invoices: false,
         calendarEvents: false,
-        errorSummary: 'Variables Supabase manquantes dans Vercel (.env)',
+        errorSummary: 'Variables de connexion Supabase manquantes.',
       };
     }
 
@@ -536,6 +783,7 @@ export const api = {
       invoices: false,
       calendarEvents: false,
       errorSummary: '',
+      projectUrl: supabaseUrl,
     };
 
     const errors: string[] = [];
@@ -544,47 +792,47 @@ export const api = {
     try {
       const { error } = await supabase.from('clients').select('id').limit(1);
       results.clients = !error;
-      if (error) errors.push(`clients: ${error.message}`);
+      if (error) errors.push(`Table clients : ${error.message}`);
     } catch (e: any) {
-      errors.push(`clients: ${e.message}`);
+      errors.push(`Table clients : ${e.message}`);
     }
 
     // Test client_notes
     try {
       const { error } = await supabase.from('client_notes').select('id').limit(1);
       results.clientNotes = !error;
-      if (error) errors.push(`client_notes: ${error.message}`);
+      if (error) errors.push(`Table client_notes : ${error.message}`);
     } catch (e: any) {
-      errors.push(`client_notes: ${e.message}`);
+      errors.push(`Table client_notes : ${e.message}`);
     }
 
     // Test invoices
     try {
       const { error } = await supabase.from('invoices').select('id').limit(1);
       results.invoices = !error;
-      if (error) errors.push(`invoices: ${error.message}`);
+      if (error) errors.push(`Table invoices : ${error.message}`);
     } catch (e: any) {
-      errors.push(`invoices: ${e.message}`);
+      errors.push(`Table invoices : ${e.message}`);
     }
 
     // Test calendar_events
     try {
       const { error } = await supabase.from('calendar_events').select('id').limit(1);
       results.calendarEvents = !error;
-      if (error) errors.push(`calendar_events: ${error.message}`);
+      if (error) errors.push(`Table calendar_events : ${error.message}`);
     } catch (e: any) {
-      errors.push(`calendar_events: ${e.message}`);
+      errors.push(`Table calendar_events : ${e.message}`);
     }
 
     if (errors.length > 0) {
-      results.errorSummary = errors.join(' | ');
+      results.errorSummary = errors.join(' • ');
     }
 
     return results;
   },
 
-  // SYNCHRONISATION INITIALE VERS SUPABASE
-  async syncAllToSupabase(): Promise<{ success: boolean; count: number; message: string }> {
+  // SYNCHRONISATION TOUTES DONNÉES LOCALES VERS SUPABASE
+  async syncAllToSupabase(): Promise<{ success: boolean; count: number; message: string; details?: string }> {
     if (!isSupabaseConfigured || !supabase) {
       return { success: false, count: 0, message: 'Supabase n\'est pas configuré' };
     }
@@ -596,50 +844,89 @@ export const api = {
       const localEvents = loadLocal('events', mockEvents);
 
       let syncedCount = 0;
+      const errors: string[] = [];
 
       // 1. Sync Clients
       for (const client of localClients) {
-        await this.createClient(client);
-        syncedCount++;
+        try {
+          await this.createClient(client);
+          syncedCount++;
+        } catch (e: any) {
+          errors.push(`Client ${client.name}: ${e.message}`);
+        }
       }
 
       // 2. Sync Notes
       for (const note of localNotes) {
-        await this.createClientNote(note);
-        syncedCount++;
+        try {
+          await this.createClientNote(note);
+          syncedCount++;
+        } catch (e: any) {
+          errors.push(`Note: ${e.message}`);
+        }
       }
 
       // 3. Sync Invoices
       for (const inv of localInvoices) {
-        await this.createInvoice(inv);
-        syncedCount++;
+        try {
+          await this.createInvoice(inv);
+          syncedCount++;
+        } catch (e: any) {
+          errors.push(`Facture ${inv.invoiceNumber}: ${e.message}`);
+        }
       }
 
       // 4. Sync Events
       for (const ev of localEvents) {
-        await this.createLocalEvent(ev);
-        syncedCount++;
+        try {
+          await this.createLocalEvent(ev);
+          syncedCount++;
+        } catch (e: any) {
+          errors.push(`RDV: ${e.message}`);
+        }
       }
 
+      const success = errors.length === 0;
       return { 
-        success: true, 
+        success, 
         count: syncedCount, 
-        message: `${syncedCount} éléments synchronisés avec succès dans Supabase !` 
+        message: success 
+          ? `${syncedCount} enregistrements synchronisés avec succès dans Supabase !`
+          : `${syncedCount} enregistrements synchronisés avec des avertissements.`,
+        details: errors.join(' | '),
       };
     } catch (err: any) {
       return { success: false, count: 0, message: err.message || 'Erreur lors de la synchronisation' };
     }
   },
 
+  // ==========================================
   // CLIENTS
+  // ==========================================
   async getClients(): Promise<Client[]> {
+    const localClients = loadLocal('clients', mockClients);
+
     if (isSupabaseConfigured && supabase) {
       try {
         const { data, error } = await supabase.from('clients').select('*');
         if (!error && data) {
-          const mapped = data.map(mapClientFromDB);
-          saveLocal('clients', mapped);
-          return mapped.sort((a, b) => a.name.localeCompare(b.name));
+          const remoteClients = data.map(mapClientFromDB);
+          
+          // SMART MERGE: Keep any locally added client that isn't yet present in Supabase remote data
+          const remoteIdMap = new Set(remoteClients.map(c => c.id));
+          const unsyncedLocals = localClients.filter(c => !remoteIdMap.has(c.id));
+          
+          const combined = [...remoteClients, ...unsyncedLocals].sort((a, b) => a.name.localeCompare(b.name));
+          saveLocal('clients', combined);
+
+          // Background push unsynced items if any
+          if (unsyncedLocals.length > 0) {
+            setTimeout(() => {
+              unsyncedLocals.forEach(c => this.createClient(c).catch(() => {}));
+            }, 1000);
+          }
+
+          return combined;
         }
         if (error) {
           console.warn('Supabase clients fetch failed, using local storage:', error.message);
@@ -648,7 +935,7 @@ export const api = {
         console.warn('Supabase clients fetch exception:', err);
       }
     }
-    return loadLocal('clients', mockClients).sort((a, b) => a.name.localeCompare(b.name));
+    return localClients.sort((a, b) => a.name.localeCompare(b.name));
   },
 
   async createClient(client: Omit<Client, 'id' | 'createdAt'> & { id?: string; createdAt?: string }): Promise<Client> {
@@ -660,8 +947,27 @@ export const api = {
 
     if (isSupabaseConfigured && supabase) {
       try {
-        // Primary payload: exact columns existing in Supabase 'clients' table
-        const cleanPayload: Record<string, any> = {
+        // Candidate 1: Standard snake_case payload
+        const snakePayload: Record<string, any> = {
+          id: newClient.id,
+          name: newClient.name,
+          first_name: newClient.firstName,
+          last_name: newClient.lastName,
+          email: newClient.email || '',
+          phone: newClient.phone || '',
+          address: newClient.address || '',
+          created_at: newClient.createdAt,
+        };
+        if (newClient.dni) snakePayload.dni = newClient.dni;
+        if (newClient.birthDate) snakePayload.birth_date = newClient.birthDate;
+        if (newClient.lastSessionAt) snakePayload.last_session_at = newClient.lastSessionAt;
+        if (newClient.hasBono !== undefined) snakePayload.has_bono = newClient.hasBono;
+        if (newClient.bonoType) snakePayload.bono_type = newClient.bonoType;
+        if (newClient.defaultDiscount !== undefined) snakePayload.default_discount = newClient.defaultDiscount;
+        if (newClient.bonoSessionsRemaining !== undefined) snakePayload.bono_sessions_remaining = newClient.bonoSessionsRemaining;
+
+        // Candidate 2: camelCase payload
+        const camelPayload: Record<string, any> = {
           id: newClient.id,
           name: newClient.name,
           firstName: newClient.firstName,
@@ -671,71 +977,41 @@ export const api = {
           address: newClient.address || '',
           createdAt: newClient.createdAt,
         };
-        if (newClient.dni) cleanPayload.dni = newClient.dni;
-        if (newClient.birthDate) cleanPayload.birthDate = newClient.birthDate;
-        if (newClient.lastSessionAt) cleanPayload.lastSessionAt = newClient.lastSessionAt;
-        if (newClient.hasBono !== undefined) cleanPayload.hasBono = newClient.hasBono;
-        if (newClient.bonoType) cleanPayload.bonoType = newClient.bonoType;
-        if (newClient.defaultDiscount !== undefined) cleanPayload.defaultDiscount = newClient.defaultDiscount;
-        if (newClient.bonoSessionsRemaining !== undefined) cleanPayload.bonoSessionsRemaining = newClient.bonoSessionsRemaining;
+        if (newClient.dni) camelPayload.dni = newClient.dni;
+        if (newClient.birthDate) camelPayload.birthDate = newClient.birthDate;
+        if (newClient.lastSessionAt) camelPayload.lastSessionAt = newClient.lastSessionAt;
+        if (newClient.hasBono !== undefined) camelPayload.hasBono = newClient.hasBono;
+        if (newClient.bonoType) camelPayload.bonoType = newClient.bonoType;
+        if (newClient.defaultDiscount !== undefined) camelPayload.defaultDiscount = newClient.defaultDiscount;
+        if (newClient.bonoSessionsRemaining !== undefined) camelPayload.bonoSessionsRemaining = newClient.bonoSessionsRemaining;
 
-        let insertRes = await supabase.from('clients').insert(cleanPayload).select().single();
+        // Candidate 3: Minimal essential payload
+        const minimalPayload: Record<string, any> = {
+          id: newClient.id,
+          name: newClient.name,
+          first_name: newClient.firstName,
+          last_name: newClient.lastName,
+          email: newClient.email || '',
+          phone: newClient.phone || '',
+        };
 
-        // If camelCase failed, fallback to snake_case column names
-        if (insertRes.error) {
-          console.warn('Supabase clients primary insert failed, trying snake_case:', insertRes.error.message);
-          const snakePayload: Record<string, any> = {
-            id: newClient.id,
-            name: newClient.name,
-            first_name: newClient.firstName,
-            last_name: newClient.lastName,
-            email: newClient.email || '',
-            phone: newClient.phone || '',
-            address: newClient.address || '',
-            created_at: newClient.createdAt,
-          };
-          if (newClient.dni) snakePayload.dni = newClient.dni;
-          if (newClient.birthDate) snakePayload.birth_date = newClient.birthDate;
-          if (newClient.lastSessionAt) snakePayload.last_session_at = newClient.lastSessionAt;
-          if (newClient.hasBono !== undefined) snakePayload.has_bono = newClient.hasBono;
-          if (newClient.bonoType) snakePayload.bono_type = newClient.bonoType;
-          if (newClient.defaultDiscount !== undefined) snakePayload.default_discount = newClient.defaultDiscount;
-          if (newClient.bonoSessionsRemaining !== undefined) snakePayload.bono_sessions_remaining = newClient.bonoSessionsRemaining;
+        const result = await executeResilientInsert('clients', [snakePayload, camelPayload, minimalPayload]);
 
-          insertRes = await supabase.from('clients').insert(snakePayload).select().single();
-        }
-
-        // If still failed, try minimal mandatory columns
-        if (insertRes.error) {
-          console.warn('Supabase clients fallback insert failed, trying minimal:', insertRes.error.message);
-          const minimalPayload: Record<string, any> = {
-            id: newClient.id,
-            name: newClient.name,
-            email: newClient.email || '',
-            phone: newClient.phone || '',
-            address: newClient.address || '',
-          };
-          if (newClient.dni) minimalPayload.dni = newClient.dni;
-          insertRes = await supabase.from('clients').upsert(minimalPayload).select().single();
-        }
-
-        if (!insertRes.error && insertRes.data) {
-          const mapped = mapClientFromDB(insertRes.data);
+        if (result.success && result.data) {
+          const mapped = mapClientFromDB(result.data);
           const current = loadLocal('clients', mockClients);
           const existsIdx = current.findIndex(c => c.id === mapped.id);
           if (existsIdx !== -1) current[existsIdx] = mapped;
           else current.push(mapped);
           saveLocal('clients', current);
           return mapped;
-        } else if (insertRes.error) {
-          console.error('All Supabase client insert attempts failed:', insertRes.error);
         }
       } catch (err: any) {
         console.error('Exception during Supabase client insertion:', err);
       }
     }
 
-    // Save locally if Supabase not configured or in case of network/permission issue
+    // Save locally as reliable fallback
     const current = loadLocal('clients', mockClients);
     const existsIdx = current.findIndex(c => c.id === newClient.id);
     if (existsIdx !== -1) current[existsIdx] = newClient;
@@ -747,7 +1023,23 @@ export const api = {
   async updateClient(client: Client): Promise<Client> {
     if (isSupabaseConfigured && supabase) {
       try {
-        const payload: Record<string, any> = {
+        const snakePayload: Record<string, any> = {
+          name: client.name,
+          first_name: client.firstName,
+          last_name: client.lastName,
+          email: client.email || '',
+          phone: client.phone || '',
+          address: client.address || '',
+        };
+        if (client.dni !== undefined) snakePayload.dni = client.dni;
+        if (client.birthDate) snakePayload.birth_date = client.birthDate;
+        if (client.lastSessionAt) snakePayload.last_session_at = client.lastSessionAt;
+        if (client.hasBono !== undefined) snakePayload.has_bono = client.hasBono;
+        if (client.bonoType !== undefined) snakePayload.bono_type = client.bonoType;
+        if (client.defaultDiscount !== undefined) snakePayload.default_discount = client.defaultDiscount;
+        if (client.bonoSessionsRemaining !== undefined) snakePayload.bono_sessions_remaining = client.bonoSessionsRemaining;
+
+        const camelPayload: Record<string, any> = {
           name: client.name,
           firstName: client.firstName,
           lastName: client.lastName,
@@ -755,37 +1047,18 @@ export const api = {
           phone: client.phone || '',
           address: client.address || '',
         };
-        if (client.dni !== undefined) payload.dni = client.dni;
-        if (client.birthDate) payload.birthDate = client.birthDate;
-        if (client.lastSessionAt) payload.lastSessionAt = client.lastSessionAt;
-        if (client.hasBono !== undefined) payload.hasBono = client.hasBono;
-        if (client.bonoType !== undefined) payload.bonoType = client.bonoType;
-        if (client.defaultDiscount !== undefined) payload.defaultDiscount = client.defaultDiscount;
-        if (client.bonoSessionsRemaining !== undefined) payload.bonoSessionsRemaining = client.bonoSessionsRemaining;
+        if (client.dni !== undefined) camelPayload.dni = client.dni;
+        if (client.birthDate) camelPayload.birthDate = client.birthDate;
+        if (client.lastSessionAt) camelPayload.lastSessionAt = client.lastSessionAt;
+        if (client.hasBono !== undefined) camelPayload.hasBono = client.hasBono;
+        if (client.bonoType !== undefined) camelPayload.bonoType = client.bonoType;
+        if (client.defaultDiscount !== undefined) camelPayload.defaultDiscount = client.defaultDiscount;
+        if (client.bonoSessionsRemaining !== undefined) camelPayload.bonoSessionsRemaining = client.bonoSessionsRemaining;
 
-        let updateRes = await supabase.from('clients').update(payload).eq('id', client.id).select().single();
-        
-        if (updateRes.error) {
-          const fallbackPayload: Record<string, any> = {
-            name: client.name,
-            first_name: client.firstName,
-            last_name: client.lastName,
-            email: client.email || '',
-            phone: client.phone || '',
-            address: client.address || '',
-          };
-          if (client.dni !== undefined) fallbackPayload.dni = client.dni;
-          if (client.birthDate) fallbackPayload.birth_date = client.birthDate;
-          if (client.lastSessionAt) fallbackPayload.last_session_at = client.lastSessionAt;
-          if (client.hasBono !== undefined) fallbackPayload.has_bono = client.hasBono;
-          if (client.bonoType !== undefined) fallbackPayload.bono_type = client.bonoType;
-          if (client.defaultDiscount !== undefined) fallbackPayload.default_discount = client.defaultDiscount;
-          if (client.bonoSessionsRemaining !== undefined) fallbackPayload.bono_sessions_remaining = client.bonoSessionsRemaining;
-          updateRes = await supabase.from('clients').update(fallbackPayload).eq('id', client.id).select().single();
-        }
+        const result = await executeResilientUpdate('clients', client.id, [snakePayload, camelPayload]);
 
-        if (!updateRes.error && updateRes.data) {
-          const mapped = mapClientFromDB(updateRes.data);
+        if (result.success && result.data) {
+          const mapped = mapClientFromDB(result.data);
           const current = loadLocal('clients', mockClients);
           const index = current.findIndex(c => c.id === client.id);
           if (index !== -1) current[index] = mapped;
@@ -809,8 +1082,8 @@ export const api = {
   async deleteClient(id: string): Promise<boolean> {
     if (isSupabaseConfigured && supabase) {
       try {
-        await supabase.from('client_notes').delete().eq('clientId', id);
-        await supabase.from('invoices').delete().eq('clientId', id);
+        await supabase.from('client_notes').delete().or(`clientId.eq.${id},client_id.eq.${id}`);
+        await supabase.from('invoices').delete().or(`clientId.eq.${id},client_id.eq.${id}`);
         await supabase.from('clients').delete().eq('id', id);
       } catch (err) {
         console.warn('Supabase delete client exception:', err);
@@ -823,25 +1096,35 @@ export const api = {
     return true;
   },
 
-  // CLIENT NOTES
+  // ==========================================
+  // CLIENT NOTES & CLINICAL RECORDS
+  // ==========================================
   async getClientNotes(clientId: string): Promise<ClientNote[]> {
-    if (isSupabaseConfigured && supabase) {
-      let { data, error } = await supabase.from('client_notes').select('*').eq('clientId', clientId).order('date', { ascending: false });
-      
-      if (error) {
-        // Retry with client_id column
-        const res = await supabase.from('client_notes').select('*').eq('client_id', clientId).order('date', { ascending: false });
-        data = res.data;
-        error = res.error;
-      }
+    const localNotes = loadLocal('notes', mockNotes).filter(n => n.clientId === clientId);
 
-      if (!error && data) {
-        return data.map(mapNoteFromDB);
+    if (isSupabaseConfigured && supabase) {
+      try {
+        let { data, error } = await supabase.from('client_notes').select('*').eq('client_id', clientId).order('date', { ascending: false });
+        
+        if (error || !data || data.length === 0) {
+          const res = await supabase.from('client_notes').select('*').eq('clientId', clientId).order('date', { ascending: false });
+          if (!res.error && res.data) {
+            data = res.data;
+            error = null;
+          }
+        }
+
+        if (!error && data) {
+          const remoteNotes = data.map(mapNoteFromDB);
+          const remoteIdMap = new Set(remoteNotes.map(n => n.id));
+          const unsynced = localNotes.filter(n => !remoteIdMap.has(n.id));
+          return [...remoteNotes, ...unsynced].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+        }
+      } catch (err) {
+        console.warn('Supabase getClientNotes exception:', err);
       }
     }
-    return loadLocal('notes', mockNotes)
-      .filter(n => n.clientId === clientId)
-      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    return localNotes.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
   },
 
   async createClientNote(note: Omit<ClientNote, 'id'> & { id?: string; date?: string }): Promise<ClientNote> {
@@ -853,7 +1136,18 @@ export const api = {
 
     if (isSupabaseConfigured && supabase) {
       try {
-        const payload: Record<string, any> = {
+        const snakePayload: Record<string, any> = {
+          id: newNote.id,
+          client_id: newNote.clientId,
+          date: newNote.date,
+          motif: newNote.motif || '',
+          anamnese: newNote.anamnese || '',
+          treatment: newNote.treatment || '',
+          content: newNote.content || '',
+          category: newNote.category || 'treatment',
+        };
+
+        const camelPayload: Record<string, any> = {
           id: newNote.id,
           clientId: newNote.clientId,
           date: newNote.date,
@@ -864,31 +1158,17 @@ export const api = {
           category: newNote.category || 'treatment',
         };
 
-        let insertRes = await supabase.from('client_notes').insert(payload).select().single();
-        
-        if (insertRes.error) {
-          const fallbackPayload: Record<string, any> = {
-            id: newNote.id,
-            client_id: newNote.clientId,
-            date: newNote.date,
-            motif: newNote.motif || '',
-            anamnese: newNote.anamnese || '',
-            treatment: newNote.treatment || '',
-            content: newNote.content || '',
-            category: newNote.category || 'treatment',
-          };
-          insertRes = await supabase.from('client_notes').insert(fallbackPayload).select().single();
-        }
+        const result = await executeResilientInsert('client_notes', [snakePayload, camelPayload]);
 
-        if (!insertRes.error && insertRes.data) {
-          // Also update lastSessionAt in Supabase for this client
+        if (result.success && result.data) {
+          // Also update lastSessionAt on client
           try {
-            await supabase.from('clients').update({ lastSessionAt: newNote.date }).eq('id', note.clientId);
+            await supabase.from('clients').update({ last_session_at: newNote.date, lastSessionAt: newNote.date }).eq('id', note.clientId);
           } catch {
-            // ignore if column name mismatch
+            // non-fatal
           }
 
-          const mapped = mapNoteFromDB(insertRes.data);
+          const mapped = mapNoteFromDB(result.data);
           const current = loadLocal('notes', mockNotes);
           const idx = current.findIndex(n => n.id === mapped.id);
           if (idx !== -1) current[idx] = mapped;
@@ -896,7 +1176,6 @@ export const api = {
           saveLocal('notes', current);
           return mapped;
         }
-        console.warn('Supabase note insert failed:', insertRes.error);
       } catch (err) {
         console.warn('Supabase createClientNote exception:', err);
       }
@@ -908,7 +1187,7 @@ export const api = {
     else current.push(newNote);
     saveLocal('notes', current);
 
-    // Update lastSessionAt in Client record
+    // Update lastSessionAt in Client record locally
     const clients = loadLocal('clients', mockClients);
     const clientIdx = clients.findIndex(c => c.id === note.clientId);
     if (clientIdx !== -1) {
@@ -931,17 +1210,9 @@ export const api = {
           category: note.category || 'treatment',
         };
 
-        let updateRes = await supabase.from('client_notes').update(payload).eq('id', note.id).select().single();
-        if (updateRes.error) {
-          updateRes = await supabase.from('client_notes').update({
-            date: note.date,
-            content: note.content,
-            category: note.category,
-          }).eq('id', note.id).select().single();
-        }
-
-        if (!updateRes.error && updateRes.data) {
-          const mapped = mapNoteFromDB(updateRes.data);
+        const result = await executeResilientUpdate('client_notes', note.id, [payload]);
+        if (result.success && result.data) {
+          const mapped = mapNoteFromDB(result.data);
           const current = loadLocal('notes', mockNotes);
           const index = current.findIndex(n => n.id === note.id);
           if (index !== -1) current[index] = mapped;
@@ -977,15 +1248,22 @@ export const api = {
     return true;
   },
 
-  // INVOICES
+  // ==========================================
+  // INVOICES & BILLING
+  // ==========================================
   async getInvoices(): Promise<Invoice[]> {
+    const localInvoices = loadLocal('invoices', mockInvoices);
+
     if (isSupabaseConfigured && supabase) {
       try {
         const { data, error } = await supabase.from('invoices').select('*').order('date', { ascending: false });
         if (!error && data) {
-          const mapped = data.map(mapInvoiceFromDB);
-          saveLocal('invoices', mapped);
-          return mapped;
+          const remoteInvoices = data.map(mapInvoiceFromDB);
+          const remoteIdMap = new Set(remoteInvoices.map(i => i.id));
+          const unsynced = localInvoices.filter(i => !remoteIdMap.has(i.id));
+          const combined = [...remoteInvoices, ...unsynced].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+          saveLocal('invoices', combined);
+          return combined;
         }
         if (error) {
           console.warn('Supabase invoices fetch failed, using local storage:', error.message);
@@ -994,7 +1272,7 @@ export const api = {
         console.warn('Supabase invoices fetch exception:', err);
       }
     }
-    return loadLocal('invoices', mockInvoices).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    return localInvoices.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
   },
 
   async createInvoice(invoice: Omit<Invoice, 'id' | 'invoiceNumber'> & { id?: string; invoiceNumber?: string }): Promise<Invoice> {
@@ -1010,7 +1288,25 @@ export const api = {
 
     if (isSupabaseConfigured && supabase) {
       try {
-        const payload: Record<string, any> = {
+        const snakePayload: Record<string, any> = {
+          id: newInvoice.id,
+          invoice_number: newInvoice.invoiceNumber,
+          client_id: newInvoice.clientId,
+          client_name: newInvoice.clientName,
+          date: newInvoice.date,
+          amount: newInvoice.amount,
+          status: newInvoice.status || 'paid',
+          payment_method: newInvoice.paymentMethod || 'card',
+          description: newInvoice.description || "Séance d'Ostéopathie",
+          language: newInvoice.language || 'fr',
+          ...(newInvoice.originalAmount !== undefined ? { original_amount: newInvoice.originalAmount } : {}),
+          ...(newInvoice.discountAmount !== undefined ? { discount_amount: newInvoice.discountAmount } : {}),
+          ...(newInvoice.discountType ? { discount_type: newInvoice.discountType } : {}),
+          ...(newInvoice.discountLabel ? { discount_label: newInvoice.discountLabel } : {}),
+          ...(newInvoice.noteId ? { note_id: newInvoice.noteId } : {}),
+        };
+
+        const camelPayload: Record<string, any> = {
           id: newInvoice.id,
           invoiceNumber: newInvoice.invoiceNumber,
           clientId: newInvoice.clientId,
@@ -1020,6 +1316,7 @@ export const api = {
           status: newInvoice.status || 'paid',
           paymentMethod: newInvoice.paymentMethod || 'card',
           description: newInvoice.description || "Séance d'Ostéopathie",
+          language: newInvoice.language || 'fr',
           ...(newInvoice.originalAmount !== undefined ? { originalAmount: newInvoice.originalAmount } : {}),
           ...(newInvoice.discountAmount !== undefined ? { discountAmount: newInvoice.discountAmount } : {}),
           ...(newInvoice.discountType ? { discountType: newInvoice.discountType } : {}),
@@ -1027,37 +1324,16 @@ export const api = {
           ...(newInvoice.noteId ? { noteId: newInvoice.noteId } : {}),
         };
 
-        let insertRes = await supabase.from('invoices').insert(payload).select().single();
+        const result = await executeResilientInsert('invoices', [snakePayload, camelPayload]);
 
-        if (insertRes.error) {
-          const fallback: Record<string, any> = {
-            id: newInvoice.id,
-            invoice_number: newInvoice.invoiceNumber,
-            client_id: newInvoice.clientId,
-            client_name: newInvoice.clientName,
-            date: newInvoice.date,
-            amount: newInvoice.amount,
-            status: newInvoice.status || 'paid',
-            payment_method: newInvoice.paymentMethod || 'card',
-            description: newInvoice.description || "Séance d'Ostéopathie",
-            ...(newInvoice.originalAmount !== undefined ? { original_amount: newInvoice.originalAmount } : {}),
-            ...(newInvoice.discountAmount !== undefined ? { discount_amount: newInvoice.discountAmount } : {}),
-            ...(newInvoice.discountType ? { discount_type: newInvoice.discountType } : {}),
-            ...(newInvoice.discountLabel ? { discount_label: newInvoice.discountLabel } : {}),
-            ...(newInvoice.noteId ? { note_id: newInvoice.noteId } : {}),
-          };
-          insertRes = await supabase.from('invoices').insert(fallback).select().single();
-        }
-
-        if (!insertRes.error && insertRes.data) {
-          const mapped = mapInvoiceFromDB(insertRes.data);
+        if (result.success && result.data) {
+          const mapped = mapInvoiceFromDB(result.data);
           const idx = currentInvoices.findIndex(i => i.id === mapped.id);
           if (idx !== -1) currentInvoices[idx] = mapped;
           else currentInvoices.push(mapped);
           saveLocal('invoices', currentInvoices);
           return mapped;
         }
-        console.warn('Supabase invoice insertion failed:', insertRes.error);
       } catch (err) {
         console.warn('Supabase createInvoice exception:', err);
       }
@@ -1073,7 +1349,23 @@ export const api = {
   async updateInvoice(invoice: Invoice): Promise<Invoice> {
     if (isSupabaseConfigured && supabase) {
       try {
-        const payload: Record<string, any> = {
+        const snakePayload: Record<string, any> = {
+          invoice_number: invoice.invoiceNumber,
+          client_id: invoice.clientId,
+          client_name: invoice.clientName,
+          date: invoice.date,
+          amount: invoice.amount,
+          status: invoice.status,
+          payment_method: invoice.paymentMethod,
+          description: invoice.description,
+          language: invoice.language,
+          ...(invoice.originalAmount !== undefined ? { original_amount: invoice.originalAmount } : {}),
+          ...(invoice.discountAmount !== undefined ? { discount_amount: invoice.discountAmount } : {}),
+          ...(invoice.discountType ? { discount_type: invoice.discountType } : {}),
+          ...(invoice.discountLabel ? { discount_label: invoice.discountLabel } : {}),
+        };
+
+        const camelPayload: Record<string, any> = {
           invoiceNumber: invoice.invoiceNumber,
           clientId: invoice.clientId,
           clientName: invoice.clientName,
@@ -1082,33 +1374,16 @@ export const api = {
           status: invoice.status,
           paymentMethod: invoice.paymentMethod,
           description: invoice.description,
+          language: invoice.language,
           ...(invoice.originalAmount !== undefined ? { originalAmount: invoice.originalAmount } : {}),
           ...(invoice.discountAmount !== undefined ? { discountAmount: invoice.discountAmount } : {}),
           ...(invoice.discountType ? { discountType: invoice.discountType } : {}),
           ...(invoice.discountLabel ? { discountLabel: invoice.discountLabel } : {}),
         };
 
-        let updateRes = await supabase.from('invoices').update(payload).eq('id', invoice.id).select().single();
-        if (updateRes.error) {
-          const fallback: Record<string, any> = {
-            invoice_number: invoice.invoiceNumber,
-            client_id: invoice.clientId,
-            client_name: invoice.clientName,
-            date: invoice.date,
-            amount: invoice.amount,
-            status: invoice.status,
-            payment_method: invoice.paymentMethod,
-            description: invoice.description,
-            ...(invoice.originalAmount !== undefined ? { original_amount: invoice.originalAmount } : {}),
-            ...(invoice.discountAmount !== undefined ? { discount_amount: invoice.discountAmount } : {}),
-            ...(invoice.discountType ? { discount_type: invoice.discountType } : {}),
-            ...(invoice.discountLabel ? { discount_label: invoice.discountLabel } : {}),
-          };
-          updateRes = await supabase.from('invoices').update(fallback).eq('id', invoice.id).select().single();
-        }
-
-        if (!updateRes.error && updateRes.data) {
-          const mapped = mapInvoiceFromDB(updateRes.data);
+        const result = await executeResilientUpdate('invoices', invoice.id, [snakePayload, camelPayload]);
+        if (result.success && result.data) {
+          const mapped = mapInvoiceFromDB(result.data);
           const current = loadLocal('invoices', mockInvoices);
           const index = current.findIndex(i => i.id === invoice.id);
           if (index !== -1) current[index] = mapped;
@@ -1144,21 +1419,28 @@ export const api = {
     return true;
   },
 
+  // ==========================================
   // LOCAL & SUPABASE CALENDAR EVENTS
+  // ==========================================
   async getLocalEvents(): Promise<CalendarEvent[]> {
+    const localEvents = loadLocal('events', mockEvents);
+
     if (isSupabaseConfigured && supabase) {
       try {
         const { data, error } = await supabase.from('calendar_events').select('*').order('start', { ascending: true });
         if (!error && data) {
-          const mapped = data.map(mapEventFromDB);
-          saveLocal('events', mapped);
-          return mapped;
+          const remoteEvents = data.map(mapEventFromDB);
+          const remoteIdMap = new Set(remoteEvents.map(e => e.id));
+          const unsynced = localEvents.filter(e => !remoteIdMap.has(e.id));
+          const combined = [...remoteEvents, ...unsynced].sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
+          saveLocal('events', combined);
+          return combined;
         }
       } catch (err) {
         console.warn('Supabase getLocalEvents exception:', err);
       }
     }
-    return loadLocal('events', mockEvents).sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
+    return localEvents.sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
   },
 
   async createLocalEvent(event: Omit<CalendarEvent, 'id'> & { id?: string }): Promise<CalendarEvent> {
@@ -1169,7 +1451,17 @@ export const api = {
 
     if (isSupabaseConfigured && supabase) {
       try {
-        const payload: Record<string, any> = {
+        const snakePayload: Record<string, any> = {
+          id: newEvent.id,
+          summary: newEvent.summary,
+          description: newEvent.description || '',
+          start: newEvent.start,
+          end: newEvent.end,
+          client_id: newEvent.clientId || null,
+          client_name: newEvent.clientName || '',
+        };
+
+        const camelPayload: Record<string, any> = {
           id: newEvent.id,
           summary: newEvent.summary,
           description: newEvent.description || '',
@@ -1179,22 +1471,10 @@ export const api = {
           clientName: newEvent.clientName || '',
         };
 
-        let insertRes = await supabase.from('calendar_events').insert(payload).select().single();
-        if (insertRes.error) {
-          const fallback: Record<string, any> = {
-            id: newEvent.id,
-            summary: newEvent.summary,
-            description: newEvent.description || '',
-            start: newEvent.start,
-            end: newEvent.end,
-            client_id: newEvent.clientId || null,
-            client_name: newEvent.clientName || '',
-          };
-          insertRes = await supabase.from('calendar_events').insert(fallback).select().single();
-        }
+        const result = await executeResilientInsert('calendar_events', [snakePayload, camelPayload]);
 
-        if (!insertRes.error && insertRes.data) {
-          const mapped = mapEventFromDB(insertRes.data);
+        if (result.success && result.data) {
+          const mapped = mapEventFromDB(result.data);
           const current = loadLocal('events', mockEvents);
           const idx = current.findIndex(e => e.id === mapped.id);
           if (idx !== -1) current[idx] = mapped;
@@ -1218,7 +1498,16 @@ export const api = {
   async updateLocalEvent(event: CalendarEvent): Promise<CalendarEvent> {
     if (isSupabaseConfigured && supabase) {
       try {
-        const payload: Record<string, any> = {
+        const snakePayload: Record<string, any> = {
+          summary: event.summary,
+          description: event.description || '',
+          start: event.start,
+          end: event.end,
+          client_id: event.clientId || null,
+          client_name: event.clientName || '',
+        };
+
+        const camelPayload: Record<string, any> = {
           summary: event.summary,
           description: event.description || '',
           start: event.start,
@@ -1227,21 +1516,10 @@ export const api = {
           clientName: event.clientName || '',
         };
 
-        let updateRes = await supabase.from('calendar_events').update(payload).eq('id', event.id).select().single();
-        if (updateRes.error) {
-          const fallback: Record<string, any> = {
-            summary: event.summary,
-            description: event.description || '',
-            start: event.start,
-            end: event.end,
-            client_id: event.clientId || null,
-            client_name: event.clientName || '',
-          };
-          updateRes = await supabase.from('calendar_events').update(fallback).eq('id', event.id).select().single();
-        }
+        const result = await executeResilientUpdate('calendar_events', event.id, [snakePayload, camelPayload]);
 
-        if (!updateRes.error && updateRes.data) {
-          const mapped = mapEventFromDB(updateRes.data);
+        if (result.success && result.data) {
+          const mapped = mapEventFromDB(result.data);
           const current = loadLocal('events', mockEvents);
           const index = current.findIndex(e => e.id === event.id);
           if (index !== -1) current[index] = mapped;

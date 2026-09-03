@@ -80,20 +80,22 @@ const Navbar = ({ onSecretAdmin }: { onSecretAdmin?: () => void }) => {
   const { t } = useTranslation();
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [clickCount, setClickCount] = useState(0);
+  const resetTimerRef = React.useRef<NodeJS.Timeout | null>(null);
 
   const handleLogoClick = () => {
-    setClickCount(prev => {
-      const next = prev + 1;
-      if (next >= 5) {
-        if (onSecretAdmin) onSecretAdmin();
-        return 0;
-      }
-      return next;
-    });
-    // Reset count after 2.5 seconds if not reached 5
-    setTimeout(() => {
+    if (resetTimerRef.current) {
+      clearTimeout(resetTimerRef.current);
+    }
+    const nextCount = clickCount + 1;
+    if (nextCount >= 5) {
       setClickCount(0);
-    }, 2500);
+      onSecretAdmin?.();
+    } else {
+      setClickCount(nextCount);
+      resetTimerRef.current = setTimeout(() => {
+        setClickCount(0);
+      }, 2500);
+    }
   };
 
   return (
