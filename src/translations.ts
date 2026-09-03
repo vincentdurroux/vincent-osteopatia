@@ -101,6 +101,11 @@ export const translations = {
       subtitle: 'Choisissez votre mode de contact',
       call: 'Appel Direct',
     },
+    passcodeModal: {
+      title: "Accès Praticien",
+      subtitle: "Saisissez votre code d'accès de sécurité",
+      error: "Code d'accès incorrect",
+    },
     admin: {
       title: "Gestion",
       close: "Fermer",
@@ -409,6 +414,11 @@ export const translations = {
       subtitle: 'Choose your contact method',
       call: 'Direct Call',
     },
+    passcodeModal: {
+      title: "Practitioner Access",
+      subtitle: "Enter your security access code",
+      error: "Incorrect access code",
+    },
     admin: {
       title: "Management",
       close: "Close",
@@ -716,6 +726,11 @@ export const translations = {
     booking: {
       subtitle: 'Elija su método de contacto',
       call: 'Llamada Directa',
+    },
+    passcodeModal: {
+      title: "Acceso Profesional",
+      subtitle: "Introduzca su código de acceso de seguridad",
+      error: "Código de acceso incorrecto",
     },
     admin: {
       title: "Gestión",

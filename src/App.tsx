@@ -84,16 +84,16 @@ const Navbar = ({ onSecretAdmin }: { onSecretAdmin?: () => void }) => {
   const handleLogoClick = () => {
     setClickCount(prev => {
       const next = prev + 1;
-      if (next >= 3) {
+      if (next >= 5) {
         if (onSecretAdmin) onSecretAdmin();
         return 0;
       }
       return next;
     });
-    // Reset count after 1.5 seconds if not reached 3
+    // Reset count after 2.5 seconds if not reached 5
     setTimeout(() => {
       setClickCount(0);
-    }, 1500);
+    }, 2500);
   };
 
   return (
@@ -655,6 +655,7 @@ const BookingModal = ({ isOpen, onClose }: { isOpen: boolean; onClose: () => voi
 };
 
 const PasscodeModal = ({ isOpen, onClose, onSuccess }: { isOpen: boolean; onClose: () => void; onSuccess: () => void }) => {
+  const { t } = useTranslation();
   const [pin, setPin] = useState('');
   const [error, setError] = useState(false);
   const correctPin = '46183'; // L'Eliana Postal Code, secure, personal and highly memorable
@@ -712,8 +713,8 @@ const PasscodeModal = ({ isOpen, onClose, onSuccess }: { isOpen: boolean; onClos
               <div className="w-12 h-12 bg-primary/10 text-primary rounded-full flex items-center justify-center mx-auto mb-4">
                 <Shield size={24} />
               </div>
-              <h3 className="text-xl font-serif font-semibold">Accès Praticien</h3>
-              <p className="text-xs text-gray-500 mt-2">Saisissez votre code d'accès de sécurité</p>
+              <h3 className="text-xl font-serif font-semibold">{t.passcodeModal?.title || 'Accès Praticien'}</h3>
+              <p className="text-xs text-gray-500 mt-2">{t.passcodeModal?.subtitle || "Saisissez votre code d'accès de sécurité"}</p>
             </div>
 
             {/* PIN Dots indicator */}
@@ -738,7 +739,7 @@ const PasscodeModal = ({ isOpen, onClose, onSuccess }: { isOpen: boolean; onClos
                 animate={{ opacity: 1, y: 0 }}
                 className="text-red-500 text-xs font-bold uppercase tracking-wider mb-6"
               >
-                Code d'accès incorrect
+                {t.passcodeModal?.error || "Code d'accès incorrect"}
               </motion.p>
             )}
 
