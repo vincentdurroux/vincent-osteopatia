@@ -143,6 +143,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
   const [creatingInvoiceForNoteId, setCreatingInvoiceForNoteId] = useState<string | null>(null);
   const [inlineInvoiceAmount, setInlineInvoiceAmount] = useState<number>(60);
   const [inlineInvoicePaymentMethod, setInlineInvoicePaymentMethod] = useState<'card' | 'cash' | 'transfer'>('card');
+  const [inlineInvoiceStatus, setInlineInvoiceStatus] = useState<'paid' | 'pending'>('paid');
 
   const [isEditInvoiceOpen, setIsEditInvoiceOpen] = useState(false);
   const [editingInvoice, setEditingInvoice] = useState<Invoice | null>(null);
@@ -401,11 +402,12 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
         clientId: selectedClient.id,
         clientName: selectedClient.name,
         amount: Number(inlineInvoiceAmount),
-        status: 'paid',
+        status: inlineInvoiceStatus,
         paymentMethod: inlineInvoicePaymentMethod,
         date: noteDateStr,
         description: translations[lang as Language].invoice.serviceDescription,
         language: lang as 'fr' | 'en' | 'es',
+        noteId: note.id,
       });
       setInvoices(prev => [created, ...prev]);
       setCreatingInvoiceForNoteId(null);
@@ -1735,11 +1737,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
 
                             {/* Associated Invoice or Inline Creation Options */}
                             {(() => {
-                              const noteDateStr = note.date.includes('T') ? note.date.split('T')[0] : note.date;
-                              const associatedInvoice = invoices.find(inv => 
-                                inv.clientId === note.clientId && 
-                                (inv.date === noteDateStr || (inv.date && noteDateStr && inv.date.slice(0, 10) === noteDateStr.slice(0, 10)))
-                              );
+                              const associatedInvoice = invoices.find(inv => inv.noteId === note.id);
 
                               return associatedInvoice ? (
                                 <div className="mt-4 pt-4 border-t border-black/5 flex flex-wrap items-center justify-between gap-3 bg-secondary/30 p-3 rounded-2xl">
@@ -1748,8 +1746,10 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                     <div className="text-left">
                                       <p className="text-xs font-bold text-gray-800 flex items-center gap-1.5">
                                         <span>{lang === 'fr' ? 'Facture' : lang === 'es' ? 'Factura' : 'Invoice'} #{associatedInvoice.invoiceNumber}</span>
-                                        <span className="text-[10px] text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded-full font-bold">
-                                          {lang === 'fr' ? 'Payée' : lang === 'es' ? 'Pagada' : 'Paid'}
+                                        <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${
+                                          associatedInvoice.status === 'paid' ? 'text-emerald-600 bg-emerald-50' : 'text-amber-600 bg-amber-50'
+                                        }`}>
+                                          {associatedInvoice.status === 'paid' ? translations[lang].admin.billing.statusPaid : translations[lang].admin.billing.statusPending}
                                         </span>
                                       </p>
                                       <p className="text-[10px] text-gray-500">
@@ -1772,21 +1772,21 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                               ) : (
                                 <div className="mt-4 pt-4 border-t border-black/5">
                                   {creatingInvoiceForNoteId === note.id ? (
-                                    <div className="p-3 bg-primary/5 rounded-2xl border border-primary/20 space-y-3">
+                                    <div className="p-3.5 bg-primary/5 rounded-2xl border border-primary/20 space-y-3">
                                       <div className="flex items-center justify-between">
                                         <span className="text-[11px] font-bold text-primary flex items-center gap-1.5">
                                           <CreditCard size={13} />
-                                          {translations[lang].admin.billing.addInvoice}
+                                          {translations[lang].admin.billing.issueInvoice}
                                         </span>
                                         <button
                                           type="button"
                                           onClick={() => setCreatingInvoiceForNoteId(null)}
                                           className="text-[10px] text-gray-400 hover:text-gray-600 font-bold"
                                         >
-                                          {lang === 'fr' ? 'Annuler' : 'Cancel'}
+                                          {translations[lang].admin.billing.cancel}
                                         </button>
                                       </div>
-                                      <div className="grid grid-cols-2 gap-2">
+                                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                                         <div>
                                           <label className="text-[9px] uppercase tracking-wider font-bold text-gray-400 block mb-0.5">
                                             {lang === 'fr' ? 'Montant (€)' : 'Amount (€)'}
@@ -1800,26 +1800,48 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                         </div>
                                         <div>
                                           <label className="text-[9px] uppercase tracking-wider font-bold text-gray-400 block mb-0.5">
-                                            {lang === 'fr' ? 'Paiement' : 'Payment'}
+                                            {translations[lang].admin.billing.tableMethod}
                                           </label>
                                           <select
                                             value={inlineInvoicePaymentMethod}
                                             onChange={(e) => setInlineInvoicePaymentMethod(e.target.value as any)}
                                             className="w-full p-2 bg-white rounded-xl border border-black/10 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
                                           >
-                                            <option value="card">{lang === 'fr' ? 'Carte' : lang === 'es' ? 'Tarjeta' : 'Card'}</option>
-                                            <option value="cash">{lang === 'fr' ? 'Espèces' : lang === 'es' ? 'Efectivo' : 'Cash'}</option>
-                                            <option value="transfer">{lang === 'fr' ? 'Virement' : lang === 'es' ? 'Transferencia' : 'Transfer'}</option>
+                                            <option value="card">{translations[lang].admin.billing.paymentCard}</option>
+                                            <option value="cash">{translations[lang].admin.billing.paymentCash}</option>
+                                            <option value="transfer">{translations[lang].admin.billing.paymentTransfer}</option>
+                                          </select>
+                                        </div>
+                                        <div>
+                                          <label className="text-[9px] uppercase tracking-wider font-bold text-gray-400 block mb-0.5">
+                                            {translations[lang].admin.billing.status}
+                                          </label>
+                                          <select
+                                            value={inlineInvoiceStatus}
+                                            onChange={(e) => setInlineInvoiceStatus(e.target.value as any)}
+                                            className="w-full p-2 bg-white rounded-xl border border-black/10 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
+                                          >
+                                            <option value="paid">{translations[lang].admin.billing.statusPaid}</option>
+                                            <option value="pending">{translations[lang].admin.billing.statusPending}</option>
                                           </select>
                                         </div>
                                       </div>
-                                      <button
-                                        type="button"
-                                        onClick={() => handleCreateInlineInvoice(note)}
-                                        className="w-full py-2 bg-primary text-white text-xs font-bold rounded-xl hover:bg-primary/95 transition-all shadow-sm"
-                                      >
-                                        {lang === 'fr' ? 'Générer & Enregistrer' : 'Generate & Save'}
-                                      </button>
+                                      <div className="flex items-center gap-2 pt-1">
+                                        <button
+                                          type="button"
+                                          onClick={() => handleCreateInlineInvoice(note)}
+                                          className="flex-1 py-2 bg-primary text-white text-xs font-bold rounded-xl hover:bg-primary/95 transition-all shadow-sm"
+                                        >
+                                          {translations[lang].admin.billing.issueInvoiceAction}
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => setCreatingInvoiceForNoteId(null)}
+                                          className="px-3 py-2 bg-gray-100 text-gray-600 text-xs font-bold rounded-xl hover:bg-gray-200 transition-all"
+                                        >
+                                          {translations[lang].admin.billing.cancel}
+                                        </button>
+                                      </div>
                                     </div>
                                   ) : (
                                     <button
@@ -1828,11 +1850,12 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                         setCreatingInvoiceForNoteId(note.id);
                                         setInlineInvoiceAmount(60);
                                         setInlineInvoicePaymentMethod('card');
+                                        setInlineInvoiceStatus('paid');
                                       }}
-                                      className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-50 hover:bg-primary/5 text-gray-500 hover:text-primary rounded-xl text-[10px] font-bold uppercase tracking-wider transition-all border border-black/5"
+                                      className="flex items-center gap-1.5 px-3 py-1.5 bg-primary/10 hover:bg-primary text-primary hover:text-white rounded-xl text-xs font-bold transition-all shadow-xs group/btn"
                                     >
-                                      <Plus size={12} />
-                                      <span>{lang === 'fr' ? 'Créer une facture' : lang === 'es' ? 'Crear factura' : 'Create Invoice'}</span>
+                                      <Plus size={13} className="group-hover/btn:rotate-90 transition-transform" />
+                                      <span>{translations[lang].admin.billing.issueInvoice}</span>
                                     </button>
                                   )}
                                 </div>

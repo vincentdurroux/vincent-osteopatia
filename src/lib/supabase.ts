@@ -140,6 +140,7 @@ const mockInvoices: Invoice[] = [
     status: 'paid',
     paymentMethod: 'card',
     description: 'Séance d\'Ostéopathie (1h)',
+    noteId: 'n1',
   },
   {
     id: 'i2',
@@ -151,6 +152,7 @@ const mockInvoices: Invoice[] = [
     status: 'paid',
     paymentMethod: 'cash',
     description: 'Séance d\'Ostéopathie (1h)',
+    noteId: 'n2',
   },
   {
     id: 'i3',
@@ -162,6 +164,7 @@ const mockInvoices: Invoice[] = [
     status: 'paid',
     paymentMethod: 'transfer',
     description: 'Séance d\'Ostéopathie pédiatrique',
+    noteId: 'n3',
   },
   {
     id: 'i4',
@@ -357,6 +360,7 @@ export function mapInvoiceFromDB(i: any): Invoice {
     paymentMethod: i.paymentMethod || i.payment_method || i.paymentmethod || 'card',
     description: i.description || "Séance d'Ostéopathie",
     language: i.language || 'fr',
+    noteId: i.noteId || i.note_id || undefined,
   };
 }
 
@@ -960,6 +964,7 @@ export const api = {
           status: newInvoice.status || 'paid',
           paymentMethod: newInvoice.paymentMethod || 'card',
           description: newInvoice.description || "Séance d'Ostéopathie",
+          ...(newInvoice.noteId ? { noteId: newInvoice.noteId } : {}),
         };
 
         let insertRes = await supabase.from('invoices').insert(payload).select().single();
@@ -975,6 +980,7 @@ export const api = {
             status: newInvoice.status || 'paid',
             payment_method: newInvoice.paymentMethod || 'card',
             description: newInvoice.description || "Séance d'Ostéopathie",
+            ...(newInvoice.noteId ? { note_id: newInvoice.noteId } : {}),
           };
           insertRes = await supabase.from('invoices').insert(fallback).select().single();
         }

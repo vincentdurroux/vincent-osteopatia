@@ -33,6 +33,7 @@ export interface Invoice {
   paymentMethod?: 'cash' | 'card' | 'transfer';
   description: string;
   language?: 'fr' | 'en' | 'es';
+  noteId?: string;
 }
 
 export interface CalendarEvent {
