@@ -854,26 +854,28 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
     let finalClientName: string | undefined = undefined;
 
     if (isInlineNewPatient) {
-      if (!inlinePatient.lastName || !inlinePatient.firstName) {
+      const cleanFirstName = inlinePatient.firstName.trim();
+      const cleanLastName = inlinePatient.lastName.trim();
+      if (!cleanLastName || !cleanFirstName) {
         alert(lang === 'fr' ? "Veuillez saisir le nom et le prénom du nouveau patient." : "Please enter the new patient's first and last name.");
         return;
       }
       try {
-        const fullName = `${inlinePatient.lastName.toUpperCase()} ${inlinePatient.firstName}`;
+        const fullName = `${cleanLastName.toUpperCase()} ${cleanFirstName}`;
         const createdCl = await api.createClient({
-          firstName: inlinePatient.firstName,
-          lastName: inlinePatient.lastName,
+          firstName: cleanFirstName,
+          lastName: cleanLastName,
           name: fullName,
           dni: inlinePatient.dni?.trim() ? inlinePatient.dni.trim().toUpperCase() : undefined,
-          email: inlinePatient.email,
-          phone: inlinePatient.phone,
+          email: inlinePatient.email?.trim() || '',
+          phone: inlinePatient.phone?.trim() || '',
         });
         setClients(prev => {
           const filtered = prev.filter(c => c.id !== createdCl.id);
           return [...filtered, createdCl].sort((a, b) => a.name.localeCompare(b.name));
         });
         finalClientId = createdCl.id;
-        finalClientName = createdCl.name;
+        finalClientName = (createdCl.name && createdCl.name !== 'Patient sans nom') ? createdCl.name : fullName;
       } catch (err) {
         console.error('Failed to create inline patient:', err);
         alert(lang === 'fr' ? "Erreur lors de la création du patient." : "Error creating patient.");
@@ -907,7 +909,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
       setEvents(prev => [...prev, created].sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime()));
       setIsAddEventOpen(false);
       setIsInlineNewPatient(false);
-      setInlinePatient({ firstName: '', lastName: '', phone: '', email: '' });
+      setInlinePatient({ firstName: '', lastName: '', dni: '', phone: '', email: '' });
       setNewEvent({
         clientId: '',
         title: getDefaultAppointmentTitle(lang),
@@ -930,6 +932,14 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
     const startIso = new Date(`${editingEvent.date}T${editingEvent.startTime}:00`).toISOString();
     const endIso = new Date(`${editingEvent.date}T${editingEvent.endTime}:00`).toISOString();
 
+    let clientName = editingEvent.clientName;
+    if (editingEvent.clientId) {
+      const foundClient = clients.find(c => c.id === editingEvent.clientId);
+      if (foundClient) {
+        clientName = foundClient.name;
+      }
+    }
+
     try {
       const existing = events.find(ev => ev.id === editingEvent.id);
       const updated = await api.updateLocalEvent({
@@ -938,8 +948,8 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
         description: editingEvent.description,
         start: startIso,
         end: endIso,
-        clientId: existing?.clientId,
-        clientName: existing?.clientName,
+        clientId: editingEvent.clientId || existing?.clientId,
+        clientName: clientName || existing?.clientName,
       });
 
       setEvents(prev => prev.map(ev => ev.id === updated.id ? updated : ev).sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime()));

@@ -330,26 +330,36 @@ const saveLocal = <T>(key: string, data: T[]) => {
 // ==========================================
 
 export function mapClientFromDB(c: any): Client {
-  let firstName = c.firstName || c.first_name;
-  let lastName = c.lastName || c.last_name;
+  let firstName = c.firstName || c.first_name || c.firstname || c.prenom || c.prenom_patient || c.prenomPatient || '';
+  let lastName = c.lastName || c.last_name || c.lastname || c.nom || c.nom_patient || c.nomPatient || '';
 
-  if ((!firstName || !lastName) && c.name) {
-    const parts = String(c.name).split(' ');
-    lastName = parts[0] || '';
-    firstName = parts.slice(1).join(' ') || '';
+  const rawName = c.name || c.full_name || c.fullName || c.fullname || c.client_name || c.clientName || c.clientname || c.patient_name || c.patientName || '';
+
+  if ((!firstName || !lastName) && rawName) {
+    const parts = String(rawName).trim().split(/\s+/);
+    lastName = lastName || parts[0] || '';
+    firstName = firstName || parts.slice(1).join(' ') || '';
   }
 
-  const name = c.name || `${(lastName || '').toUpperCase()} ${firstName || ''}`.trim() || 'Patient sans nom';
+  let finalName = rawName || `${(lastName || '').toUpperCase()} ${firstName || ''}`.trim();
+  if (!finalName || finalName.toLowerCase() === 'patient sans nom' || finalName.toLowerCase() === 'sans nom') {
+    if (lastName || firstName) {
+      finalName = `${(lastName || '').toUpperCase()} ${firstName || ''}`.trim();
+    } else {
+      finalName = 'Patient sans nom';
+    }
+  }
+
   return {
     id: String(c.id),
     firstName: firstName || '',
     lastName: lastName || '',
-    name,
+    name: finalName,
     dni: c.dni || c.nie || c.nif || c["dni"] || '',
     email: c.email || '',
-    phone: c.phone || '',
-    birthDate: c.birthDate || c.birth_date || '',
-    address: c.address || '',
+    phone: c.phone || c.telephone || c.tel || '',
+    birthDate: c.birthDate || c.birth_date || c.birthdate || c.date_de_naissance || c.date_naissance || '',
+    address: c.address || c.adresse || '',
     createdAt: c.createdAt || c.created_at || new Date().toISOString(),
     lastSessionAt: c.lastSessionAt || c.last_session_at,
     hasBono: Boolean(c.hasBono || c.has_bono),
@@ -395,12 +405,12 @@ export function mapInvoiceFromDB(i: any): Invoice {
 export function mapEventFromDB(e: any): CalendarEvent {
   return {
     id: String(e.id),
-    summary: e.summary || '',
-    description: e.description || '',
-    start: e.start || '',
-    end: e.end || '',
-    clientId: e.clientId || e.client_id || e.clientid,
-    clientName: e.clientName || e.client_name || e.clientname,
+    summary: e.summary || e.title || e.intitule || '',
+    description: e.description || e.notes || e.note || '',
+    start: e.start || e.start_time || e.startTime || '',
+    end: e.end || e.end_time || e.endTime || '',
+    clientId: e.clientId || e.client_id || e.clientid || e.patient_id || e.patientId || undefined,
+    clientName: e.clientName || e.client_name || e.clientname || e.patient_name || e.patientName || undefined,
   };
 }
 
@@ -905,12 +915,23 @@ export const api = {
   // ==========================================
   async getClients(): Promise<Client[]> {
     const localClients = loadLocal('clients', mockClients);
+    const localMap = new Map(localClients.map(c => [c.id, c]));
 
     if (isSupabaseConfigured && supabase) {
       try {
         const { data, error } = await supabase.from('clients').select('*');
         if (!error && data) {
-          const remoteClients = data.map(mapClientFromDB);
+          const remoteClients = data.map(row => {
+            const mapped = mapClientFromDB(row);
+            const local = localMap.get(mapped.id);
+            // If remote is missing name or is 'Patient sans nom', restore from local cache if known
+            if (local && (mapped.name === 'Patient sans nom' || !mapped.name) && local.name && local.name !== 'Patient sans nom') {
+              mapped.name = local.name;
+              mapped.firstName = mapped.firstName || local.firstName;
+              mapped.lastName = mapped.lastName || local.lastName;
+            }
+            return mapped;
+          });
           
           // SMART MERGE: Keep any locally added client that isn't yet present in Supabase remote data
           const remoteIdMap = new Set(remoteClients.map(c => c.id));
@@ -939,20 +960,32 @@ export const api = {
   },
 
   async createClient(client: Omit<Client, 'id' | 'createdAt'> & { id?: string; createdAt?: string }): Promise<Client> {
+    const cleanFirstName = (client.firstName || '').trim();
+    const cleanLastName = (client.lastName || '').trim();
+    const fullName = (client.name && client.name.trim()) || `${cleanLastName.toUpperCase()} ${cleanFirstName}`.trim() || 'Patient sans nom';
+
     const newClient: Client = {
       ...client,
       id: client.id || crypto.randomUUID(),
+      firstName: cleanFirstName,
+      lastName: cleanLastName,
+      name: fullName,
       createdAt: client.createdAt || new Date().toISOString(),
     };
 
     if (isSupabaseConfigured && supabase) {
       try {
-        // Candidate 1: Standard snake_case payload
+        // Candidate 1: Standard comprehensive snake_case payload
         const snakePayload: Record<string, any> = {
           id: newClient.id,
           name: newClient.name,
           first_name: newClient.firstName,
           last_name: newClient.lastName,
+          nom: newClient.lastName,
+          prenom: newClient.firstName,
+          full_name: newClient.name,
+          client_name: newClient.name,
+          patient_name: newClient.name,
           email: newClient.email || '',
           phone: newClient.phone || '',
           address: newClient.address || '',
@@ -972,6 +1005,9 @@ export const api = {
           name: newClient.name,
           firstName: newClient.firstName,
           lastName: newClient.lastName,
+          fullName: newClient.name,
+          clientName: newClient.name,
+          patientName: newClient.name,
           email: newClient.email || '',
           phone: newClient.phone || '',
           address: newClient.address || '',
@@ -985,12 +1021,10 @@ export const api = {
         if (newClient.defaultDiscount !== undefined) camelPayload.defaultDiscount = newClient.defaultDiscount;
         if (newClient.bonoSessionsRemaining !== undefined) camelPayload.bonoSessionsRemaining = newClient.bonoSessionsRemaining;
 
-        // Candidate 3: Minimal essential payload
+        // Candidate 3: Minimal essential payload with guaranteed name
         const minimalPayload: Record<string, any> = {
           id: newClient.id,
           name: newClient.name,
-          first_name: newClient.firstName,
-          last_name: newClient.lastName,
           email: newClient.email || '',
           phone: newClient.phone || '',
         };
@@ -999,12 +1033,19 @@ export const api = {
 
         if (result.success && result.data) {
           const mapped = mapClientFromDB(result.data);
+          const finalClient: Client = {
+            ...newClient,
+            ...mapped,
+            name: (mapped.name && mapped.name !== 'Patient sans nom') ? mapped.name : newClient.name,
+            firstName: mapped.firstName || newClient.firstName,
+            lastName: mapped.lastName || newClient.lastName,
+          };
           const current = loadLocal('clients', mockClients);
-          const existsIdx = current.findIndex(c => c.id === mapped.id);
-          if (existsIdx !== -1) current[existsIdx] = mapped;
-          else current.push(mapped);
+          const existsIdx = current.findIndex(c => c.id === finalClient.id);
+          if (existsIdx !== -1) current[existsIdx] = finalClient;
+          else current.push(finalClient);
           saveLocal('clients', current);
-          return mapped;
+          return finalClient;
         }
       } catch (err: any) {
         console.error('Exception during Supabase client insertion:', err);
@@ -1021,49 +1062,73 @@ export const api = {
   },
 
   async updateClient(client: Client): Promise<Client> {
+    const cleanFirstName = (client.firstName || '').trim();
+    const cleanLastName = (client.lastName || '').trim();
+    const fullName = (client.name && client.name.trim()) || `${cleanLastName.toUpperCase()} ${cleanFirstName}`.trim() || 'Patient sans nom';
+
+    const normalizedClient: Client = {
+      ...client,
+      firstName: cleanFirstName,
+      lastName: cleanLastName,
+      name: fullName,
+    };
+
     if (isSupabaseConfigured && supabase) {
       try {
         const snakePayload: Record<string, any> = {
-          name: client.name,
-          first_name: client.firstName,
-          last_name: client.lastName,
-          email: client.email || '',
-          phone: client.phone || '',
-          address: client.address || '',
+          name: normalizedClient.name,
+          first_name: normalizedClient.firstName,
+          last_name: normalizedClient.lastName,
+          nom: normalizedClient.lastName,
+          prenom: normalizedClient.firstName,
+          full_name: normalizedClient.name,
+          client_name: normalizedClient.name,
+          email: normalizedClient.email || '',
+          phone: normalizedClient.phone || '',
+          address: normalizedClient.address || '',
         };
-        if (client.dni !== undefined) snakePayload.dni = client.dni;
-        if (client.birthDate) snakePayload.birth_date = client.birthDate;
-        if (client.lastSessionAt) snakePayload.last_session_at = client.lastSessionAt;
-        if (client.hasBono !== undefined) snakePayload.has_bono = client.hasBono;
-        if (client.bonoType !== undefined) snakePayload.bono_type = client.bonoType;
-        if (client.defaultDiscount !== undefined) snakePayload.default_discount = client.defaultDiscount;
-        if (client.bonoSessionsRemaining !== undefined) snakePayload.bono_sessions_remaining = client.bonoSessionsRemaining;
+        if (normalizedClient.dni !== undefined) snakePayload.dni = normalizedClient.dni;
+        if (normalizedClient.birthDate) snakePayload.birth_date = normalizedClient.birthDate;
+        if (normalizedClient.lastSessionAt) snakePayload.last_session_at = normalizedClient.lastSessionAt;
+        if (normalizedClient.hasBono !== undefined) snakePayload.has_bono = normalizedClient.hasBono;
+        if (normalizedClient.bonoType !== undefined) snakePayload.bono_type = normalizedClient.bonoType;
+        if (normalizedClient.defaultDiscount !== undefined) snakePayload.default_discount = normalizedClient.defaultDiscount;
+        if (normalizedClient.bonoSessionsRemaining !== undefined) snakePayload.bono_sessions_remaining = normalizedClient.bonoSessionsRemaining;
 
         const camelPayload: Record<string, any> = {
-          name: client.name,
-          firstName: client.firstName,
-          lastName: client.lastName,
-          email: client.email || '',
-          phone: client.phone || '',
-          address: client.address || '',
+          name: normalizedClient.name,
+          firstName: normalizedClient.firstName,
+          lastName: normalizedClient.lastName,
+          fullName: normalizedClient.name,
+          clientName: normalizedClient.name,
+          email: normalizedClient.email || '',
+          phone: normalizedClient.phone || '',
+          address: normalizedClient.address || '',
         };
-        if (client.dni !== undefined) camelPayload.dni = client.dni;
-        if (client.birthDate) camelPayload.birthDate = client.birthDate;
-        if (client.lastSessionAt) camelPayload.lastSessionAt = client.lastSessionAt;
-        if (client.hasBono !== undefined) camelPayload.hasBono = client.hasBono;
-        if (client.bonoType !== undefined) camelPayload.bonoType = client.bonoType;
-        if (client.defaultDiscount !== undefined) camelPayload.defaultDiscount = client.defaultDiscount;
-        if (client.bonoSessionsRemaining !== undefined) camelPayload.bonoSessionsRemaining = client.bonoSessionsRemaining;
+        if (normalizedClient.dni !== undefined) camelPayload.dni = normalizedClient.dni;
+        if (normalizedClient.birthDate) camelPayload.birthDate = normalizedClient.birthDate;
+        if (normalizedClient.lastSessionAt) camelPayload.lastSessionAt = normalizedClient.lastSessionAt;
+        if (normalizedClient.hasBono !== undefined) camelPayload.hasBono = normalizedClient.hasBono;
+        if (normalizedClient.bonoType !== undefined) camelPayload.bonoType = normalizedClient.bonoType;
+        if (normalizedClient.defaultDiscount !== undefined) camelPayload.defaultDiscount = normalizedClient.defaultDiscount;
+        if (normalizedClient.bonoSessionsRemaining !== undefined) camelPayload.bonoSessionsRemaining = normalizedClient.bonoSessionsRemaining;
 
-        const result = await executeResilientUpdate('clients', client.id, [snakePayload, camelPayload]);
+        const result = await executeResilientUpdate('clients', normalizedClient.id, [snakePayload, camelPayload]);
 
         if (result.success && result.data) {
           const mapped = mapClientFromDB(result.data);
+          const finalClient: Client = {
+            ...normalizedClient,
+            ...mapped,
+            name: (mapped.name && mapped.name !== 'Patient sans nom') ? mapped.name : normalizedClient.name,
+            firstName: mapped.firstName || normalizedClient.firstName,
+            lastName: mapped.lastName || normalizedClient.lastName,
+          };
           const current = loadLocal('clients', mockClients);
-          const index = current.findIndex(c => c.id === client.id);
-          if (index !== -1) current[index] = mapped;
+          const index = current.findIndex(c => c.id === finalClient.id);
+          if (index !== -1) current[index] = finalClient;
           saveLocal('clients', current);
-          return mapped;
+          return finalClient;
         }
       } catch (err) {
         console.warn('Supabase updateClient exception:', err);
@@ -1071,12 +1136,12 @@ export const api = {
     }
 
     const current = loadLocal('clients', mockClients);
-    const index = current.findIndex(c => c.id === client.id);
+    const index = current.findIndex(c => c.id === normalizedClient.id);
     if (index !== -1) {
-      current[index] = client;
+      current[index] = normalizedClient;
       saveLocal('clients', current);
     }
-    return client;
+    return normalizedClient;
   },
 
   async deleteClient(id: string): Promise<boolean> {
@@ -1424,12 +1489,20 @@ export const api = {
   // ==========================================
   async getLocalEvents(): Promise<CalendarEvent[]> {
     const localEvents = loadLocal('events', mockEvents);
+    const localClients = loadLocal('clients', mockClients);
+    const clientMap = new Map(localClients.map(c => [c.id, c.name]));
 
     if (isSupabaseConfigured && supabase) {
       try {
         const { data, error } = await supabase.from('calendar_events').select('*').order('start', { ascending: true });
         if (!error && data) {
-          const remoteEvents = data.map(mapEventFromDB);
+          const remoteEvents = data.map(row => {
+            const mapped = mapEventFromDB(row);
+            if (!mapped.clientName && mapped.clientId && clientMap.has(mapped.clientId)) {
+              mapped.clientName = clientMap.get(mapped.clientId);
+            }
+            return mapped;
+          });
           const remoteIdMap = new Set(remoteEvents.map(e => e.id));
           const unsynced = localEvents.filter(e => !remoteIdMap.has(e.id));
           const combined = [...remoteEvents, ...unsynced].sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
@@ -1440,7 +1513,12 @@ export const api = {
         console.warn('Supabase getLocalEvents exception:', err);
       }
     }
-    return localEvents.sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
+    return localEvents.map(e => {
+      if (!e.clientName && e.clientId && clientMap.has(e.clientId)) {
+        return { ...e, clientName: clientMap.get(e.clientId) };
+      }
+      return e;
+    }).sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
   },
 
   async createLocalEvent(event: Omit<CalendarEvent, 'id'> & { id?: string }): Promise<CalendarEvent> {
@@ -1459,6 +1537,7 @@ export const api = {
           end: newEvent.end,
           client_id: newEvent.clientId || null,
           client_name: newEvent.clientName || '',
+          patient_name: newEvent.clientName || '',
         };
 
         const camelPayload: Record<string, any> = {
@@ -1471,16 +1550,30 @@ export const api = {
           clientName: newEvent.clientName || '',
         };
 
-        const result = await executeResilientInsert('calendar_events', [snakePayload, camelPayload]);
+        const minimalPayload: Record<string, any> = {
+          id: newEvent.id,
+          summary: newEvent.summary,
+          start: newEvent.start,
+          end: newEvent.end,
+        };
+
+        const result = await executeResilientInsert('calendar_events', [snakePayload, camelPayload, minimalPayload]);
 
         if (result.success && result.data) {
           const mapped = mapEventFromDB(result.data);
+          const finalEvent: CalendarEvent = {
+            ...newEvent,
+            ...mapped,
+            clientId: mapped.clientId || newEvent.clientId,
+            clientName: mapped.clientName || newEvent.clientName,
+            summary: mapped.summary || newEvent.summary,
+          };
           const current = loadLocal('events', mockEvents);
-          const idx = current.findIndex(e => e.id === mapped.id);
-          if (idx !== -1) current[idx] = mapped;
-          else current.push(mapped);
+          const idx = current.findIndex(e => e.id === finalEvent.id);
+          if (idx !== -1) current[idx] = finalEvent;
+          else current.push(finalEvent);
           saveLocal('events', current);
-          return mapped;
+          return finalEvent;
         }
       } catch (err) {
         console.warn('Supabase createLocalEvent exception:', err);
@@ -1505,6 +1598,7 @@ export const api = {
           end: event.end,
           client_id: event.clientId || null,
           client_name: event.clientName || '',
+          patient_name: event.clientName || '',
         };
 
         const camelPayload: Record<string, any> = {
@@ -1520,11 +1614,18 @@ export const api = {
 
         if (result.success && result.data) {
           const mapped = mapEventFromDB(result.data);
+          const finalEvent: CalendarEvent = {
+            ...event,
+            ...mapped,
+            clientId: mapped.clientId || event.clientId,
+            clientName: mapped.clientName || event.clientName,
+            summary: mapped.summary || event.summary,
+          };
           const current = loadLocal('events', mockEvents);
           const index = current.findIndex(e => e.id === event.id);
-          if (index !== -1) current[index] = mapped;
+          if (index !== -1) current[index] = finalEvent;
           saveLocal('events', current);
-          return mapped;
+          return finalEvent;
         }
       } catch (err) {
         console.warn('Supabase updateLocalEvent exception:', err);
