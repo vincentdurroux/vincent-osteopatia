@@ -1575,8 +1575,15 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                     </span>
                                   </div>
                                   <h5 className="text-xs font-bold text-gray-800 line-clamp-1">
-                                    {event.summary}
+                                    {event.clientName || event.summary}
                                   </h5>
+                                  {event.clientName && event.summary && event.summary !== event.clientName && 
+                                   event.summary !== "Sesión de osteopatía" && event.summary !== "Séance d'ostéopathie" && 
+                                   event.summary !== "Osteopathy session" && (
+                                    <p className="text-[10px] text-gray-400 mt-0.5 line-clamp-1">
+                                      {event.summary}
+                                    </p>
+                                  )}
                                 </div>
 
                                 <div className="flex items-center justify-between gap-2 pt-2 border-t border-black/5">
