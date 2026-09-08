@@ -5461,7 +5461,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                             <span className="px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 text-[9px] font-bold uppercase">
                               {selectedInvoiceForPrint.discountType === 'bono' ? 'Bono' : (receiptLang === 'fr' ? 'Remise' : receiptLang === 'es' ? 'Descuento' : 'Discount')}
                             </span>
-                            {selectedInvoiceForPrint.discountLabel || (receiptLang === 'fr' ? 'Remise Bono séance' : receiptLang === 'es' ? 'Descuento Bono sesión' : 'Bono session discount')}
+                            {selectedInvoiceForPrint.discountLabel || (receiptLang === 'fr' ? 'Remise Bono séance' : receiptLang === 'es' ? 'Descuento sesión' : 'Bono session discount')}
                           </p>
                         </td>
                         <td className="py-3 text-center text-[10px] text-emerald-700 font-medium">-</td>
@@ -5485,7 +5485,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                         <div className="flex justify-between text-[11px] text-emerald-700 font-medium">
                           <span>
                             {selectedInvoiceForPrint.discountType === 'bono'
-                              ? (receiptLang === 'fr' ? 'Remise Forfait Bono' : receiptLang === 'es' ? 'Descuento Bono' : 'Bono discount')
+                              ? (receiptLang === 'fr' ? 'Remise Forfait Bono' : receiptLang === 'es' ? 'Descuento' : 'Bono discount')
                               : (receiptLang === 'fr' ? 'Remise accordée' : receiptLang === 'es' ? 'Descuento aplicado' : 'Discount')}
                           </span>
                           <span>-{selectedInvoiceForPrint.discountAmount} €</span>
