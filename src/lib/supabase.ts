@@ -277,7 +277,7 @@ const mockInvoices: Invoice[] = [
   }
 ];
 
-export const mockEvents: CalendarEvent[] = [
+const mockEvents: CalendarEvent[] = [
   {
     id: 'e1',
     summary: 'Marie Laurent - Séance de suivi',
@@ -324,17 +324,6 @@ const loadLocal = <T>(key: string, seed: T[]): T[] => {
 const saveLocal = <T>(key: string, data: T[]) => {
   localStorage.setItem(`vincent_osteo_${key}`, JSON.stringify(data));
 };
-
-export function syncEventsToServer(events: CalendarEvent[]): void {
-  if (typeof window === 'undefined' || !events || events.length === 0) return;
-  fetch('/api/calendar/sync', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ events }),
-  }).catch(() => {
-    // Ignore server error if route not available
-  });
-}
 
 // ==========================================
 // COLUMN MAPPERS (HANDLES BOTH SNAKE_CASE & CAMELCASE)
@@ -1503,8 +1492,6 @@ export const api = {
     const localClients = loadLocal('clients', mockClients);
     const clientMap = new Map(localClients.map(c => [c.id, c.name]));
 
-    let finalEvents: CalendarEvent[] = localEvents;
-
     if (isSupabaseConfigured && supabase) {
       try {
         const { data, error } = await supabase.from('calendar_events').select('*').order('start', { ascending: true });
@@ -1520,23 +1507,18 @@ export const api = {
           const unsynced = localEvents.filter(e => !remoteIdMap.has(e.id));
           const combined = [...remoteEvents, ...unsynced].sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
           saveLocal('events', combined);
-          finalEvents = combined;
+          return combined;
         }
       } catch (err) {
         console.warn('Supabase getLocalEvents exception:', err);
       }
-    } else {
-      finalEvents = localEvents.map(e => {
-        if (!e.clientName && e.clientId && clientMap.has(e.clientId)) {
-          return { ...e, clientName: clientMap.get(e.clientId) };
-        }
-        return e;
-      }).sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
     }
-
-    // Automatically sync loaded events to server feed
-    syncEventsToServer(finalEvents);
-    return finalEvents;
+    return localEvents.map(e => {
+      if (!e.clientName && e.clientId && clientMap.has(e.clientId)) {
+        return { ...e, clientName: clientMap.get(e.clientId) };
+      }
+      return e;
+    }).sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
   },
 
   async createLocalEvent(event: Omit<CalendarEvent, 'id'> & { id?: string }): Promise<CalendarEvent> {
@@ -1591,7 +1573,6 @@ export const api = {
           if (idx !== -1) current[idx] = finalEvent;
           else current.push(finalEvent);
           saveLocal('events', current);
-          syncEventsToServer(current);
           return finalEvent;
         }
       } catch (err) {
@@ -1604,7 +1585,6 @@ export const api = {
     if (idx !== -1) current[idx] = newEvent;
     else current.push(newEvent);
     saveLocal('events', current);
-    syncEventsToServer(current);
     return newEvent;
   },
 
@@ -1645,7 +1625,6 @@ export const api = {
           const index = current.findIndex(e => e.id === event.id);
           if (index !== -1) current[index] = finalEvent;
           saveLocal('events', current);
-          syncEventsToServer(current);
           return finalEvent;
         }
       } catch (err) {
@@ -1659,7 +1638,6 @@ export const api = {
       current[index] = event;
       saveLocal('events', current);
     }
-    syncEventsToServer(current);
     return event;
   },
 
@@ -1675,7 +1653,6 @@ export const api = {
     const current = loadLocal('events', mockEvents);
     const filtered = current.filter(e => e.id !== id);
     saveLocal('events', filtered);
-    syncEventsToServer(filtered);
     return true;
   }
 };

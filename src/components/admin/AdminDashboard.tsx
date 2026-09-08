@@ -6,11 +6,10 @@ import {
   CreditCard, Shield, Clock, MapPin, Phone, Mail, FileCheck, Printer,
   ChevronRight, Pencil, ChevronLeft, LayoutGrid, List, ArrowRight,
   Copy, CheckCircle2, XCircle, AlertTriangle, Database, Server, UserPlus, User,
-  Tag, BadgePercent, Percent, Sparkles, IdCard, Share2, ExternalLink, Download
+  Tag, BadgePercent, Percent, Sparkles, IdCard
 } from 'lucide-react';
 import { Client, ClientNote, Invoice, CalendarEvent } from '../../types';
 import { api, isSupabaseConfigured, SUPABASE_SQL_SETUP } from '../../lib/supabase';
-import { downloadICSFile, buildGoogleCalendarUrl } from '../../lib/ical';
 import SpineLogo from '../SpineLogo';
 import { useTranslation } from '../../App';
 import { Language, translations } from '../../translations';
@@ -55,8 +54,6 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
   const [calendarViewMode, setCalendarViewMode] = useState<'grid' | 'list'>('grid');
   const [currentCalendarDate, setCurrentCalendarDate] = useState(new Date());
   const [isSyncing, setIsSyncing] = useState(false);
-  const [isICalModalOpen, setIsICalModalOpen] = useState(false);
-  const [isCopiedICalUrl, setIsCopiedICalUrl] = useState(false);
   
   // Modals & Selected states
   const [selectedClient, setSelectedClient] = useState<Client | null>(null);
@@ -2566,15 +2563,6 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                 </button>
 
                 <button
-                  onClick={() => setIsICalModalOpen(true)}
-                  className="flex items-center gap-1.5 px-3.5 py-2 bg-emerald-50 border border-emerald-200 text-emerald-800 hover:bg-emerald-100 rounded-2xl transition-all text-xs font-bold shadow-sm"
-                  title={lang === 'fr' ? "Synchroniser avec Google Calendar / Apple Calendar" : "Sync with Google Calendar"}
-                >
-                  <Share2 size={14} className="text-emerald-600" />
-                  <span>{lang === 'fr' ? "Synchro Google Calendar" : lang === 'es' ? "Sincro Google Calendar" : "Google Calendar Sync"}</span>
-                </button>
-
-                <button
                   onClick={() => setIsAddEventOpen(true)}
                   className="flex items-center gap-2 px-4 py-2.5 bg-primary text-white rounded-2xl text-xs font-bold uppercase tracking-wider hover:bg-primary/95 transition-all shadow-md shadow-primary/10"
                 >
@@ -2827,18 +2815,6 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                         </div>
 
                         <div className="flex items-center gap-2">
-                          <a
-                            href={buildGoogleCalendarUrl(event)}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            onClick={(e) => e.stopPropagation()}
-                            className="flex items-center gap-1 px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200/80 rounded-xl text-xs font-bold transition-all shadow-xs"
-                            title={lang === 'fr' ? "Ajouter ce rendez-vous directement dans votre Google Calendar" : "Add this event to Google Calendar"}
-                          >
-                            <CalendarIcon size={13} className="text-emerald-600" />
-                            <span className="hidden sm:inline">{lang === 'fr' ? "+ Google Cal" : "+ Google Cal"}</span>
-                          </a>
-
                           <button
                             type="button"
                             onClick={(e) => {
@@ -5397,165 +5373,6 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                 >
                   {confirmDialog.isLoading && <RefreshCw size={13} className="animate-spin" />}
                   <span>{confirmDialog.confirmText || (lang === 'fr' ? 'Confirmer' : lang === 'es' ? 'Confirmar' : 'Confirm')}</span>
-                </button>
-              </div>
-            </motion.div>
-          </div>
-        )}
-
-        {/* MODAL: GOOGLE CALENDAR & ICAL SUBSCRIPTION */}
-        {isICalModalOpen && (
-          <div className="fixed inset-0 z-[110] flex items-center justify-center p-4">
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setIsICalModalOpen(false)}
-              className="absolute inset-0 bg-black/50 backdrop-blur-xs"
-            />
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95, y: 15 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 15 }}
-              className="relative w-full max-w-xl bg-white rounded-3xl shadow-2xl p-6 sm:p-8 z-10 border border-black/10 text-left overflow-hidden max-h-[90vh] overflow-y-auto"
-            >
-              {/* Header */}
-              <div className="flex items-start justify-between pb-4 border-b border-gray-100">
-                <div className="flex items-center gap-3">
-                  <div className="w-11 h-11 bg-emerald-50 text-emerald-700 rounded-2xl flex items-center justify-center shrink-0 border border-emerald-100">
-                    <CalendarIcon size={22} />
-                  </div>
-                  <div>
-                    <h3 className="text-lg font-bold font-serif text-gray-900">
-                      {lang === 'fr' ? "Afficher votre agenda sur Google Calendar" : "Sync with Google Calendar"}
-                    </h3>
-                    <p className="text-xs text-gray-500 mt-0.5">
-                      {lang === 'fr' ? "Flux iCal en lecture seule pour Google Calendar, Apple Calendar et Outlook" : "Read-only iCal feed for Google Calendar, Apple Calendar, and Outlook"}
-                    </p>
-                  </div>
-                </div>
-                <button
-                  onClick={() => setIsICalModalOpen(false)}
-                  className="p-2 text-gray-400 hover:text-gray-600 rounded-full hover:bg-gray-100 transition-all"
-                >
-                  <XCircle size={20} />
-                </button>
-              </div>
-
-              <div className="py-5 space-y-6">
-                
-                {/* Method 1: iCal Feed Subscription URL */}
-                <div className="bg-emerald-50/70 border border-emerald-200/80 p-4 sm:p-5 rounded-2xl space-y-3">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold uppercase tracking-wider text-emerald-900 flex items-center gap-1.5">
-                      <Share2 size={15} className="text-emerald-600" />
-                      {lang === 'fr' ? "1. URL d'abonnement iCal (Mise à jour auto)" : "1. iCal Subscription URL (Auto Sync)"}
-                    </span>
-                    <span className="text-[10px] bg-emerald-200/80 text-emerald-900 font-bold px-2 py-0.5 rounded-full uppercase">
-                      {lang === 'fr' ? "Recommandé" : "Recommended"}
-                    </span>
-                  </div>
-
-                  <p className="text-xs text-emerald-950/80 leading-relaxed">
-                    {lang === 'fr' 
-                      ? "Abonnez-vous à ce lien dans Google Calendar pour afficher automatiquement tous vos rendez-vous enregistrés dans votre application en lecture seule."
-                      : "Subscribe to this link in Google Calendar to automatically view all your saved appointments in read-only mode."}
-                  </p>
-
-                  <div className="flex flex-col sm:flex-row items-stretch gap-2 pt-1">
-                    <input
-                      type="text"
-                      readOnly
-                      value={typeof window !== 'undefined' ? `${window.location.origin}/api/calendar/feed.ics` : 'https://www.osteovalencia.com/api/calendar/feed.ics'}
-                      className="flex-1 bg-white border border-emerald-300 px-3 py-2 rounded-xl text-xs font-mono text-gray-800 select-all shadow-inner focus:outline-none"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const url = typeof window !== 'undefined' ? `${window.location.origin}/api/calendar/feed.ics` : 'https://www.osteovalencia.com/api/calendar/feed.ics';
-                        navigator.clipboard.writeText(url);
-                        setIsCopiedICalUrl(true);
-                        setTimeout(() => setIsCopiedICalUrl(false), 3000);
-                      }}
-                      className="px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 shrink-0 shadow-sm"
-                    >
-                      {isCopiedICalUrl ? <CheckCircle2 size={15} /> : <Copy size={15} />}
-                      <span>
-                        {isCopiedICalUrl 
-                          ? (lang === 'fr' ? 'Lien copié !' : 'Copied!') 
-                          : (lang === 'fr' ? 'Copier le lien' : 'Copy link')}
-                      </span>
-                    </button>
-                  </div>
-                </div>
-
-                {/* Step-by-Step Instructions */}
-                <div className="space-y-3">
-                  <h4 className="text-xs font-bold uppercase tracking-wider text-gray-700 flex items-center gap-1.5">
-                    <CheckCircle2 size={15} className="text-primary" />
-                    {lang === 'fr' ? "Procédure d'ajout dans Google Calendar (4 étapes) :" : "How to add to Google Calendar:"}
-                  </h4>
-
-                  <ol className="space-y-2.5 text-xs text-gray-600 bg-gray-50 p-4 rounded-2xl border border-gray-100 font-medium">
-                    <li className="flex items-start gap-2.5">
-                      <span className="w-5 h-5 bg-primary/10 text-primary font-bold rounded-full flex items-center justify-center shrink-0 text-[11px]">1</span>
-                      <span>{lang === 'fr' ? "Cliquez sur le bouton " : "Click "} <strong className="text-gray-900">« Copier le lien »</strong> {lang === 'fr' ? "ci-dessus." : "above."}</span>
-                    </li>
-                    <li className="flex items-start gap-2.5">
-                      <span className="w-5 h-5 bg-primary/10 text-primary font-bold rounded-full flex items-center justify-center shrink-0 text-[11px]">2</span>
-                      <div className="flex-1">
-                        <span>{lang === 'fr' ? "Ouvrez " : "Open "} <strong className="text-gray-900">Google Calendar</strong> {lang === 'fr' ? "sur votre ordinateur :" : "on your computer:"}</span>
-                        <a
-                          href="https://calendar.google.com/calendar/r/settings/addbyurl"
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1 text-primary hover:underline font-bold ml-1.5"
-                        >
-                          calendar.google.com <ExternalLink size={12} />
-                        </a>
-                      </div>
-                    </li>
-                    <li className="flex items-start gap-2.5">
-                      <span className="w-5 h-5 bg-primary/10 text-primary font-bold rounded-full flex items-center justify-center shrink-0 text-[11px]">3</span>
-                      <span>{lang === 'fr' ? "Dans le panneau de gauche, cliquez sur le " : "In the left panel, click "} <strong className="text-gray-900">« + »</strong> {lang === 'fr' ? "à côté de " : "next to "} <strong className="text-gray-900">« Autres agendas »</strong>, {lang === 'fr' ? "puis choisissez " : "then select "} <strong className="text-gray-900">« À partir de l'URL »</strong>.</span>
-                    </li>
-                    <li className="flex items-start gap-2.5">
-                      <span className="w-5 h-5 bg-primary/10 text-primary font-bold rounded-full flex items-center justify-center shrink-0 text-[11px]">4</span>
-                      <span>{lang === 'fr' ? "Collez le lien copié et validez avec " : "Paste the link and click "} <strong className="text-gray-900">« Ajouter l'agenda »</strong>.</span>
-                    </li>
-                  </ol>
-                </div>
-
-                {/* Method 2: Manual Download .ics */}
-                <div className="border-t border-gray-100 pt-4 flex flex-col sm:flex-row items-center justify-between gap-3">
-                  <div>
-                    <h5 className="text-xs font-bold text-gray-800">
-                      {lang === 'fr' ? "Besoin d'un fichier .ics direct ?" : "Need a direct .ics file?"}
-                    </h5>
-                    <p className="text-[11px] text-gray-500">
-                      {lang === 'fr' ? "Téléchargez tous vos rendez-vous actuels au format fichier d'importation." : "Download all current appointments as an importable calendar file."}
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => downloadICSFile(events, 'agenda-cabinet-osteopathie.ics')}
-                    className="w-full sm:w-auto px-4 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 shrink-0 border border-gray-200"
-                  >
-                    <Download size={14} />
-                    <span>{lang === 'fr' ? "Télécharger .ics" : "Download .ics"}</span>
-                  </button>
-                </div>
-
-              </div>
-
-              {/* Footer */}
-              <div className="pt-4 border-t border-gray-100 flex justify-end">
-                <button
-                  type="button"
-                  onClick={() => setIsICalModalOpen(false)}
-                  className="px-5 py-2.5 bg-gray-900 hover:bg-black text-white rounded-xl text-xs font-bold transition-all shadow-sm"
-                >
-                  {lang === 'fr' ? "Fermer" : "Close"}
                 </button>
               </div>
             </motion.div>
