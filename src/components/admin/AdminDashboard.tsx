@@ -999,7 +999,14 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
       }
     }
 
-    let summary = newEvent.title.trim() || "Sesión de osteopatía";
+    let summary = newEvent.title.trim();
+    if (!summary || summary === "Sesión de osteopatía" || summary === "Séance d'ostéopathie" || summary === "Osteopathy session" || summary === getDefaultAppointmentTitle(lang)) {
+      if (finalClientName) {
+        summary = finalClientName;
+      } else {
+        summary = "Sesión de osteopatía";
+      }
+    }
     let description = newEvent.description?.trim() || "";
     
     const startIso = new Date(`${newEvent.date}T${newEvent.startTime}:00`).toISOString();
@@ -4039,10 +4046,11 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                       value={newEvent.clientId}
                       onChange={(e) => {
                         const selectedId = e.target.value;
+                        const client = clients.find(c => c.id === selectedId);
                         setNewEvent(prev => ({
                           ...prev,
                           clientId: selectedId,
-                          title: prev.title || getDefaultAppointmentTitle(lang)
+                          title: client ? client.name : getDefaultAppointmentTitle(lang)
                         }));
                       }}
                       className="w-full p-2.5 bg-secondary rounded-xl border border-black/5 text-xs focus:outline-none focus:ring-1 focus:ring-primary focus:bg-white transition-all"
