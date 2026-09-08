@@ -44,12 +44,22 @@ export let lastSupabaseStatus: {
 // ==========================================
 // SEED DATA FOR LOCAL STORAGE FALLBACK
 // ==========================================
+export function capitalizeFirstName(str: string): string {
+  if (!str) return '';
+  return str
+    .trim()
+    .toLowerCase()
+    .split(/([\s-]+)/)
+    .map(part => part ? part.charAt(0).toUpperCase() + part.slice(1) : '')
+    .join('');
+}
+
 const mockClients: Client[] = [
   {
     id: 'c1',
     firstName: 'Marie',
-    lastName: 'Laurent',
-    name: 'Marie Laurent',
+    lastName: 'LAURENT',
+    name: 'LAURENT Marie',
     dni: '48765432A',
     email: 'marie.laurent@gmail.com',
     phone: '+33 6 12 34 56 78',
@@ -61,8 +71,8 @@ const mockClients: Client[] = [
   {
     id: 'c2',
     firstName: 'Jean-Pierre',
-    lastName: 'Petit',
-    name: 'Jean-Pierre Petit',
+    lastName: 'PETIT',
+    name: 'PETIT Jean-Pierre',
     dni: 'Y1234567X',
     email: 'jp.petit@yahoo.fr',
     phone: '+34 612 987 654',
@@ -74,8 +84,8 @@ const mockClients: Client[] = [
   {
     id: 'c3',
     firstName: 'Lucas',
-    lastName: 'Mercier (Bébé)',
-    name: 'Lucas Mercier (Bébé)',
+    lastName: 'MERCIER (BÉBÉ)',
+    name: 'MERCIER (BÉBÉ) Lucas',
     dni: '',
     email: 'sophie.mercier@gmail.com',
     phone: '+33 6 88 55 44 22',
@@ -87,8 +97,8 @@ const mockClients: Client[] = [
   {
     id: 'c4',
     firstName: 'Sofía',
-    lastName: 'Benítez',
-    name: 'Sofía Benítez',
+    lastName: 'BENÍTEZ',
+    name: 'BENÍTEZ Sofía',
     dni: '53987123K',
     email: 'sofia.benitez@outlook.com',
     phone: '+34 654 321 098',
@@ -280,30 +290,30 @@ const mockInvoices: Invoice[] = [
 const mockEvents: CalendarEvent[] = [
   {
     id: 'e1',
-    summary: 'Marie Laurent - Séance de suivi',
+    summary: 'Séance de suivi',
     description: 'Charnière thoraco-lombaire, psoas et bassin.',
     start: '2026-09-03T10:00:00Z',
     end: '2026-09-03T11:00:00Z',
     clientId: 'c1',
-    clientName: 'Marie Laurent',
+    clientName: 'LAURENT Marie',
   },
   {
     id: 'e2',
-    summary: 'Jean-Pierre Petit - Cervicales',
+    summary: 'Cervicales',
     description: 'Suivi cervicalgie chronique et trapèzes.',
     start: '2026-09-04T14:30:00Z',
     end: '2026-09-04T15:30:00Z',
     clientId: 'c2',
-    clientName: 'Jean-Pierre Petit',
+    clientName: 'PETIT Jean-Pierre',
   },
   {
     id: 'e3',
-    summary: 'Lucas Mercier - Séance pédiatrique',
+    summary: 'Séance pédiatrique',
     description: 'Bébé coliques, sphère viscérale.',
     start: '2026-09-05T09:30:00Z',
     end: '2026-09-05T10:30:00Z',
     clientId: 'c3',
-    clientName: 'Lucas Mercier (Bébé)',
+    clientName: 'MERCIER (BÉBÉ) Lucas',
   }
 ];
 
@@ -341,13 +351,12 @@ export function mapClientFromDB(c: any): Client {
     firstName = firstName || parts.slice(1).join(' ') || '';
   }
 
-  let finalName = rawName || `${(lastName || '').toUpperCase()} ${firstName || ''}`.trim();
+  if (lastName) lastName = lastName.trim().toUpperCase();
+  if (firstName) firstName = capitalizeFirstName(firstName);
+
+  let finalName = `${lastName} ${firstName}`.trim();
   if (!finalName || finalName.toLowerCase() === 'patient sans nom' || finalName.toLowerCase() === 'sans nom') {
-    if (lastName || firstName) {
-      finalName = `${(lastName || '').toUpperCase()} ${firstName || ''}`.trim();
-    } else {
-      finalName = 'Patient sans nom';
-    }
+    finalName = 'Patient sans nom';
   }
 
   return {
@@ -499,7 +508,32 @@ async function executeResilientInsert(
             }
           }
 
-          // 3. ID type mismatch (e.g. integer primary key) -> try without id if generated
+          // 3. UUID or syntax error -> strip offending ID/FK columns and retry
+          if (msg.includes('invalid input syntax for type uuid') || msg.includes('22P02')) {
+            if (currentPayload.client_id && typeof currentPayload.client_id === 'string' && !currentPayload.client_id.includes('-')) {
+              console.warn(`[Supabase Auto-Heal] client_id "${currentPayload.client_id}" is not a valid UUID. Stripping.`);
+              delete currentPayload.client_id;
+              continue;
+            }
+            if (currentPayload.clientId && typeof currentPayload.clientId === 'string' && !currentPayload.clientId.includes('-')) {
+              console.warn(`[Supabase Auto-Heal] clientId "${currentPayload.clientId}" is not a valid UUID. Stripping.`);
+              delete currentPayload.clientId;
+              continue;
+            }
+            if ('id' in currentPayload && typeof currentPayload.id === 'string' && !currentPayload.id.includes('-')) {
+              console.warn(`[Supabase Auto-Heal] id "${currentPayload.id}" is not a valid UUID. Regenerating UUID.`);
+              currentPayload.id = crypto.randomUUID();
+              continue;
+            }
+          }
+
+          // 4. Foreign key violation -> strip foreign key column & retry
+          if (msg.includes('foreign key constraint') || res.error.code === '23503') {
+            if ('client_id' in currentPayload) { delete currentPayload.client_id; continue; }
+            if ('clientId' in currentPayload) { delete currentPayload.clientId; continue; }
+          }
+
+          // 5. ID type mismatch (e.g. integer primary key) -> try without id if generated
           if (msg.includes('invalid input syntax for type integer') || msg.includes('invalid input syntax for type bigint')) {
             if ('id' in currentPayload) {
               console.warn(`[Supabase Auto-Heal] Table "${table}" uses integer IDs. Stripping string UUID and retrying.`);
@@ -602,9 +636,8 @@ async function executeResilientUpdate(
 // SQL SCRIPT FOR SUPABASE SETUP & UPGRADE
 // ==========================================
 export const SUPABASE_SQL_SETUP = `-- ==============================================================================
--- SCRIPT COMPLET DE CRÉATION & MISE À NIVEAU DES TABLES (CABINET VINCENT OSTÉOPATHIE)
+-- SCRIPT ULTIMATE / FAIL-SAFE D'INITIALISATION SUPABASE
 -- À exécuter dans Supabase : Menu gauche > SQL Editor > New query > Run
--- Ce script est idempotent (peut être relancé en toute sécurité sans perdre de données).
 -- ==============================================================================
 
 -- 1. TABLE DES PATIENTS (CLIENTS)
@@ -622,38 +655,41 @@ CREATE TABLE IF NOT EXISTS public.clients (
     last_session_at TIMESTAMPTZ,
     has_bono BOOLEAN DEFAULT FALSE,
     bono_type TEXT,
-    default_discount NUMERIC,
-    bono_sessions_remaining NUMERIC
+    default_discount NUMERIC DEFAULT 0,
+    bono_sessions_remaining NUMERIC DEFAULT 0
 );
 
--- Mises à jour des colonnes si la table clients existe déjà sur votre Supabase :
-ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS first_name TEXT;
-ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS last_name TEXT;
-ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS "firstName" TEXT;
-ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS "lastName" TEXT;
-ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS dni TEXT;
-ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS "dni" TEXT;
-ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS birth_date TEXT;
-ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS "birthDate" TEXT;
-ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS address TEXT;
-ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();
-ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS "createdAt" TIMESTAMPTZ DEFAULT NOW();
-ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS last_session_at TIMESTAMPTZ;
-ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS "lastSessionAt" TIMESTAMPTZ;
-ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS has_bono BOOLEAN DEFAULT FALSE;
-ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS "hasBono" BOOLEAN DEFAULT FALSE;
-ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS bono_type TEXT;
-ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS "bonoType" TEXT;
-ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS default_discount NUMERIC;
-ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS "defaultDiscount" NUMERIC;
-ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS bono_sessions_remaining NUMERIC;
-ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS "bonoSessionsRemaining" NUMERIC;
+DO $$
+BEGIN
+    BEGIN ALTER TABLE public.clients ADD COLUMN first_name TEXT; EXCEPTION WHEN duplicate_column THEN END;
+    BEGIN ALTER TABLE public.clients ADD COLUMN last_name TEXT; EXCEPTION WHEN duplicate_column THEN END;
+    BEGIN ALTER TABLE public.clients ADD COLUMN "firstName" TEXT; EXCEPTION WHEN duplicate_column THEN END;
+    BEGIN ALTER TABLE public.clients ADD COLUMN "lastName" TEXT; EXCEPTION WHEN duplicate_column THEN END;
+    BEGIN ALTER TABLE public.clients ADD COLUMN dni TEXT; EXCEPTION WHEN duplicate_column THEN END;
+    BEGIN ALTER TABLE public.clients ADD COLUMN email TEXT; EXCEPTION WHEN duplicate_column THEN END;
+    BEGIN ALTER TABLE public.clients ADD COLUMN phone TEXT; EXCEPTION WHEN duplicate_column THEN END;
+    BEGIN ALTER TABLE public.clients ADD COLUMN birth_date TEXT; EXCEPTION WHEN duplicate_column THEN END;
+    BEGIN ALTER TABLE public.clients ADD COLUMN "birthDate" TEXT; EXCEPTION WHEN duplicate_column THEN END;
+    BEGIN ALTER TABLE public.clients ADD COLUMN address TEXT; EXCEPTION WHEN duplicate_column THEN END;
+    BEGIN ALTER TABLE public.clients ADD COLUMN created_at TIMESTAMPTZ DEFAULT NOW(); EXCEPTION WHEN duplicate_column THEN END;
+    BEGIN ALTER TABLE public.clients ADD COLUMN "createdAt" TIMESTAMPTZ DEFAULT NOW(); EXCEPTION WHEN duplicate_column THEN END;
+    BEGIN ALTER TABLE public.clients ADD COLUMN last_session_at TIMESTAMPTZ; EXCEPTION WHEN duplicate_column THEN END;
+    BEGIN ALTER TABLE public.clients ADD COLUMN "lastSessionAt" TIMESTAMPTZ; EXCEPTION WHEN duplicate_column THEN END;
+    BEGIN ALTER TABLE public.clients ADD COLUMN has_bono BOOLEAN DEFAULT FALSE; EXCEPTION WHEN duplicate_column THEN END;
+    BEGIN ALTER TABLE public.clients ADD COLUMN "hasBono" BOOLEAN DEFAULT FALSE; EXCEPTION WHEN duplicate_column THEN END;
+    BEGIN ALTER TABLE public.clients ADD COLUMN bono_type TEXT; EXCEPTION WHEN duplicate_column THEN END;
+    BEGIN ALTER TABLE public.clients ADD COLUMN "bonoType" TEXT; EXCEPTION WHEN duplicate_column THEN END;
+    BEGIN ALTER TABLE public.clients ADD COLUMN default_discount NUMERIC DEFAULT 0; EXCEPTION WHEN duplicate_column THEN END;
+    BEGIN ALTER TABLE public.clients ADD COLUMN "defaultDiscount" NUMERIC DEFAULT 0; EXCEPTION WHEN duplicate_column THEN END;
+    BEGIN ALTER TABLE public.clients ADD COLUMN bono_sessions_remaining NUMERIC DEFAULT 0; EXCEPTION WHEN duplicate_column THEN END;
+    BEGIN ALTER TABLE public.clients ADD COLUMN "bonoSessionsRemaining" NUMERIC DEFAULT 0; EXCEPTION WHEN duplicate_column THEN END;
+END $$;
 
 -- 2. TABLE DES NOTES CLINIQUES & DOSSIERS PATIENTS
 CREATE TABLE IF NOT EXISTS public.client_notes (
     id TEXT PRIMARY KEY,
-    client_id TEXT NOT NULL,
-    date TIMESTAMPTZ NOT NULL,
+    client_id TEXT,
+    date TIMESTAMPTZ DEFAULT NOW(),
     motif TEXT,
     anamnese TEXT,
     treatment TEXT,
@@ -662,23 +698,26 @@ CREATE TABLE IF NOT EXISTS public.client_notes (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-ALTER TABLE public.client_notes ADD COLUMN IF NOT EXISTS "clientId" TEXT;
-ALTER TABLE public.client_notes ADD COLUMN IF NOT EXISTS client_id TEXT;
-ALTER TABLE public.client_notes ADD COLUMN IF NOT EXISTS motif TEXT;
-ALTER TABLE public.client_notes ADD COLUMN IF NOT EXISTS anamnese TEXT;
-ALTER TABLE public.client_notes ADD COLUMN IF NOT EXISTS treatment TEXT;
-ALTER TABLE public.client_notes ADD COLUMN IF NOT EXISTS content TEXT;
-ALTER TABLE public.client_notes ADD COLUMN IF NOT EXISTS category TEXT DEFAULT 'treatment';
-ALTER TABLE public.client_notes ADD COLUMN IF NOT EXISTS date TIMESTAMPTZ;
+DO $$
+BEGIN
+    BEGIN ALTER TABLE public.client_notes ADD COLUMN client_id TEXT; EXCEPTION WHEN duplicate_column THEN END;
+    BEGIN ALTER TABLE public.client_notes ADD COLUMN "clientId" TEXT; EXCEPTION WHEN duplicate_column THEN END;
+    BEGIN ALTER TABLE public.client_notes ADD COLUMN date TIMESTAMPTZ DEFAULT NOW(); EXCEPTION WHEN duplicate_column THEN END;
+    BEGIN ALTER TABLE public.client_notes ADD COLUMN motif TEXT; EXCEPTION WHEN duplicate_column THEN END;
+    BEGIN ALTER TABLE public.client_notes ADD COLUMN anamnese TEXT; EXCEPTION WHEN duplicate_column THEN END;
+    BEGIN ALTER TABLE public.client_notes ADD COLUMN treatment TEXT; EXCEPTION WHEN duplicate_column THEN END;
+    BEGIN ALTER TABLE public.client_notes ADD COLUMN content TEXT; EXCEPTION WHEN duplicate_column THEN END;
+    BEGIN ALTER TABLE public.client_notes ADD COLUMN category TEXT DEFAULT 'treatment'; EXCEPTION WHEN duplicate_column THEN END;
+END $$;
 
 -- 3. TABLE DES FACTURES & REÇUS D'HONORAIRES
 CREATE TABLE IF NOT EXISTS public.invoices (
     id TEXT PRIMARY KEY,
-    invoice_number TEXT NOT NULL,
-    client_id TEXT NOT NULL,
-    client_name TEXT NOT NULL,
-    date TEXT NOT NULL,
-    amount NUMERIC NOT NULL,
+    invoice_number TEXT,
+    client_id TEXT,
+    client_name TEXT,
+    date TEXT,
+    amount NUMERIC,
     original_amount NUMERIC,
     discount_amount NUMERIC,
     discount_type TEXT,
@@ -691,70 +730,76 @@ CREATE TABLE IF NOT EXISTS public.invoices (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS "invoiceNumber" TEXT;
-ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS invoice_number TEXT;
-ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS "clientId" TEXT;
-ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS client_id TEXT;
-ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS "clientName" TEXT;
-ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS client_name TEXT;
-ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS original_amount NUMERIC;
-ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS "originalAmount" NUMERIC;
-ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS discount_amount NUMERIC;
-ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS "discountAmount" NUMERIC;
-ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS discount_type TEXT;
-ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS "discountType" TEXT;
-ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS discount_label TEXT;
-ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS "discountLabel" TEXT;
-ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS payment_method TEXT DEFAULT 'card';
-ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS "paymentMethod" TEXT DEFAULT 'card';
-ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS description TEXT;
-ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS language TEXT DEFAULT 'fr';
-ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS note_id TEXT;
-ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS "noteId" TEXT;
+DO $$
+BEGIN
+    BEGIN ALTER TABLE public.invoices ADD COLUMN invoice_number TEXT; EXCEPTION WHEN duplicate_column THEN END;
+    BEGIN ALTER TABLE public.invoices ADD COLUMN "invoiceNumber" TEXT; EXCEPTION WHEN duplicate_column THEN END;
+    BEGIN ALTER TABLE public.invoices ADD COLUMN client_id TEXT; EXCEPTION WHEN duplicate_column THEN END;
+    BEGIN ALTER TABLE public.invoices ADD COLUMN "clientId" TEXT; EXCEPTION WHEN duplicate_column THEN END;
+    BEGIN ALTER TABLE public.invoices ADD COLUMN client_name TEXT; EXCEPTION WHEN duplicate_column THEN END;
+    BEGIN ALTER TABLE public.invoices ADD COLUMN "clientName" TEXT; EXCEPTION WHEN duplicate_column THEN END;
+    BEGIN ALTER TABLE public.invoices ADD COLUMN date TEXT; EXCEPTION WHEN duplicate_column THEN END;
+    BEGIN ALTER TABLE public.invoices ADD COLUMN amount NUMERIC; EXCEPTION WHEN duplicate_column THEN END;
+    BEGIN ALTER TABLE public.invoices ADD COLUMN original_amount NUMERIC; EXCEPTION WHEN duplicate_column THEN END;
+    BEGIN ALTER TABLE public.invoices ADD COLUMN "originalAmount" NUMERIC; EXCEPTION WHEN duplicate_column THEN END;
+    BEGIN ALTER TABLE public.invoices ADD COLUMN discount_amount NUMERIC; EXCEPTION WHEN duplicate_column THEN END;
+    BEGIN ALTER TABLE public.invoices ADD COLUMN "discountAmount" NUMERIC; EXCEPTION WHEN duplicate_column THEN END;
+    BEGIN ALTER TABLE public.invoices ADD COLUMN discount_type TEXT; EXCEPTION WHEN duplicate_column THEN END;
+    BEGIN ALTER TABLE public.invoices ADD COLUMN "discountType" TEXT; EXCEPTION WHEN duplicate_column THEN END;
+    BEGIN ALTER TABLE public.invoices ADD COLUMN discount_label TEXT; EXCEPTION WHEN duplicate_column THEN END;
+    BEGIN ALTER TABLE public.invoices ADD COLUMN "discountLabel" TEXT; EXCEPTION WHEN duplicate_column THEN END;
+    BEGIN ALTER TABLE public.invoices ADD COLUMN status TEXT DEFAULT 'paid'; EXCEPTION WHEN duplicate_column THEN END;
+    BEGIN ALTER TABLE public.invoices ADD COLUMN payment_method TEXT DEFAULT 'card'; EXCEPTION WHEN duplicate_column THEN END;
+    BEGIN ALTER TABLE public.invoices ADD COLUMN "paymentMethod" TEXT DEFAULT 'card'; EXCEPTION WHEN duplicate_column THEN END;
+    BEGIN ALTER TABLE public.invoices ADD COLUMN description TEXT; EXCEPTION WHEN duplicate_column THEN END;
+    BEGIN ALTER TABLE public.invoices ADD COLUMN language TEXT DEFAULT 'fr'; EXCEPTION WHEN duplicate_column THEN END;
+    BEGIN ALTER TABLE public.invoices ADD COLUMN note_id TEXT; EXCEPTION WHEN duplicate_column THEN END;
+    BEGIN ALTER TABLE public.invoices ADD COLUMN "noteId" TEXT; EXCEPTION WHEN duplicate_column THEN END;
+END $$;
 
 -- 4. TABLE DE L'AGENDA & RENDEZ-VOUS
 CREATE TABLE IF NOT EXISTS public.calendar_events (
     id TEXT PRIMARY KEY,
-    summary TEXT NOT NULL,
+    summary TEXT,
     description TEXT,
-    start TIMESTAMPTZ NOT NULL,
-    "end" TIMESTAMPTZ NOT NULL,
+    start TIMESTAMPTZ,
+    "end" TIMESTAMPTZ,
     client_id TEXT,
     client_name TEXT,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-ALTER TABLE public.calendar_events ADD COLUMN IF NOT EXISTS "clientId" TEXT;
-ALTER TABLE public.calendar_events ADD COLUMN IF NOT EXISTS client_id TEXT;
-ALTER TABLE public.calendar_events ADD COLUMN IF NOT EXISTS "clientName" TEXT;
-ALTER TABLE public.calendar_events ADD COLUMN IF NOT EXISTS client_name TEXT;
-ALTER TABLE public.calendar_events ADD COLUMN IF NOT EXISTS summary TEXT;
-ALTER TABLE public.calendar_events ADD COLUMN IF NOT EXISTS description TEXT;
-ALTER TABLE public.calendar_events ADD COLUMN IF NOT EXISTS start TIMESTAMPTZ;
-ALTER TABLE public.calendar_events ADD COLUMN IF NOT EXISTS "end" TIMESTAMPTZ;
+DO $$
+BEGIN
+    BEGIN ALTER TABLE public.calendar_events ADD COLUMN summary TEXT; EXCEPTION WHEN duplicate_column THEN END;
+    BEGIN ALTER TABLE public.calendar_events ADD COLUMN description TEXT; EXCEPTION WHEN duplicate_column THEN END;
+    BEGIN ALTER TABLE public.calendar_events ADD COLUMN start TIMESTAMPTZ; EXCEPTION WHEN duplicate_column THEN END;
+    BEGIN ALTER TABLE public.calendar_events ADD COLUMN "end" TIMESTAMPTZ; EXCEPTION WHEN duplicate_column THEN END;
+    BEGIN ALTER TABLE public.calendar_events ADD COLUMN client_id TEXT; EXCEPTION WHEN duplicate_column THEN END;
+    BEGIN ALTER TABLE public.calendar_events ADD COLUMN "clientId" TEXT; EXCEPTION WHEN duplicate_column THEN END;
+    BEGIN ALTER TABLE public.calendar_events ADD COLUMN client_name TEXT; EXCEPTION WHEN duplicate_column THEN END;
+    BEGIN ALTER TABLE public.calendar_events ADD COLUMN "clientName" TEXT; EXCEPTION WHEN duplicate_column THEN END;
+END $$;
 
--- 5. POLITIQUES DE SÉCURITÉ ROW LEVEL SECURITY (RLS) & DROITS D'ACCÈS
+-- 5. SÉCURITÉ ROW LEVEL SECURITY (RLS)
 ALTER TABLE public.clients ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.client_notes ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.invoices ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.calendar_events ENABLE ROW LEVEL SECURITY;
 
-DO $$ 
-BEGIN
-    DROP POLICY IF EXISTS "Accès total clients" ON public.clients;
-    CREATE POLICY "Accès total clients" ON public.clients FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
-    
-    DROP POLICY IF EXISTS "Accès total notes" ON public.client_notes;
-    CREATE POLICY "Accès total notes" ON public.client_notes FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
-    
-    DROP POLICY IF EXISTS "Accès total factures" ON public.invoices;
-    CREATE POLICY "Accès total factures" ON public.invoices FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
-    
-    DROP POLICY IF EXISTS "Accès total agenda" ON public.calendar_events;
-    CREATE POLICY "Accès total agenda" ON public.calendar_events FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
-END $$;
+DROP POLICY IF EXISTS "Accès total clients" ON public.clients;
+CREATE POLICY "Accès total clients" ON public.clients FOR ALL USING (true) WITH CHECK (true);
 
--- 6. PERMISSIONS EXPLICITES POUR LE RÔLE PUBLIC ANON & AUTHENTICATED
+DROP POLICY IF EXISTS "Accès total notes" ON public.client_notes;
+CREATE POLICY "Accès total notes" ON public.client_notes FOR ALL USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Accès total factures" ON public.invoices;
+CREATE POLICY "Accès total factures" ON public.invoices FOR ALL USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Accès total agenda" ON public.calendar_events;
+CREATE POLICY "Accès total agenda" ON public.calendar_events FOR ALL USING (true) WITH CHECK (true);
+
+-- 6. ACCÈS ROLES ANON ET AUTHENTICATED
 GRANT ALL ON public.clients TO anon, authenticated;
 GRANT ALL ON public.client_notes TO anon, authenticated;
 GRANT ALL ON public.invoices TO anon, authenticated;
@@ -1072,6 +1117,100 @@ export const api = {
       lastName: cleanLastName,
       name: fullName,
     };
+
+    // Find previous client name before updating
+    const existingClients = loadLocal('clients', mockClients);
+    const prevClient = existingClients.find(c => c.id === normalizedClient.id);
+    const oldName = prevClient?.name;
+
+    // Helper: Cascade patient name updates to related appointments and invoices
+    const syncRelatedEventsAndInvoices = async () => {
+      // 1. Local Events Sync
+      const localEvents = loadLocal('events', mockEvents);
+      let eventsModified = false;
+      const updatedEvents = localEvents.map(ev => {
+        if (ev.clientId === normalizedClient.id || (oldName && ev.clientName === oldName)) {
+          eventsModified = true;
+          let newSummary = ev.summary;
+          if (ev.summary && ev.summary.includes(' - ')) {
+            const parts = ev.summary.split(' - ');
+            newSummary = `${fullName} - ${parts.slice(1).join(' - ')}`;
+          } else if (!ev.summary || ev.summary === ev.clientName || (oldName && ev.summary === oldName)) {
+            newSummary = fullName;
+          }
+          return {
+            ...ev,
+            clientId: normalizedClient.id,
+            clientName: fullName,
+            summary: newSummary,
+          };
+        }
+        return ev;
+      });
+      if (eventsModified) {
+        saveLocal('events', updatedEvents);
+      }
+
+      // 2. Local Invoices Sync
+      const localInvoices = loadLocal('invoices', mockInvoices);
+      let invoicesModified = false;
+      const updatedInvoices = localInvoices.map(inv => {
+        if (inv.clientId === normalizedClient.id || (oldName && inv.clientName === oldName)) {
+          invoicesModified = true;
+          return {
+            ...inv,
+            clientId: normalizedClient.id,
+            clientName: fullName,
+          };
+        }
+        return inv;
+      });
+      if (invoicesModified) {
+        saveLocal('invoices', updatedInvoices);
+      }
+
+      // 3. Supabase Cloud Sync for Calendar Events and Invoices
+      if (isSupabaseConfigured && supabase) {
+        try {
+          const clientFilter = (normalizedClient.id && normalizedClient.id.includes('-'))
+            ? `client_id.eq.${normalizedClient.id},clientId.eq.${normalizedClient.id}`
+            : undefined;
+
+          // Update calendar_events table
+          if (clientFilter) {
+            await supabase
+              .from('calendar_events')
+              .update({ client_name: fullName, clientName: fullName })
+              .or(clientFilter);
+
+            await supabase
+              .from('events')
+              .update({ client_name: fullName, clientName: fullName })
+              .or(clientFilter);
+
+            await supabase
+              .from('invoices')
+              .update({ client_name: fullName, clientName: fullName })
+              .or(clientFilter);
+          } else if (oldName) {
+            await supabase
+              .from('calendar_events')
+              .update({ client_name: fullName, clientName: fullName })
+              .or(`client_name.eq.${oldName},clientName.eq.${oldName}`);
+
+            await supabase
+              .from('invoices')
+              .update({ client_name: fullName, clientName: fullName })
+              .or(`client_name.eq.${oldName},clientName.eq.${oldName}`);
+          }
+        } catch (cloudErr) {
+          console.warn('[Supabase] Cascade update failed silently:', cloudErr);
+        }
+      }
+    };
+
+    // Perform cascade sync
+    await syncRelatedEventsAndInvoices();
 
     if (isSupabaseConfigured && supabase) {
       try {
@@ -1489,23 +1628,45 @@ export const api = {
   // ==========================================
   async getLocalEvents(): Promise<CalendarEvent[]> {
     const localEvents = loadLocal('events', mockEvents);
-    const localClients = loadLocal('clients', mockClients);
-    const clientMap = new Map(localClients.map(c => [c.id, c.name]));
+    let allClients: Client[] = [];
+    try {
+      allClients = await this.getClients();
+    } catch {
+      allClients = loadLocal('clients', mockClients);
+    }
+    const clientMap = new Map(allClients.map(c => [c.id, c.name]));
 
     if (isSupabaseConfigured && supabase) {
       try {
-        const { data, error } = await supabase.from('calendar_events').select('*').order('start', { ascending: true });
+        let { data, error } = await supabase.from('calendar_events').select('*').order('start', { ascending: true });
+        if (error && (error.message?.includes('relation') || error.code === '42P01')) {
+          const fallback = await supabase.from('events').select('*').order('start', { ascending: true });
+          data = fallback.data;
+          error = fallback.error;
+        }
+
         if (!error && data) {
           const remoteEvents = data.map(row => {
             const mapped = mapEventFromDB(row);
             if (!mapped.clientName && mapped.clientId && clientMap.has(mapped.clientId)) {
               mapped.clientName = clientMap.get(mapped.clientId);
             }
+            if (!mapped.clientName && mapped.summary.includes(' - ')) {
+              const parts = mapped.summary.split(' - ');
+              if (parts[0] && parts[0].trim().length > 1) {
+                mapped.clientName = parts[0].trim();
+              }
+            }
             return mapped;
           });
           const remoteIdMap = new Set(remoteEvents.map(e => e.id));
           const unsynced = localEvents.filter(e => !remoteIdMap.has(e.id));
-          const combined = [...remoteEvents, ...unsynced].sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
+          const combined = [...remoteEvents, ...unsynced].map(e => {
+            if (!e.clientName && e.clientId && clientMap.has(e.clientId)) {
+              return { ...e, clientName: clientMap.get(e.clientId) };
+            }
+            return e;
+          }).sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
           saveLocal('events', combined);
           return combined;
         }
@@ -1514,17 +1675,25 @@ export const api = {
       }
     }
     return localEvents.map(e => {
-      if (!e.clientName && e.clientId && clientMap.has(e.clientId)) {
-        return { ...e, clientName: clientMap.get(e.clientId) };
+      let name = e.clientName;
+      if (!name && e.clientId && clientMap.has(e.clientId)) {
+        name = clientMap.get(e.clientId);
       }
-      return e;
+      if (!name && e.summary.includes(' - ')) {
+        const parts = e.summary.split(' - ');
+        if (parts[0] && parts[0].trim().length > 1) {
+          name = parts[0].trim();
+        }
+      }
+      return { ...e, clientName: name };
     }).sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
   },
 
   async createLocalEvent(event: Omit<CalendarEvent, 'id'> & { id?: string }): Promise<CalendarEvent> {
+    const validId = (event.id && event.id.length > 10) ? event.id : crypto.randomUUID();
     const newEvent: CalendarEvent = {
       ...event,
-      id: event.id || crypto.randomUUID(),
+      id: validId,
     };
 
     if (isSupabaseConfigured && supabase) {
@@ -1535,7 +1704,7 @@ export const api = {
           description: newEvent.description || '',
           start: newEvent.start,
           end: newEvent.end,
-          client_id: newEvent.clientId || null,
+          client_id: (newEvent.clientId && newEvent.clientId.includes('-')) ? newEvent.clientId : null,
           client_name: newEvent.clientName || '',
           patient_name: newEvent.clientName || '',
         };
@@ -1546,8 +1715,18 @@ export const api = {
           description: newEvent.description || '',
           start: newEvent.start,
           end: newEvent.end,
-          clientId: newEvent.clientId || null,
+          clientId: (newEvent.clientId && newEvent.clientId.includes('-')) ? newEvent.clientId : null,
           clientName: newEvent.clientName || '',
+        };
+
+        const timePayload: Record<string, any> = {
+          id: newEvent.id,
+          summary: newEvent.summary,
+          description: newEvent.description || '',
+          start_time: newEvent.start,
+          end_time: newEvent.end,
+          client_id: (newEvent.clientId && newEvent.clientId.includes('-')) ? newEvent.clientId : null,
+          client_name: newEvent.clientName || '',
         };
 
         const minimalPayload: Record<string, any> = {
@@ -1557,7 +1736,12 @@ export const api = {
           end: newEvent.end,
         };
 
-        const result = await executeResilientInsert('calendar_events', [snakePayload, camelPayload, minimalPayload]);
+        let result = await executeResilientInsert('calendar_events', [snakePayload, camelPayload, timePayload, minimalPayload]);
+
+        if (!result.success && result.error && (result.error.message?.includes('relation') || result.error.code === '42P01')) {
+          console.warn('[Supabase] calendar_events missing, retrying with table "events"');
+          result = await executeResilientInsert('events', [snakePayload, camelPayload, timePayload, minimalPayload]);
+        }
 
         if (result.success && result.data) {
           const mapped = mapEventFromDB(result.data);
@@ -1574,6 +1758,8 @@ export const api = {
           else current.push(finalEvent);
           saveLocal('events', current);
           return finalEvent;
+        } else {
+          console.error('[Supabase createLocalEvent error]', result.error);
         }
       } catch (err) {
         console.warn('Supabase createLocalEvent exception:', err);
@@ -1596,7 +1782,7 @@ export const api = {
           description: event.description || '',
           start: event.start,
           end: event.end,
-          client_id: event.clientId || null,
+          client_id: (event.clientId && event.clientId.includes('-')) ? event.clientId : null,
           client_name: event.clientName || '',
           patient_name: event.clientName || '',
         };
@@ -1606,11 +1792,22 @@ export const api = {
           description: event.description || '',
           start: event.start,
           end: event.end,
-          clientId: event.clientId || null,
+          clientId: (event.clientId && event.clientId.includes('-')) ? event.clientId : null,
           clientName: event.clientName || '',
         };
 
-        const result = await executeResilientUpdate('calendar_events', event.id, [snakePayload, camelPayload]);
+        const timePayload: Record<string, any> = {
+          summary: event.summary,
+          description: event.description || '',
+          start_time: event.start,
+          end_time: event.end,
+        };
+
+        let result = await executeResilientUpdate('calendar_events', event.id, [snakePayload, camelPayload, timePayload]);
+
+        if (!result.success && result.error && (result.error.message?.includes('relation') || result.error.code === '42P01')) {
+          result = await executeResilientUpdate('events', event.id, [snakePayload, camelPayload, timePayload]);
+        }
 
         if (result.success && result.data) {
           const mapped = mapEventFromDB(result.data);
@@ -1626,6 +1823,8 @@ export const api = {
           if (index !== -1) current[index] = finalEvent;
           saveLocal('events', current);
           return finalEvent;
+        } else {
+          console.error('[Supabase updateLocalEvent error]', result.error);
         }
       } catch (err) {
         console.warn('Supabase updateLocalEvent exception:', err);
@@ -1644,7 +1843,10 @@ export const api = {
   async deleteLocalEvent(id: string): Promise<boolean> {
     if (isSupabaseConfigured && supabase) {
       try {
-        await supabase.from('calendar_events').delete().eq('id', id);
+        const { error } = await supabase.from('calendar_events').delete().eq('id', id);
+        if (error && (error.message?.includes('relation') || error.code === '42P01')) {
+          await supabase.from('events').delete().eq('id', id);
+        }
       } catch (err) {
         console.warn('Supabase deleteLocalEvent exception:', err);
       }

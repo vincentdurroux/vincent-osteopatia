@@ -6,10 +6,10 @@ import {
   CreditCard, Shield, Clock, MapPin, Phone, Mail, FileCheck, Printer,
   ChevronRight, Pencil, ChevronLeft, LayoutGrid, List, ArrowRight,
   Copy, CheckCircle2, XCircle, AlertTriangle, Database, Server, UserPlus, User,
-  Tag, BadgePercent, Percent, Sparkles, IdCard
+  Tag, BadgePercent, Percent, Sparkles, IdCard, X
 } from 'lucide-react';
 import { Client, ClientNote, Invoice, CalendarEvent } from '../../types';
-import { api, isSupabaseConfigured, SUPABASE_SQL_SETUP } from '../../lib/supabase';
+import { api, isSupabaseConfigured, SUPABASE_SQL_SETUP, capitalizeFirstName } from '../../lib/supabase';
 import SpineLogo from '../SpineLogo';
 import { useTranslation } from '../../App';
 import { Language, translations } from '../../translations';
@@ -23,10 +23,12 @@ interface AdminDashboardProps {
   onClose: () => void;
 }
 
-const getDefaultAppointmentTitle = (language: string) => {
-  if (language === 'es') return "Sesión de Osteopatía";
-  if (language === 'en') return "Osteopathy Session";
-  return "Séance d'Ostéopathie";
+const getDefaultAppointmentTitle = (_language?: string) => {
+  return "Sesión de osteopatía";
+};
+
+const getDefaultAppointmentDescription = (_language?: string) => {
+  return "";
 };
 
 const getMonthsList = (lang: string) => {
@@ -94,12 +96,14 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
     discountAmount: 0,
     discountType: 'none' as 'none' | 'bono' | 'custom',
     discountLabel: '',
+    status: 'paid' as 'paid' | 'pending',
     paymentMethod: 'card' as Invoice['paymentMethod'],
     description: "Séance d'Ostéopathie (1h)",
     language: 'fr' as 'fr' | 'en' | 'es',
   });
   
   const [isAddEventOpen, setIsAddEventOpen] = useState(false);
+  const [selectedDayModalDate, setSelectedDayModalDate] = useState<string | null>(null);
   const [isInlineNewPatient, setIsInlineNewPatient] = useState(false);
   const [inlinePatient, setInlinePatient] = useState({
     firstName: '',
@@ -110,18 +114,18 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
   });
   const [newEvent, setNewEvent] = useState({
     clientId: '',
-    title: "Séance d'Ostéopathie",
+    title: "Sesión de osteopatía",
     date: new Date().toISOString().split('T')[0],
     startTime: '10:00',
     endTime: '11:00',
     description: '',
   });
 
-  // Keep appointment title updated according to language
+  // Keep appointment title set to Spanish default if empty
   useEffect(() => {
     setNewEvent(prev => ({
       ...prev,
-      title: getDefaultAppointmentTitle(lang)
+      title: prev.title || "Sesión de osteopatía",
     }));
   }, [lang]);
 
@@ -269,15 +273,25 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
   const loadData = async () => {
     try {
       setIsSyncing(true);
-      const [allClients, allInvoices, allEvents] = await Promise.all([
-        api.getClients(),
-        api.getInvoices(),
-        api.getLocalEvents(),
-      ]);
+      const allClients = await api.getClients();
+      const allInvoices = await api.getInvoices();
+      const allEvents = await api.getLocalEvents();
       
+      const clientMap = new Map(allClients.map(c => [c.id, c.name]));
+      const enrichedEvents = allEvents.map(ev => {
+        let name = ev.clientName;
+        if (!name && ev.clientId && clientMap.has(ev.clientId)) {
+          name = clientMap.get(ev.clientId);
+        }
+        return {
+          ...ev,
+          clientName: name,
+        };
+      });
+
       setClients(allClients);
       setInvoices(allInvoices);
-      setEvents(allEvents);
+      setEvents(enrichedEvents);
     } catch (err) {
       console.error('Error loading admin data:', err);
     } finally {
@@ -301,10 +315,12 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
     if (!newClient.firstName || !newClient.lastName) return;
     
     try {
-      const fullName = `${newClient.lastName.toUpperCase()} ${newClient.firstName}`;
+      const formattedLastName = newClient.lastName.trim().toUpperCase();
+      const formattedFirstName = capitalizeFirstName(newClient.firstName);
+      const fullName = `${formattedLastName} ${formattedFirstName}`;
       const created = await api.createClient({
-        firstName: newClient.firstName,
-        lastName: newClient.lastName,
+        firstName: formattedFirstName,
+        lastName: formattedLastName,
         name: fullName,
         dni: newClient.dni?.trim() ? newClient.dni.trim().toUpperCase() : undefined,
         email: newClient.email,
@@ -516,7 +532,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
         discountAmount: isDiscounted ? finalDiscount : undefined,
         discountType: isDiscounted && finalDiscType !== 'none' ? finalDiscType : undefined,
         discountLabel: isDiscounted ? (finalDiscLabel || (finalDiscType === 'bono' ? (client.bonoType || 'Bono') : undefined)) : undefined,
-        status: 'paid',
+        status: newInvoice.status || 'paid',
         paymentMethod: newInvoice.paymentMethod,
         date: new Date().toISOString().split('T')[0],
         description: finalDescription,
@@ -573,6 +589,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
         discountAmount: 0,
         discountType: 'none',
         discountLabel: '',
+        status: 'paid',
         paymentMethod: 'card',
         description: "Séance d'Ostéopathie (1h)",
         language: lang as 'fr' | 'en' | 'es',
@@ -681,12 +698,52 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
     if (!editingClient || !editingClient.firstName || !editingClient.lastName) return;
 
     try {
-      const fullName = `${editingClient.lastName.toUpperCase()} ${editingClient.firstName}`;
+      const formattedLastName = editingClient.lastName.trim().toUpperCase();
+      const formattedFirstName = capitalizeFirstName(editingClient.firstName);
+      const fullName = `${formattedLastName} ${formattedFirstName}`;
+      const oldClientName = editingClient.name;
+
       const updated = await api.updateClient({
         ...editingClient,
+        firstName: formattedFirstName,
+        lastName: formattedLastName,
         name: fullName,
       });
+
       setClients(prev => prev.map(c => c.id === updated.id ? updated : c).sort((a, b) => a.name.localeCompare(b.name)));
+
+      // Synchronize appointment events with updated patient name in React state
+      setEvents(prev => prev.map(ev => {
+        if (ev.clientId === updated.id || (oldClientName && ev.clientName === oldClientName)) {
+          let updatedSummary = ev.summary;
+          if (ev.summary && ev.summary.includes(' - ')) {
+            const parts = ev.summary.split(' - ');
+            updatedSummary = `${fullName} - ${parts.slice(1).join(' - ')}`;
+          } else if (!ev.summary || ev.summary === ev.clientName || (oldClientName && ev.summary === oldClientName)) {
+            updatedSummary = fullName;
+          }
+          return {
+            ...ev,
+            clientId: updated.id,
+            clientName: fullName,
+            summary: updatedSummary,
+          };
+        }
+        return ev;
+      }));
+
+      // Synchronize invoices with updated patient name in React state
+      setInvoices(prev => prev.map(inv => {
+        if (inv.clientId === updated.id || (oldClientName && inv.clientName === oldClientName)) {
+          return {
+            ...inv,
+            clientId: updated.id,
+            clientName: fullName,
+          };
+        }
+        return inv;
+      }));
+
       if (selectedClient?.id === updated.id) {
         setSelectedClient(updated);
       }
@@ -745,6 +802,60 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
       setEditingInvoice(null);
     } catch (err) {
       console.error('Failed to update invoice:', err);
+    }
+  };
+
+  // Toggle invoice payment status handler
+  const handleToggleInvoiceStatus = async (invoice: Invoice, targetStatus?: 'paid' | 'pending') => {
+    const newStatus = targetStatus || (invoice.status === 'paid' ? 'pending' : 'paid');
+
+    const executeToggle = async () => {
+      try {
+        const updated = await api.updateInvoice({
+          ...invoice,
+          status: newStatus,
+        });
+        setInvoices(prev => prev.map(i => i.id === updated.id ? updated : i));
+        if (selectedInvoiceForPrint?.id === updated.id) {
+          setSelectedInvoiceForPrint(updated);
+        }
+      } catch (err) {
+        console.error('Failed to update invoice status:', err);
+      }
+    };
+
+    const invNum = invoice.invoiceNumber ? `#${invoice.invoiceNumber}` : '';
+
+    if (newStatus === 'paid' && invoice.status === 'pending') {
+      setConfirmDialog({
+        isOpen: true,
+        title: lang === 'fr' ? 'Confirmer le règlement' : lang === 'es' ? 'Confirmar pago' : 'Confirm payment',
+        message: lang === 'fr'
+          ? `Confirmez-vous que la facture ${invNum} (${invoice.clientName} - ${invoice.amount} €) a bien été réglée par le patient ?`
+          : lang === 'es'
+          ? `¿Confirma que la factura ${invNum} (${invoice.clientName} - ${invoice.amount} €) ha sido pagada por el paciente?`
+          : `Do you confirm that invoice ${invNum} (${invoice.clientName} - ${invoice.amount} €) has been paid by the patient?`,
+        confirmText: lang === 'fr' ? 'Confirmer le paiement' : lang === 'es' ? 'Confirmar pago' : 'Confirm payment',
+        cancelText: lang === 'fr' ? 'Annuler' : lang === 'es' ? 'Cancelar' : 'Cancel',
+        isDangerous: false,
+        onConfirm: executeToggle,
+      });
+    } else if (newStatus === 'pending' && invoice.status === 'paid') {
+      setConfirmDialog({
+        isOpen: true,
+        title: lang === 'fr' ? 'Passer en attente de règlement' : lang === 'es' ? 'Cambiar a pendiente de pago' : 'Set to pending payment',
+        message: lang === 'fr'
+          ? `Voulez-vous vraiment repasser la facture ${invNum} (${invoice.clientName} - ${invoice.amount} €) au statut "En attente de règlement" (impayée) ?`
+          : lang === 'es'
+          ? `¿Realmente desea cambiar el estado de la factura ${invNum} (${invoice.clientName} - ${invoice.amount} €) a "Pendiente de pago"?`
+          : `Are you sure you want to change invoice ${invNum} (${invoice.clientName} - ${invoice.amount} €) back to "Pending payment" (unpaid)?`,
+        confirmText: lang === 'fr' ? 'Passer en attente' : lang === 'es' ? 'Marcar pendiente' : 'Mark as pending',
+        cancelText: lang === 'fr' ? 'Annuler' : lang === 'es' ? 'Cancelar' : 'Cancel',
+        isDangerous: true,
+        onConfirm: executeToggle,
+      });
+    } else {
+      await executeToggle();
     }
   };
 
@@ -854,14 +965,14 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
     let finalClientName: string | undefined = undefined;
 
     if (isInlineNewPatient) {
-      const cleanFirstName = inlinePatient.firstName.trim();
-      const cleanLastName = inlinePatient.lastName.trim();
+      const cleanFirstName = capitalizeFirstName(inlinePatient.firstName);
+      const cleanLastName = inlinePatient.lastName.trim().toUpperCase();
       if (!cleanLastName || !cleanFirstName) {
         alert(lang === 'fr' ? "Veuillez saisir le nom et le prénom du nouveau patient." : "Please enter the new patient's first and last name.");
         return;
       }
       try {
-        const fullName = `${cleanLastName.toUpperCase()} ${cleanFirstName}`;
+        const fullName = `${cleanLastName} ${cleanFirstName}`;
         const createdCl = await api.createClient({
           firstName: cleanFirstName,
           lastName: cleanLastName,
@@ -888,10 +999,8 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
       }
     }
 
-    let summary = newEvent.title;
-    if (finalClientName && !summary.includes(finalClientName)) {
-      summary = `${finalClientName} - ${newEvent.title}`;
-    }
+    let summary = newEvent.title.trim() || "Sesión de osteopatía";
+    let description = newEvent.description?.trim() || "";
     
     const startIso = new Date(`${newEvent.date}T${newEvent.startTime}:00`).toISOString();
     const endIso = new Date(`${newEvent.date}T${newEvent.endTime}:00`).toISOString();
@@ -899,7 +1008,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
     try {
       const created = await api.createLocalEvent({
         summary,
-        description: newEvent.description || "Consultation au cabinet Vincent Osteopatía.",
+        description,
         start: startIso,
         end: endIso,
         clientId: finalClientId,
@@ -2106,11 +2215,30 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                     <div className="text-left">
                                       <p className="text-xs font-bold text-gray-800 flex items-center gap-1.5">
                                         <span>{lang === 'fr' ? 'Facture' : lang === 'es' ? 'Factura' : 'Invoice'} #{associatedInvoice.invoiceNumber}</span>
-                                        <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${
-                                          associatedInvoice.status === 'paid' ? 'text-emerald-600 bg-emerald-50' : 'text-amber-600 bg-amber-50'
-                                        }`}>
-                                          {associatedInvoice.status === 'paid' ? translations[lang].admin.billing.statusPaid : translations[lang].admin.billing.statusPending}
-                                        </span>
+                                        <button
+                                          type="button"
+                                          onClick={() => handleToggleInvoiceStatus(associatedInvoice)}
+                                          className={`text-[10px] px-2 py-0.5 rounded-full font-bold flex items-center gap-1 transition-all ${
+                                            associatedInvoice.status === 'paid'
+                                              ? 'text-emerald-700 bg-emerald-100 hover:bg-emerald-200 border border-emerald-200'
+                                              : 'text-amber-800 bg-amber-100 hover:bg-amber-200 border border-amber-300 animate-pulse'
+                                          }`}
+                                          title={associatedInvoice.status === 'pending'
+                                            ? (lang === 'fr' ? 'Cliquer pour marquer comme payée' : 'Click to mark as paid')
+                                            : (lang === 'fr' ? 'Cliquer pour passer en attente' : 'Click to mark as pending')}
+                                        >
+                                          {associatedInvoice.status === 'paid' ? (
+                                            <>
+                                              <CheckCircle2 size={11} />
+                                              <span>{translations[lang].admin.billing.statusPaid}</span>
+                                            </>
+                                          ) : (
+                                            <>
+                                              <Clock size={11} />
+                                              <span>{translations[lang].admin.billing.statusPending}</span>
+                                            </>
+                                          )}
+                                        </button>
                                       </p>
                                       <p className="text-[10px] text-gray-500">
                                         {associatedInvoice.amount} € • {
@@ -2121,13 +2249,26 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                     </div>
                                   </div>
                                   
-                                  <button
-                                    onClick={() => setSelectedInvoiceForPrint(associatedInvoice)}
-                                    className="flex items-center gap-1.5 px-3 py-1.5 bg-primary/10 hover:bg-primary text-primary hover:text-white rounded-xl text-[10px] font-bold uppercase tracking-wider transition-all"
-                                  >
-                                    <Printer size={12} />
-                                    <span>{translations[lang].admin.billing.receipt}</span>
-                                  </button>
+                                  <div className="flex items-center gap-2">
+                                    {associatedInvoice.status === 'pending' && (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleToggleInvoiceStatus(associatedInvoice, 'paid')}
+                                        className="flex items-center gap-1 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-[10px] font-bold transition-all shadow-xs"
+                                      >
+                                        <CheckCircle2 size={12} />
+                                        <span>{lang === 'fr' ? 'Marquer payée' : lang === 'es' ? 'Marcar pagada' : 'Mark paid'}</span>
+                                      </button>
+                                    )}
+                                    <button
+                                      type="button"
+                                      onClick={() => setSelectedInvoiceForPrint(associatedInvoice)}
+                                      className="flex items-center gap-1.5 px-3 py-1.5 bg-primary/10 hover:bg-primary text-primary hover:text-white rounded-xl text-[10px] font-bold uppercase tracking-wider transition-all"
+                                    >
+                                      <Printer size={12} />
+                                      <span>{translations[lang].admin.billing.receipt}</span>
+                                    </button>
+                                  </div>
                                 </div>
                               ) : (
                                 <div className="mt-4 pt-4 border-t border-black/5">
@@ -2704,15 +2845,11 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
 
                             const isToday = cell.dateString === todayStr;
 
-                            return (
+                             return (
                               <div
                                 key={idx}
                                 onClick={() => {
-                                  setNewEvent(prev => ({
-                                    ...prev,
-                                    date: cell.dateString
-                                  }));
-                                  setIsAddEventOpen(true);
+                                  setSelectedDayModalDate(cell.dateString);
                                 }}
                                 className={`min-h-[115px] p-2 rounded-2xl border transition-all cursor-pointer flex flex-col justify-between group/cell ${
                                   cell.currentMonth 
@@ -2736,7 +2873,20 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                         {dayEvents.length} {dayEvents.length === 1 ? 'rdv' : 'rdvs'}
                                       </span>
                                     )}
-                                    <span className="opacity-0 group-hover/cell:opacity-100 text-primary p-0.5 rounded transition-opacity" title="Ajouter un RDV">
+                                    <span 
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setNewEvent(prev => ({
+                                          ...prev,
+                                          date: cell.dateString,
+                                          title: "Sesión de osteopatía",
+                                          description: ""
+                                        }));
+                                        setIsAddEventOpen(true);
+                                      }}
+                                      className="opacity-0 group-hover/cell:opacity-100 text-primary p-0.5 rounded hover:bg-primary/10 transition-opacity" 
+                                      title={lang === 'fr' ? "Nouveau RDV rapide" : "Quick Add RDV"}
+                                    >
                                       <Plus size={12} />
                                     </span>
                                   </div>
@@ -2752,12 +2902,12 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                         key={evIdx}
                                         onClick={(e) => {
                                           e.stopPropagation();
-                                          openEditEventModal(ev);
+                                          setSelectedDayModalDate(cell.dateString);
                                         }}
                                         className="px-2 py-1 rounded-lg text-[10px] font-bold truncate leading-tight flex items-center justify-between bg-emerald-100/90 hover:bg-emerald-200 text-emerald-900 border border-emerald-300/80 transition-colors shadow-2xs"
-                                        title={`${timeStr} - ${ev.summary} (Cliquer pour modifier)`}
+                                        title={`${timeStr} - ${ev.summary} (Cliquer pour voir la journée)`}
                                       >
-                                        <span className="truncate">{timeStr} {ev.summary}</span>
+                                        <span className="truncate">{timeStr} {ev.clientName ? `${ev.clientName} (${ev.summary})` : ev.summary}</span>
                                         <Pencil size={10} className="shrink-0 opacity-60 hover:opacity-100 ml-1" />
                                       </div>
                                     );
@@ -2932,11 +3082,23 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                   </h4>
                   
                   <div className="space-y-4">
-                    <div>
-                      <p className="text-[10px] text-gray-400 uppercase tracking-wider">
-                        {lang === 'fr' ? "Chiffre d'Affaires Global" : lang === 'es' ? "Facturación Global" : "Total Revenue"}
-                      </p>
-                      <h4 className="text-3xl font-serif font-bold text-primary">{invoices.reduce((sum, item) => sum + item.amount, 0)} €</h4>
+                    <div className="flex items-center justify-between gap-4">
+                      <div>
+                        <p className="text-[10px] text-gray-400 uppercase tracking-wider">
+                          {lang === 'fr' ? "Total Encaissé (Payé)" : lang === 'es' ? "Total Cobrado" : "Total Collected"}
+                        </p>
+                        <h4 className="text-2xl font-serif font-bold text-emerald-700">
+                          {invoices.filter(i => i.status === 'paid').reduce((sum, item) => sum + item.amount, 0)} €
+                        </h4>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-[10px] text-amber-600 uppercase tracking-wider font-bold">
+                          {lang === 'fr' ? "En attente (Impayé)" : lang === 'es' ? "Pendiente" : "Pending"}
+                        </p>
+                        <h4 className="text-xl font-serif font-bold text-amber-700">
+                          {invoices.filter(i => i.status === 'pending').reduce((sum, item) => sum + item.amount, 0)} €
+                        </h4>
+                      </div>
                     </div>
                     
                     <div className="pt-4 border-t border-black/5 flex justify-between text-xs">
@@ -3103,41 +3265,95 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
 
                     const totalAmt = filtered.reduce((sum, item) => sum + item.amount, 0);
                     const count = filtered.length;
-                    const cardTotal = filtered.filter(i => i.paymentMethod === 'card').reduce((sum, item) => sum + item.amount, 0);
-                    const cashTotal = filtered.filter(i => i.paymentMethod === 'cash').reduce((sum, item) => sum + item.amount, 0);
-                    const transferTotal = filtered.filter(i => i.paymentMethod === 'transfer').reduce((sum, item) => sum + item.amount, 0);
+
+                    const paidInvoices = filtered.filter(i => i.status !== 'pending');
+                    const pendingInvoices = filtered.filter(i => i.status === 'pending');
+
+                    const paidTotal = paidInvoices.reduce((sum, item) => sum + item.amount, 0);
+                    const pendingTotal = pendingInvoices.reduce((sum, item) => sum + item.amount, 0);
+
+                    const cardTotal = paidInvoices.filter(i => i.paymentMethod === 'card').reduce((sum, item) => sum + item.amount, 0);
+                    const cashTotal = paidInvoices.filter(i => i.paymentMethod === 'cash').reduce((sum, item) => sum + item.amount, 0);
+                    const transferTotal = paidInvoices.filter(i => i.paymentMethod === 'transfer').reduce((sum, item) => sum + item.amount, 0);
+
+                    const cardPending = pendingInvoices.filter(i => i.paymentMethod === 'card').reduce((sum, item) => sum + item.amount, 0);
+                    const cashPending = pendingInvoices.filter(i => i.paymentMethod === 'cash').reduce((sum, item) => sum + item.amount, 0);
+                    const transferPending = pendingInvoices.filter(i => i.paymentMethod === 'transfer').reduce((sum, item) => sum + item.amount, 0);
 
                     return (
                       <div className="space-y-4 pt-3 border-t border-black/5">
-                        <div className="flex justify-between items-end">
-                          <div className="text-left">
-                            <p className="text-[9px] text-gray-400 uppercase tracking-wider">
-                              {translations[lang].admin.billing.revenueForPeriod}
-                            </p>
-                            <h4 className="text-2xl font-serif font-bold text-primary">{totalAmt} €</h4>
+                        <div className="space-y-2">
+                          <div className="flex justify-between items-end">
+                            <div className="text-left">
+                              <p className="text-[9px] text-emerald-700 font-bold uppercase tracking-wider">
+                                {lang === 'fr' ? 'Chiffre d\'Affaires Encaissé' : lang === 'es' ? 'Facturación Cobrada' : 'Collected Revenue'}
+                              </p>
+                              <h4 className="text-2xl font-serif font-bold text-emerald-700">{paidTotal} €</h4>
+                            </div>
+                            <div className="text-right">
+                              <p className="text-[9px] text-gray-400 uppercase tracking-wider">
+                                {translations[lang].admin.billing.consultations}
+                              </p>
+                              <p className="text-sm font-bold text-gray-700">{paidInvoices.length} / {count}</p>
+                            </div>
                           </div>
-                          <div className="text-right">
-                            <p className="text-[9px] text-gray-400 uppercase tracking-wider">
-                              {translations[lang].admin.billing.consultations}
-                            </p>
-                            <p className="text-sm font-bold text-gray-700">{count}</p>
+
+                          {pendingTotal > 0 && (
+                            <div className="flex justify-between items-center bg-amber-50 border border-amber-200 rounded-xl px-3 py-1.5 text-xs text-amber-800">
+                              <span className="font-semibold">{lang === 'fr' ? 'En attente (Impayé)' : lang === 'es' ? 'Pendiente (No cobrado)' : 'Pending (Unpaid)'} :</span>
+                              <span className="font-bold">{pendingTotal} €</span>
+                            </div>
+                          )}
+
+                          <div className="text-[10px] text-gray-400 text-right">
+                            {lang === 'fr' ? 'Total facturé : ' : lang === 'es' ? 'Total facturado: ' : 'Total invoiced: '}
+                            <span className="font-semibold">{totalAmt} €</span>
                           </div>
                         </div>
 
                         {/* Payment Breakdown */}
                         <div className="bg-[#f4f4ec]/40 p-3 rounded-2xl space-y-2 text-xs">
+                          <p className="text-[9px] uppercase font-bold text-primary/60 mb-1">
+                            {lang === 'fr' ? 'Modes de règlement (Encaissé)' : lang === 'es' ? 'Métodos de pago (Cobrado)' : 'Payment Methods (Collected)'}
+                          </p>
                           <div className="flex justify-between text-gray-600">
                             <span>{translations[lang].admin.billing.paymentCard} :</span>
-                            <span className="font-bold">{cardTotal} €</span>
+                            <span className="font-bold text-gray-800">{cardTotal} €</span>
                           </div>
                           <div className="flex justify-between text-gray-600">
                             <span>{translations[lang].admin.billing.paymentCash} :</span>
-                            <span className="font-bold">{cashTotal} €</span>
+                            <span className="font-bold text-gray-800">{cashTotal} €</span>
                           </div>
                           <div className="flex justify-between text-gray-600">
                             <span>{translations[lang].admin.billing.paymentTransfer} :</span>
-                            <span className="font-bold">{transferTotal} €</span>
+                            <span className="font-bold text-gray-800">{transferTotal} €</span>
                           </div>
+
+                          {pendingTotal > 0 && (
+                            <div className="pt-2 border-t border-black/5 text-[10px] text-amber-700 space-y-1">
+                              <p className="font-bold uppercase tracking-wider text-[8px] text-amber-600">
+                                {lang === 'fr' ? 'Dont en attente de règlement :' : lang === 'es' ? 'Pendiente de cobro:' : 'Pending collection:'}
+                              </p>
+                              {cardPending > 0 && (
+                                <div className="flex justify-between">
+                                  <span>{translations[lang].admin.billing.paymentCard} :</span>
+                                  <span className="font-medium">{cardPending} €</span>
+                                </div>
+                              )}
+                              {cashPending > 0 && (
+                                <div className="flex justify-between">
+                                  <span>{translations[lang].admin.billing.paymentCash} :</span>
+                                  <span className="font-medium">{cashPending} €</span>
+                                </div>
+                              )}
+                              {transferPending > 0 && (
+                                <div className="flex justify-between">
+                                  <span>{translations[lang].admin.billing.paymentTransfer} :</span>
+                                  <span className="font-medium">{transferPending} €</span>
+                                </div>
+                              )}
+                            </div>
+                          )}
                         </div>
 
                         <button
@@ -3151,8 +3367,12 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                               endDate: recapEndDate,
                               invoices: filtered,
                               total: totalAmt,
+                              collectedTotal: paidTotal,
+                              pendingTotal: pendingTotal,
                               breakdown: { card: cardTotal, cash: cashTotal, transfer: transferTotal },
-                              count
+                              pendingBreakdown: { card: cardPending, cash: cashPending, transfer: transferPending },
+                              count,
+                              collectedCount: paidInvoices.length
                             });
                           }}
                           disabled={count === 0}
@@ -3189,6 +3409,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                       <th className="py-3 font-semibold">{translations[lang].admin.billing.tablePatient}</th>
                       <th className="py-3 font-semibold">{translations[lang].admin.billing.tableDate}</th>
                       <th className="py-3 font-semibold">{translations[lang].admin.billing.tableMethod}</th>
+                      <th className="py-3 font-semibold text-center">{lang === 'fr' ? 'Statut' : lang === 'es' ? 'Estado' : 'Status'}</th>
                       <th className="py-3 font-semibold text-right">{translations[lang].admin.billing.tableAmount}</th>
                       <th className="py-3 font-semibold text-right">{translations[lang].admin.billing.tableActions}</th>
                     </tr>
@@ -3207,6 +3428,32 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                             {inv.paymentMethod === 'card' ? (lang === 'fr' ? 'Carte' : lang === 'es' ? 'Tarjeta' : 'Card') :
                              inv.paymentMethod === 'cash' ? (lang === 'fr' ? 'Espèces' : lang === 'es' ? 'Efectivo' : 'Cash') : (lang === 'fr' ? 'Virement' : lang === 'es' ? 'Transferencia' : 'Transfer')}
                           </span>
+                        </td>
+                        <td className="py-4 text-center">
+                          <button
+                            type="button"
+                            onClick={() => handleToggleInvoiceStatus(inv)}
+                            className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold tracking-wider transition-all cursor-pointer ${
+                              inv.status === 'paid'
+                                ? 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200 border border-emerald-300/60'
+                                : 'bg-amber-100 text-amber-900 hover:bg-amber-200 border border-amber-300/80 animate-pulse'
+                            }`}
+                            title={inv.status === 'pending'
+                              ? (lang === 'fr' ? 'Cliquer pour marquer comme payée' : 'Click to mark as paid')
+                              : (lang === 'fr' ? 'Cliquer pour passer en attente' : 'Click to mark as pending')}
+                          >
+                            {inv.status === 'paid' ? (
+                              <>
+                                <CheckCircle2 size={11} className="text-emerald-700" />
+                                <span>{translations[lang].admin.billing.statusPaid || 'Payée'}</span>
+                              </>
+                            ) : (
+                              <>
+                                <Clock size={11} className="text-amber-700" />
+                                <span>{translations[lang].admin.billing.statusPending || 'En attente'}</span>
+                              </>
+                            )}
+                          </button>
                         </td>
                         <td className="py-4 text-right">
                           <div className="flex flex-col items-end">
@@ -3311,7 +3558,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                       type="text"
                       required
                       value={newClient.lastName}
-                      onChange={(e) => setNewClient(prev => ({ ...prev, lastName: e.target.value }))}
+                      onChange={(e) => setNewClient(prev => ({ ...prev, lastName: e.target.value.toUpperCase() }))}
                       className="w-full p-2.5 bg-secondary rounded-xl border border-black/5 text-xs focus:outline-none focus:ring-1 focus:ring-primary focus:bg-white transition-all uppercase"
                     />
                   </div>
@@ -3323,7 +3570,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                       type="text"
                       required
                       value={newClient.firstName}
-                      onChange={(e) => setNewClient(prev => ({ ...prev, firstName: e.target.value }))}
+                      onChange={(e) => setNewClient(prev => ({ ...prev, firstName: capitalizeFirstName(e.target.value) }))}
                       className="w-full p-2.5 bg-secondary rounded-xl border border-black/5 text-xs focus:outline-none focus:ring-1 focus:ring-primary focus:bg-white transition-all"
                     />
                   </div>
@@ -3477,6 +3724,215 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
         )}
       </AnimatePresence>
 
+      {/* MODAL: DAY SPECIFIC APPOINTMENTS */}
+      <AnimatePresence>
+        {selectedDayModalDate && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setSelectedDayModalDate(null)}
+              className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 10 }}
+              className="relative w-full max-w-xl bg-white rounded-3xl shadow-2xl p-6 sm:p-8 z-10 border border-black/5 flex flex-col max-h-[85vh]"
+            >
+              {/* Header */}
+              <div className="flex items-start justify-between pb-4 border-b border-black/5">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-2xl bg-primary/10 text-primary flex items-center justify-center shrink-0">
+                    <CalendarIcon size={20} />
+                  </div>
+                  <div>
+                    <h3 className="text-lg sm:text-xl font-serif font-bold text-gray-900 capitalize">
+                      {(() => {
+                        const [y, m, d] = selectedDayModalDate.split('-').map(Number);
+                        const dateObj = new Date(y, m - 1, d);
+                        return dateObj.toLocaleDateString(
+                          lang === 'fr' ? 'fr-FR' : lang === 'es' ? 'es-ES' : 'en-US',
+                          { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }
+                        );
+                      })()}
+                    </h3>
+                    <p className="text-xs text-gray-500 mt-0.5">
+                      {(() => {
+                        const dayEvents = events.filter(ev => {
+                          try {
+                            const evDate = new Date(ev.start);
+                            const y = evDate.getFullYear();
+                            const m = String(evDate.getMonth() + 1).padStart(2, '0');
+                            const d = String(evDate.getDate()).padStart(2, '0');
+                            return `${y}-${m}-${d}` === selectedDayModalDate;
+                          } catch (e) {
+                            return false;
+                          }
+                        });
+                        if (dayEvents.length === 0) {
+                          return lang === 'fr' ? 'Aucun rendez-vous ce jour' : lang === 'es' ? 'Sin citas este día' : 'No appointments on this day';
+                        }
+                        return lang === 'fr' 
+                          ? `${dayEvents.length} consultation${dayEvents.length > 1 ? 's' : ''} programmée${dayEvents.length > 1 ? 's' : ''}` 
+                          : lang === 'es' 
+                          ? `${dayEvents.length} cita${dayEvents.length > 1 ? 's' : ''}` 
+                          : `${dayEvents.length} appointment${dayEvents.length > 1 ? 's' : ''}`;
+                      })()}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => {
+                      setNewEvent(prev => ({
+                        ...prev,
+                        date: selectedDayModalDate,
+                        title: "Sesión de osteopatía",
+                        description: ""
+                      }));
+                      setIsAddEventOpen(true);
+                    }}
+                    className="flex items-center gap-1.5 px-3 py-2 bg-primary text-white rounded-xl text-xs font-bold hover:bg-primary/95 transition-all shadow-sm"
+                  >
+                    <Plus size={14} />
+                    <span>{lang === 'fr' ? 'Nouveau RDV' : lang === 'es' ? 'Nueva Cita' : 'New Appointment'}</span>
+                  </button>
+
+                  <button
+                    onClick={() => setSelectedDayModalDate(null)}
+                    className="p-2 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-xl transition-all"
+                  >
+                    <X size={18} />
+                  </button>
+                </div>
+              </div>
+
+              {/* Day Events List */}
+              <div className="flex-1 overflow-y-auto my-4 pr-1 space-y-3">
+                {(() => {
+                  const dayEvents = events.filter(ev => {
+                    try {
+                      const evDate = new Date(ev.start);
+                      const y = evDate.getFullYear();
+                      const m = String(evDate.getMonth() + 1).padStart(2, '0');
+                      const d = String(evDate.getDate()).padStart(2, '0');
+                      return `${y}-${m}-${d}` === selectedDayModalDate;
+                    } catch (e) {
+                      return false;
+                    }
+                  }).sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
+
+                  if (dayEvents.length === 0) {
+                    return (
+                      <div className="py-12 text-center bg-gray-50/70 rounded-2xl border border-dashed border-gray-200">
+                        <Clock size={32} className="mx-auto text-gray-300 mb-3" />
+                        <p className="text-sm font-semibold text-gray-700">
+                          {lang === 'fr' ? 'Aucun rendez-vous prévu pour cette journée' : lang === 'es' ? 'No hay citas programadas para este día' : 'No appointments scheduled for this day'}
+                        </p>
+                        <p className="text-xs text-gray-400 mt-1 max-w-xs mx-auto">
+                          {lang === 'fr' ? 'Vous pouvez planifier un nouveau rendez-vous en cliquant sur le bouton ci-dessus.' : 'You can schedule a new appointment using the button above.'}
+                        </p>
+                        <button
+                          onClick={() => {
+                            setNewEvent(prev => ({
+                              ...prev,
+                              date: selectedDayModalDate,
+                              title: "Sesión de osteopatía",
+                              description: ""
+                            }));
+                            setIsAddEventOpen(true);
+                          }}
+                          className="mt-4 px-4 py-2 bg-primary text-white rounded-xl text-xs font-bold inline-flex items-center gap-1.5 hover:bg-primary/90 transition-all"
+                        >
+                          <Plus size={14} />
+                          <span>{lang === 'fr' ? 'Ajouter un RDV pour ce jour' : 'Add appointment for this day'}</span>
+                        </button>
+                      </div>
+                    );
+                  }
+
+                  return dayEvents.map((ev) => {
+                    const startDate = new Date(ev.start);
+                    const endDate = new Date(ev.end);
+                    const startTime = startDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                    const endTime = endDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+                    return (
+                      <div
+                        key={ev.id}
+                        className="p-4 rounded-2xl bg-[#fafafa] hover:bg-white border border-black/5 hover:border-primary/20 shadow-2xs transition-all space-y-2.5 group"
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="flex items-center gap-2">
+                            <span className="px-2.5 py-1 bg-emerald-100 text-emerald-800 text-xs font-bold rounded-lg border border-emerald-200/80 shrink-0">
+                              {startTime} - {endTime}
+                            </span>
+                            <div className="flex flex-col">
+                              {ev.clientName && (
+                                <span className="text-xs font-bold text-gray-900">{ev.clientName}</span>
+                              )}
+                              <span className="text-xs font-medium text-gray-600 group-hover:text-primary transition-colors">
+                                {ev.summary}
+                              </span>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-1 shrink-0">
+                            <button
+                              onClick={() => {
+                                handleGoToNotes(ev);
+                              }}
+                              className="px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 rounded-lg text-xs font-bold transition-all border border-emerald-200 flex items-center gap-1"
+                              title={lang === 'fr' ? 'Fiche patient & Notes' : 'Patient Notes'}
+                            >
+                              <FileText size={12} />
+                              <span className="hidden sm:inline">{lang === 'fr' ? 'Fiche' : 'File'}</span>
+                            </button>
+                            <button
+                              onClick={() => openEditEventModal(ev)}
+                              className="p-1.5 text-gray-500 hover:text-primary hover:bg-primary/5 rounded-lg transition-all"
+                              title={lang === 'fr' ? 'Modifier' : 'Edit'}
+                            >
+                              <Pencil size={14} />
+                            </button>
+                            <button
+                              onClick={() => handleDeleteEvent(ev.id)}
+                              className="p-1.5 text-gray-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-all"
+                              title={lang === 'fr' ? 'Supprimer' : 'Delete'}
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
+                        </div>
+
+                        {ev.description && (
+                          <p className="text-xs text-gray-600 pl-1 border-l-2 border-primary/20 leading-relaxed italic bg-white/60 p-2 rounded-r-lg">
+                            {ev.description}
+                          </p>
+                        )}
+                      </div>
+                    );
+                  });
+                })()}
+              </div>
+
+              {/* Footer */}
+              <div className="pt-3 border-t border-black/5 flex justify-end">
+                <button
+                  onClick={() => setSelectedDayModalDate(null)}
+                  className="px-5 py-2.5 bg-secondary text-gray-700 rounded-xl text-xs font-bold hover:bg-black/5 transition-all"
+                >
+                  {lang === 'fr' ? 'Fermer' : 'Close'}
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
       {/* MODAL: BLOCK / PLAN EVENT (GOOGLE CALENDAR) */}
       <AnimatePresence>
         {isAddEventOpen && (
@@ -3540,15 +3996,15 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                           required
                           placeholder={lang === 'fr' ? 'Nom *' : 'Last Name *'}
                           value={inlinePatient.lastName}
-                          onChange={(e) => setInlinePatient(prev => ({ ...prev, lastName: e.target.value }))}
-                          className="w-full p-2 bg-white rounded-xl border border-black/10 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
+                          onChange={(e) => setInlinePatient(prev => ({ ...prev, lastName: e.target.value.toUpperCase() }))}
+                          className="w-full p-2 bg-white rounded-xl border border-black/10 text-xs focus:outline-none focus:ring-1 focus:ring-primary uppercase"
                         />
                         <input
                           type="text"
                           required
                           placeholder={lang === 'fr' ? 'Prénom *' : 'First Name *'}
                           value={inlinePatient.firstName}
-                          onChange={(e) => setInlinePatient(prev => ({ ...prev, firstName: e.target.value }))}
+                          onChange={(e) => setInlinePatient(prev => ({ ...prev, firstName: capitalizeFirstName(e.target.value) }))}
                           className="w-full p-2 bg-white rounded-xl border border-black/10 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
                         />
                       </div>
@@ -3668,7 +4124,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                   </label>
                   <textarea
                     value={newEvent.description}
-                    placeholder={lang === 'fr' ? 'Motif, antécédents, remarques...' : 'Reason, notes...'}
+                    placeholder={lang === 'fr' ? 'Motif, remarques (optionnel)...' : lang === 'es' ? 'Motivo, notas (opcional)...' : 'Notes / Reason (optional)...'}
                     onChange={(e) => setNewEvent(prev => ({ ...prev, description: e.target.value }))}
                     rows={3}
                     className="w-full p-3 bg-secondary rounded-xl border border-black/5 text-xs focus:outline-none focus:ring-1 focus:ring-primary focus:bg-white transition-all resize-none"
@@ -3763,6 +4219,30 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
               </div>
               
               <form onSubmit={handleUpdateEvent} className="space-y-4">
+                <div>
+                  <label className="text-[10px] uppercase tracking-wider font-bold text-gray-400 block mb-1">
+                    {lang === 'fr' ? 'Patient associé' : lang === 'es' ? 'Paciente asociado' : 'Associated Patient'}
+                  </label>
+                  <select
+                    value={editingEvent.clientId || ''}
+                    onChange={(e) => {
+                      const selectedId = e.target.value;
+                      const foundClient = clients.find(c => c.id === selectedId);
+                      setEditingEvent(prev => prev ? ({
+                        ...prev,
+                        clientId: selectedId,
+                        clientName: foundClient ? foundClient.name : prev.clientName,
+                      }) : null);
+                    }}
+                    className="w-full p-2.5 bg-secondary rounded-xl border border-black/5 text-xs focus:outline-none focus:ring-1 focus:ring-primary focus:bg-white transition-all font-medium"
+                  >
+                    <option value="">-- {lang === 'fr' ? 'Aucun ou patient non répertorié' : lang === 'es' ? 'Ninguno o no registrado' : 'None or unlisted'} --</option>
+                    {clients.map(c => (
+                      <option key={c.id} value={c.id}>{c.name} ({c.phone || c.email || 'N/A'})</option>
+                    ))}
+                  </select>
+                </div>
+
                 <div>
                   <label className="text-[10px] uppercase tracking-wider font-bold text-gray-400 block mb-1">
                     {lang === 'fr' ? 'Intitulé de la consultation' : 'Appointment Title'} *
@@ -4198,19 +4678,35 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                   );
                 })()}
 
-                <div>
-                  <label className="text-[10px] uppercase tracking-wider font-bold text-gray-400 block mb-1">
-                    {lang === 'fr' ? 'Moyen de règlement' : lang === 'es' ? 'Método de pago' : 'Payment method'}
-                  </label>
-                  <select
-                    value={newInvoice.paymentMethod}
-                    onChange={(e) => setNewInvoice(prev => ({ ...prev, paymentMethod: e.target.value as Invoice['paymentMethod'] }))}
-                    className="w-full p-2.5 bg-secondary rounded-xl border border-black/5 text-xs focus:outline-none focus:ring-1 focus:ring-primary focus:bg-white transition-all"
-                  >
-                    <option value="card">{lang === 'fr' ? 'Carte Bancaire' : lang === 'es' ? 'Tarjeta bancaria' : 'Credit/Debit Card'}</option>
-                    <option value="cash">{lang === 'fr' ? 'Espèces' : lang === 'es' ? 'Efectivo' : 'Cash'}</option>
-                    <option value="transfer">{lang === 'fr' ? 'Virement Bancaire' : lang === 'es' ? 'Transferencia bancaria' : 'Bank Transfer'}</option>
-                  </select>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-[10px] uppercase tracking-wider font-bold text-gray-400 block mb-1">
+                      {lang === 'fr' ? 'Moyen de règlement' : lang === 'es' ? 'Método de pago' : 'Payment method'}
+                    </label>
+                    <select
+                      value={newInvoice.paymentMethod}
+                      onChange={(e) => setNewInvoice(prev => ({ ...prev, paymentMethod: e.target.value as Invoice['paymentMethod'] }))}
+                      className="w-full p-2.5 bg-secondary rounded-xl border border-black/5 text-xs focus:outline-none focus:ring-1 focus:ring-primary focus:bg-white transition-all"
+                    >
+                      <option value="card">{lang === 'fr' ? 'Carte Bancaire' : lang === 'es' ? 'Tarjeta bancaria' : 'Credit/Debit Card'}</option>
+                      <option value="cash">{lang === 'fr' ? 'Espèces' : lang === 'es' ? 'Efectivo' : 'Cash'}</option>
+                      <option value="transfer">{lang === 'fr' ? 'Virement Bancaire' : lang === 'es' ? 'Transferencia bancaria' : 'Bank Transfer'}</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="text-[10px] uppercase tracking-wider font-bold text-gray-400 block mb-1">
+                      {lang === 'fr' ? 'Statut du paiement' : lang === 'es' ? 'Estado del pago' : 'Payment status'}
+                    </label>
+                    <select
+                      value={newInvoice.status || 'paid'}
+                      onChange={(e) => setNewInvoice(prev => ({ ...prev, status: e.target.value as 'paid' | 'pending' }))}
+                      className="w-full p-2.5 bg-secondary rounded-xl border border-black/5 text-xs font-bold focus:outline-none focus:ring-1 focus:ring-primary focus:bg-white transition-all"
+                    >
+                      <option value="paid">{lang === 'fr' ? 'Payée (Encaissé)' : lang === 'es' ? 'Pagada' : 'Paid'}</option>
+                      <option value="pending">{lang === 'fr' ? 'En attente (Impayée)' : lang === 'es' ? 'Pendiente' : 'Pending'}</option>
+                    </select>
+                  </div>
                 </div>
 
                 <div>
@@ -4296,7 +4792,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                       type="text"
                       required
                       value={editingClient.lastName}
-                      onChange={(e) => setEditingClient(prev => prev ? ({ ...prev, lastName: e.target.value }) : null)}
+                      onChange={(e) => setEditingClient(prev => prev ? ({ ...prev, lastName: e.target.value.toUpperCase() }) : null)}
                       className="w-full p-2.5 bg-secondary rounded-xl border border-black/5 text-xs focus:outline-none focus:ring-1 focus:ring-primary focus:bg-white transition-all uppercase"
                     />
                   </div>
@@ -4308,7 +4804,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                       type="text"
                       required
                       value={editingClient.firstName}
-                      onChange={(e) => setEditingClient(prev => prev ? ({ ...prev, firstName: e.target.value }) : null)}
+                      onChange={(e) => setEditingClient(prev => prev ? ({ ...prev, firstName: capitalizeFirstName(e.target.value) }) : null)}
                       className="w-full p-2.5 bg-secondary rounded-xl border border-black/5 text-xs focus:outline-none focus:ring-1 focus:ring-primary focus:bg-white transition-all"
                     />
                   </div>
@@ -4649,19 +5145,35 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                   )}
                 </div>
 
-                <div>
-                  <label className="text-[10px] uppercase tracking-wider font-bold text-gray-400 block mb-1">
-                    {lang === 'fr' ? 'Moyen de règlement' : lang === 'es' ? 'Método de pago' : 'Payment method'}
-                  </label>
-                  <select
-                    value={editingInvoice.paymentMethod}
-                    onChange={(e) => setEditingInvoice(prev => prev ? ({ ...prev, paymentMethod: e.target.value as Invoice['paymentMethod'] }) : null)}
-                    className="w-full p-2.5 bg-secondary rounded-xl border border-black/5 text-xs focus:outline-none focus:ring-1 focus:ring-primary focus:bg-white transition-all"
-                  >
-                    <option value="card">{lang === 'fr' ? 'Carte Bancaire' : lang === 'es' ? 'Tarjeta bancaria' : 'Credit/Debit Card'}</option>
-                    <option value="cash">{lang === 'fr' ? 'Espèces' : lang === 'es' ? 'Efectivo' : 'Cash'}</option>
-                    <option value="transfer">{lang === 'fr' ? 'Virement Bancaire' : lang === 'es' ? 'Transferencia bancaria' : 'Bank Transfer'}</option>
-                  </select>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-[10px] uppercase tracking-wider font-bold text-gray-400 block mb-1">
+                      {lang === 'fr' ? 'Moyen de règlement' : lang === 'es' ? 'Método de pago' : 'Payment method'}
+                    </label>
+                    <select
+                      value={editingInvoice.paymentMethod}
+                      onChange={(e) => setEditingInvoice(prev => prev ? ({ ...prev, paymentMethod: e.target.value as Invoice['paymentMethod'] }) : null)}
+                      className="w-full p-2.5 bg-secondary rounded-xl border border-black/5 text-xs focus:outline-none focus:ring-1 focus:ring-primary focus:bg-white transition-all"
+                    >
+                      <option value="card">{lang === 'fr' ? 'Carte Bancaire' : lang === 'es' ? 'Tarjeta bancaria' : 'Credit/Debit Card'}</option>
+                      <option value="cash">{lang === 'fr' ? 'Espèces' : lang === 'es' ? 'Efectivo' : 'Cash'}</option>
+                      <option value="transfer">{lang === 'fr' ? 'Virement Bancaire' : lang === 'es' ? 'Transferencia bancaria' : 'Bank Transfer'}</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="text-[10px] uppercase tracking-wider font-bold text-gray-400 block mb-1">
+                      {lang === 'fr' ? 'Statut du paiement' : lang === 'es' ? 'Estado del pago' : 'Payment status'}
+                    </label>
+                    <select
+                      value={editingInvoice.status || 'paid'}
+                      onChange={(e) => setEditingInvoice(prev => prev ? ({ ...prev, status: e.target.value as 'paid' | 'pending' }) : null)}
+                      className="w-full p-2.5 bg-secondary rounded-xl border border-black/5 text-xs font-bold focus:outline-none focus:ring-1 focus:ring-primary focus:bg-white transition-all"
+                    >
+                      <option value="paid">{lang === 'fr' ? 'Payée (Encaissé)' : lang === 'es' ? 'Pagada' : 'Paid'}</option>
+                      <option value="pending">{lang === 'fr' ? 'En attente (Impayée)' : lang === 'es' ? 'Pendiente' : 'Pending'}</option>
+                    </select>
+                  </div>
                 </div>
 
                 <div>
@@ -4730,7 +5242,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
       {/* MODAL: PRINTABLE RECEIPT / MUTUELLE REÇU */}
       <AnimatePresence>
         {selectedInvoiceForPrint && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm overflow-y-auto print:bg-white print:p-0 print:block print:static print:overflow-visible print-modal-container">
+          <div className="fixed inset-0 z-[100] flex items-start justify-center p-4 bg-black/60 backdrop-blur-sm overflow-y-auto print:bg-white print:p-0 print:block print:static print:overflow-visible print-modal-container">
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -4803,6 +5315,29 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                 id="receipt-print-area" 
                 className="space-y-6 text-xs font-sans print:p-0 print:space-y-4 print:text-[10pt] bg-white"
               >
+                {selectedInvoiceForPrint.status === 'pending' && (
+                  <div className="bg-amber-50 border border-amber-300 text-amber-900 rounded-2xl p-3.5 flex items-center justify-between print:bg-amber-50/50">
+                    <div className="flex items-center gap-2">
+                      <Clock size={16} className="text-amber-700" />
+                      <div>
+                        <p className="font-bold text-xs uppercase tracking-wider">
+                          {receiptLang === 'fr' ? 'Facture en attente de paiement' : receiptLang === 'es' ? 'Factura pendiente de pago' : 'Invoice pending payment'}
+                        </p>
+                        <p className="text-[10px] text-amber-700 font-normal">
+                          {receiptLang === 'fr' ? 'Cette facture n\'a pas encore été marquée comme acquittée.' : receiptLang === 'es' ? 'Esta factura aún no ha sido marcada como saldada.' : 'This invoice has not been marked as paid yet.'}
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleToggleInvoiceStatus(selectedInvoiceForPrint, 'paid')}
+                      className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-all shadow-xs print:hidden flex items-center gap-1.5 shrink-0"
+                    >
+                      <CheckCircle2 size={14} />
+                      <span>{receiptLang === 'fr' ? 'Marquer comme payée' : receiptLang === 'es' ? 'Marcar pagada' : 'Mark as paid'}</span>
+                    </button>
+                  </div>
+                )}
                 {/* Header Section */}
                 <div className="flex justify-between items-start">
                   <div>
@@ -4847,7 +5382,72 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                   <tbody>
                     <tr className="border-b border-black/5 text-gray-700">
                       <td className="py-4">
-                        <p className="font-bold">{selectedInvoiceForPrint.description}</p>
+                        <p className="font-bold">
+                          {(() => {
+                            const desc = selectedInvoiceForPrint.description || '';
+                            const trimmed = desc.trim();
+
+                            // 1. Standard single session: "Séance d'Ostéopathie (1h)" or matches in other languages
+                            if (
+                              trimmed === "Séance d'Ostéopathie (1h)" || 
+                              trimmed === "Osteopathy Session (1h)" || 
+                              trimmed === "Sesión de Osteopatía (1h)"
+                            ) {
+                              return receiptLang === 'fr' ? "Séance d'Ostéopathie (1h)" :
+                                     receiptLang === 'es' ? "Sesión de Osteopatía (1h)" :
+                                     "Osteopathy Session (1h)";
+                            }
+
+                            // 2. Standard single session without (1h): "Séance d'Ostéopathie"
+                            if (
+                              trimmed === "Séance d'Ostéopathie" || 
+                              trimmed === "Osteopathy Session" || 
+                              trimmed === "Sesión de Osteopatía"
+                            ) {
+                              return receiptLang === 'fr' ? "Séance d'Ostéopathie" :
+                                     receiptLang === 'es' ? "Sesión de Osteopatía" :
+                                     "Osteopathy Session";
+                            }
+
+                            // 3. Bono Deduct: "Séance d'Ostéopathie (Prise en compte Bono)"
+                            if (
+                              trimmed.startsWith("Séance d'Ostéopathie (Prise en compte Bono)") ||
+                              trimmed.startsWith("Osteopathy session (Redeemed on Bono)") ||
+                              trimmed.startsWith("Sesión de Osteopatía (Canjeada con Bono)") ||
+                              trimmed.includes("Prise en compte Bono") ||
+                              trimmed.includes("Redeemed on Bono") ||
+                              trimmed.includes("Canjeada con Bono")
+                            ) {
+                              return receiptLang === 'fr' ? "Séance d'Ostéopathie (Prise en compte Bono)" :
+                                     receiptLang === 'es' ? "Sesión de Osteopatía (Canjeada con Bono)" :
+                                     "Osteopathy session (Redeemed on Bono)";
+                            }
+
+                            // 4. Bono 3 pack
+                            if (
+                              trimmed.startsWith("Bono Ostéopathie - Forfait 3 séances") ||
+                              trimmed.startsWith("Osteopathy Bono - 3-session pack") ||
+                              trimmed.startsWith("Bono Osteopatía - 3 sesiones")
+                            ) {
+                              return receiptLang === 'fr' ? "Bono Ostéopathie - Forfait 3 séances (160 €)" :
+                                     receiptLang === 'es' ? "Bono Osteopatía - 3 sesiones (160 €)" :
+                                     "Osteopathy Bono - 3-session pack (160 €)";
+                            }
+
+                            // 5. Bono 5 pack
+                            if (
+                              trimmed.startsWith("Bono Ostéopathie - Forfait 5 séances") ||
+                              trimmed.startsWith("Osteopathy Bono - 5-session pack") ||
+                              trimmed.startsWith("Bono Osteopatía - 5 sesiones")
+                            ) {
+                              return receiptLang === 'fr' ? "Bono Ostéopathie - Forfait 5 séances (250 €)" :
+                                     receiptLang === 'es' ? "Bono Osteopatía - 5 sesiones (250 €)" :
+                                     "Osteopathy Bono - 5-session pack (250 €)";
+                            }
+
+                            return desc;
+                          })()}
+                        </p>
                       </td>
                       <td className="py-4 text-center">{translations[receiptLang].invoice.tableExempt}</td>
                       <td className="py-4 text-right font-bold">
@@ -4911,14 +5511,21 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                 <div className="pt-8 print:pt-4 flex justify-between items-end border-t border-black/5">
                   <div>
                     <p className="text-[10px] text-gray-400 leading-relaxed max-w-sm">
-                      {(translations[receiptLang]?.invoice?.receiptDeclaration || "Reçu valant facture acquittée le {date} par {paymentMethod}.")
-                        .replace('{date}', new Date(selectedInvoiceForPrint.date).toLocaleDateString(receiptLang === 'fr' ? 'fr-FR' : receiptLang === 'es' ? 'es-ES' : 'en-US'))
-                        .replace('{paymentMethod}', selectedInvoiceForPrint.paymentMethod === 'card' 
-                          ? (translations[receiptLang]?.invoice?.methods?.card || 'Carte bancaire')
-                          : selectedInvoiceForPrint.paymentMethod === 'cash' 
-                            ? (translations[receiptLang]?.invoice?.methods?.cash || 'Espèces') 
-                            : (translations[receiptLang]?.invoice?.methods?.transfer || 'Virement bancaire')
-                        )}
+                      {selectedInvoiceForPrint.status === 'pending'
+                        ? (receiptLang === 'fr'
+                            ? "Document valant facture en attente de règlement (non acquittée)."
+                            : receiptLang === 'es'
+                            ? "Documento de factura pendiente de pago (no saldada)."
+                            : "Invoice document pending payment (unpaid).")
+                        : ((translations[receiptLang]?.invoice?.receiptDeclaration || "Reçu valant facture acquittée le {date} par {paymentMethod}.")
+                            .replace('{date}', new Date(selectedInvoiceForPrint.date).toLocaleDateString(receiptLang === 'fr' ? 'fr-FR' : receiptLang === 'es' ? 'es-ES' : 'en-US'))
+                            .replace('{paymentMethod}', selectedInvoiceForPrint.paymentMethod === 'card' 
+                              ? (translations[receiptLang]?.invoice?.methods?.card || 'Carte bancaire')
+                              : selectedInvoiceForPrint.paymentMethod === 'cash' 
+                                ? (translations[receiptLang]?.invoice?.methods?.cash || 'Espèces') 
+                                : (translations[receiptLang]?.invoice?.methods?.transfer || 'Virement bancaire')
+                            ))
+                      }
                     </p>
                   </div>
                   
@@ -4934,7 +5541,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
 
         {/* ACCOUNTING PERIOD RECAP PRINT MODAL */}
         {selectedRecapForPrint && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm overflow-y-auto animate-fadeIn print:bg-white print:p-0 print:block print:static print:overflow-visible print-modal-container">
+          <div className="fixed inset-0 z-[100] flex items-start justify-center p-4 bg-black/60 backdrop-blur-sm overflow-y-auto animate-fadeIn print:bg-white print:p-0 print:block print:static print:overflow-visible print-modal-container">
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -4990,7 +5597,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                 <div className="flex justify-between items-start border-b border-black/5 pb-6">
                   <div>
                     <h1 className="text-lg font-bold font-serif text-primary">Vincent Durroux</h1>
-                    <p className="text-gray-500 mt-1 font-medium">Ostéopathe D.O. • Osteo Valencia</p>
+                    <p className="text-gray-500 mt-1 font-medium">Osteo Valencia</p>
                     <p className="text-gray-400 text-[10px] mt-1">Calle General Pastor 25, 46183 L'Eliana, Valencia</p>
                     <p className="text-gray-400 text-[10px]">Tél : +34 614 159 462</p>
                   </div>
@@ -5011,19 +5618,49 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                 </div>
 
                 {/* KPI Metrics */}
-                <div className="grid grid-cols-3 gap-4">
-                  <div className="bg-[#f4f4ec] p-4 rounded-2xl border border-black/5">
-                    <p className="text-[9px] uppercase font-bold text-gray-400">{lang === 'fr' ? 'Chiffre d\'Affaires' : lang === 'es' ? 'Facturación' : 'Total Revenue'}</p>
-                    <p className="text-xl font-bold font-serif text-primary mt-1">{selectedRecapForPrint.total} €</p>
+                <div className="grid grid-cols-4 gap-3">
+                  <div className="bg-[#f4f4ec] p-3.5 rounded-2xl border border-black/5">
+                    <p className="text-[9px] uppercase font-bold text-emerald-800">
+                      {lang === 'fr' ? 'Total Encaissé' : lang === 'es' ? 'Total Cobrado' : 'Total Collected'}
+                    </p>
+                    <p className="text-lg font-bold font-serif text-emerald-700 mt-1">
+                      {selectedRecapForPrint.collectedTotal !== undefined ? selectedRecapForPrint.collectedTotal : selectedRecapForPrint.total} €
+                    </p>
+                    <p className="text-[8px] text-emerald-600 font-medium mt-0.5">
+                      {selectedRecapForPrint.collectedCount !== undefined ? selectedRecapForPrint.collectedCount : selectedRecapForPrint.count} {lang === 'fr' ? 'payées' : 'paid'}
+                    </p>
                   </div>
-                  <div className="bg-[#f4f4ec] p-4 rounded-2xl border border-black/5">
-                    <p className="text-[9px] uppercase font-bold text-gray-400">{lang === 'fr' ? 'Consultations' : lang === 'es' ? 'Consultas' : 'Consultations'}</p>
-                    <p className="text-xl font-bold font-serif text-primary mt-1">{selectedRecapForPrint.count}</p>
+                  <div className="bg-[#f4f4ec] p-3.5 rounded-2xl border border-black/5">
+                    <p className="text-[9px] uppercase font-bold text-amber-800">
+                      {lang === 'fr' ? 'En Attente' : lang === 'es' ? 'Pendiente' : 'Pending'}
+                    </p>
+                    <p className="text-lg font-bold font-serif text-amber-700 mt-1">
+                      {selectedRecapForPrint.pendingTotal || 0} €
+                    </p>
+                    <p className="text-[8px] text-amber-600 font-medium mt-0.5">
+                      {selectedRecapForPrint.invoices.filter(i => i.status === 'pending').length} {lang === 'fr' ? 'en attente' : 'pending'}
+                    </p>
                   </div>
-                  <div className="bg-[#f4f4ec] p-4 rounded-2xl border border-black/5">
-                    <p className="text-[9px] uppercase font-bold text-gray-400">{lang === 'fr' ? 'Panier Moyen' : lang === 'es' ? 'Ticket Promedio' : 'Average Ticket'}</p>
-                    <p className="text-xl font-bold font-serif text-primary mt-1">
+                  <div className="bg-[#f4f4ec] p-3.5 rounded-2xl border border-black/5">
+                    <p className="text-[9px] uppercase font-bold text-gray-400">
+                      {lang === 'fr' ? 'Total Facturé' : lang === 'es' ? 'Total Facturado' : 'Total Invoiced'}
+                    </p>
+                    <p className="text-lg font-bold font-serif text-primary mt-1">
+                      {selectedRecapForPrint.total} €
+                    </p>
+                    <p className="text-[8px] text-gray-400 font-medium mt-0.5">
+                      {selectedRecapForPrint.count} {lang === 'fr' ? 'consultations' : 'consultations'}
+                    </p>
+                  </div>
+                  <div className="bg-[#f4f4ec] p-3.5 rounded-2xl border border-black/5">
+                    <p className="text-[9px] uppercase font-bold text-gray-400">
+                      {lang === 'fr' ? 'Panier Moyen' : lang === 'es' ? 'Ticket Promedio' : 'Average Ticket'}
+                    </p>
+                    <p className="text-lg font-bold font-serif text-primary mt-1">
                       {selectedRecapForPrint.count > 0 ? Math.round(selectedRecapForPrint.total / selectedRecapForPrint.count) : 0} €
+                    </p>
+                    <p className="text-[8px] text-gray-400 font-medium mt-0.5">
+                      {lang === 'fr' ? 'par séance' : 'per session'}
                     </p>
                   </div>
                 </div>
@@ -5031,7 +5668,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                 {/* Payment Breakdown */}
                 <div className="space-y-3">
                   <h3 className="text-xs font-bold uppercase tracking-wider text-primary">
-                    {lang === 'fr' ? 'Répartition par mode de règlement' : lang === 'es' ? 'Distribución por método de pago' : 'Breakdown by payment method'}
+                    {lang === 'fr' ? 'Répartition des montants encaissés (payés)' : lang === 'es' ? 'Distribución por método de pago (cobrado)' : 'Breakdown of collected amounts'}
                   </h3>
                   <div className="grid grid-cols-3 gap-4 text-xs">
                     <div className="p-3 bg-white rounded-xl border border-black/5 flex justify-between items-center">
@@ -5047,6 +5684,28 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                       <span className="font-bold text-gray-800">{selectedRecapForPrint.breakdown.transfer} €</span>
                     </div>
                   </div>
+
+                  {(selectedRecapForPrint.pendingTotal || 0) > 0 && (
+                    <div className="p-3 bg-amber-50/50 rounded-xl border border-amber-200 text-xs text-amber-800 space-y-1">
+                      <p className="font-bold uppercase tracking-wider text-[8px] text-amber-600 mb-1">
+                        {lang === 'fr' ? 'Rappels des montants impayés (en attente) :' : lang === 'es' ? 'Montos pendientes de cobro:' : 'Pending unpaid amounts:'}
+                      </p>
+                      <div className="grid grid-cols-3 gap-4">
+                        <div className="flex justify-between">
+                          <span className="text-amber-700/80">{lang === 'fr' ? 'Carte' : 'Card'} :</span>
+                          <span className="font-bold text-amber-900">{selectedRecapForPrint.pendingBreakdown?.card || 0} €</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-amber-700/80">{lang === 'fr' ? 'Espèces' : 'Cash'} :</span>
+                          <span className="font-bold text-amber-900">{selectedRecapForPrint.pendingBreakdown?.cash || 0} €</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-amber-700/80">{lang === 'fr' ? 'Virement' : 'Transfer'} :</span>
+                          <span className="font-bold text-amber-900">{selectedRecapForPrint.pendingBreakdown?.transfer || 0} €</span>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* Detailed Invoices List */}
@@ -5061,6 +5720,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                         <th className="py-2">{lang === 'fr' ? 'Patient' : lang === 'es' ? 'Paciente' : 'Patient'}</th>
                         <th className="py-2">{lang === 'fr' ? 'Date' : lang === 'es' ? 'Fecha' : 'Date'}</th>
                         <th className="py-2">{lang === 'fr' ? 'Règlement' : lang === 'es' ? 'Pago' : 'Payment'}</th>
+                        <th className="py-2 text-center">{lang === 'fr' ? 'Statut' : lang === 'es' ? 'Estado' : 'Status'}</th>
                         <th className="py-2 text-right">{lang === 'fr' ? 'Montant' : lang === 'es' ? 'Monto' : 'Amount'}</th>
                       </tr>
                     </thead>
@@ -5074,6 +5734,17 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                             <span className="text-[10px] font-medium uppercase">
                               {inv.paymentMethod === 'card' ? (lang === 'fr' ? 'Carte' : lang === 'es' ? 'Tarjeta' : 'Card') :
                                inv.paymentMethod === 'cash' ? (lang === 'fr' ? 'Espèces' : lang === 'es' ? 'Efectivo' : 'Cash') : (lang === 'fr' ? 'Virement' : lang === 'es' ? 'Transferencia' : 'Transfer')}
+                            </span>
+                          </td>
+                          <td className="py-2 text-center font-bold">
+                            <span className={`text-[9px] px-1.5 py-0.5 rounded-full ${
+                              inv.status === 'paid' 
+                                ? 'bg-emerald-100 text-emerald-800' 
+                                : 'bg-amber-100 text-amber-900 font-bold'
+                            }`}>
+                              {inv.status === 'paid' 
+                                ? (lang === 'fr' ? 'Payée' : lang === 'es' ? 'Pagada' : 'Paid') 
+                                : (lang === 'fr' ? 'En attente' : lang === 'es' ? 'Pendiente' : 'Pending')}
                             </span>
                           </td>
                           <td className="py-2 text-right font-bold">{inv.amount} €</td>
@@ -5098,216 +5769,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
             </motion.div>
           </div>
         )}
-        {/* SUPABASE DIAGNOSTICS & SYNCHRONIZATION MODAL */}
-        {isSupabaseModalOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs">
-            <motion.div 
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-white rounded-3xl max-w-2xl w-full p-6 sm:p-8 shadow-2xl border border-black/10 max-h-[90vh] overflow-y-auto space-y-6"
-            >
-              <div className="flex items-start justify-between gap-4 border-b border-black/5 pb-4">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-2xl bg-emerald-50 text-emerald-700 flex items-center justify-center">
-                    <Database size={20} />
-                  </div>
-                  <div>
-                    <h3 className="text-lg font-serif font-bold text-primary">
-                      {lang === 'fr' ? 'Synchronisation Base de Données Supabase' : 'Supabase Database Sync'}
-                    </h3>
-                    <p className="text-xs text-gray-500">
-                      {lang === 'fr' 
-                        ? 'Diagnostic de vos 4 tables cloud et synchronisation des données.' 
-                        : 'Diagnostics for your 4 cloud tables and data sync.'}
-                    </p>
-                  </div>
-                </div>
 
-                <button 
-                  onClick={() => setIsSupabaseModalOpen(false)}
-                  className="w-8 h-8 rounded-full bg-gray-100 hover:bg-gray-200 text-gray-500 flex items-center justify-center transition-colors"
-                >
-                  ✕
-                </button>
-              </div>
-
-              {/* Status Section */}
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <h4 className="text-xs font-bold uppercase tracking-wider text-gray-400">
-                    {lang === 'fr' ? 'État des 4 Tables Supabase' : 'Supabase Tables Status'}
-                  </h4>
-                  <button
-                    onClick={runDiagnostics}
-                    disabled={isDiagnosing}
-                    className="flex items-center gap-1 text-xs font-bold text-primary hover:underline disabled:opacity-50"
-                  >
-                    <RefreshCw size={12} className={isDiagnosing ? 'animate-spin' : ''} />
-                    <span>{lang === 'fr' ? 'Tester la connexion' : 'Test connection'}</span>
-                  </button>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  {/* Table 1: Clients */}
-                  <div className="p-3 rounded-2xl border border-black/5 bg-[#fafafa] flex items-center justify-between">
-                    <div className="flex items-center gap-2.5">
-                      <Users size={16} className="text-gray-500" />
-                      <div>
-                        <p className="text-xs font-bold text-gray-800">clients</p>
-                        <p className="text-[10px] text-gray-400">Patients & Coordonnées</p>
-                      </div>
-                    </div>
-                    {tableDiagnostics ? (
-                      tableDiagnostics.clients ? (
-                        <span className="flex items-center gap-1 text-[11px] font-bold text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200">
-                          <CheckCircle2 size={12} /> Connectée
-                        </span>
-                      ) : (
-                        <span className="flex items-center gap-1 text-[11px] font-bold text-rose-600 bg-rose-50 px-2.5 py-1 rounded-full border border-rose-200">
-                          <XCircle size={12} /> À créer
-                        </span>
-                      )
-                    ) : (
-                      <span className="text-[10px] text-gray-400">En attente de test</span>
-                    )}
-                  </div>
-
-                  {/* Table 2: Client Notes */}
-                  <div className="p-3 rounded-2xl border border-black/5 bg-[#fafafa] flex items-center justify-between">
-                    <div className="flex items-center gap-2.5">
-                      <FileText size={16} className="text-gray-500" />
-                      <div>
-                        <p className="text-xs font-bold text-gray-800">client_notes</p>
-                        <p className="text-[10px] text-gray-400">Consultations & Anamnèses</p>
-                      </div>
-                    </div>
-                    {tableDiagnostics ? (
-                      tableDiagnostics.clientNotes ? (
-                        <span className="flex items-center gap-1 text-[11px] font-bold text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200">
-                          <CheckCircle2 size={12} /> Connectée
-                        </span>
-                      ) : (
-                        <span className="flex items-center gap-1 text-[11px] font-bold text-rose-600 bg-rose-50 px-2.5 py-1 rounded-full border border-rose-200">
-                          <XCircle size={12} /> À créer
-                        </span>
-                      )
-                    ) : (
-                      <span className="text-[10px] text-gray-400">En attente de test</span>
-                    )}
-                  </div>
-
-                  {/* Table 3: Invoices */}
-                  <div className="p-3 rounded-2xl border border-black/5 bg-[#fafafa] flex items-center justify-between">
-                    <div className="flex items-center gap-2.5">
-                      <CreditCard size={16} className="text-gray-500" />
-                      <div>
-                        <p className="text-xs font-bold text-gray-800">invoices</p>
-                        <p className="text-[10px] text-gray-400">Factures & Reçus</p>
-                      </div>
-                    </div>
-                    {tableDiagnostics ? (
-                      tableDiagnostics.invoices ? (
-                        <span className="flex items-center gap-1 text-[11px] font-bold text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200">
-                          <CheckCircle2 size={12} /> Connectée
-                        </span>
-                      ) : (
-                        <span className="flex items-center gap-1 text-[11px] font-bold text-rose-600 bg-rose-50 px-2.5 py-1 rounded-full border border-rose-200">
-                          <XCircle size={12} /> À créer
-                        </span>
-                      )
-                    ) : (
-                      <span className="text-[10px] text-gray-400">En attente de test</span>
-                    )}
-                  </div>
-
-                  {/* Table 4: Calendar Events */}
-                  <div className="p-3 rounded-2xl border border-black/5 bg-[#fafafa] flex items-center justify-between">
-                    <div className="flex items-center gap-2.5">
-                      <CalendarIcon size={16} className="text-gray-500" />
-                      <div>
-                        <p className="text-xs font-bold text-gray-800">calendar_events</p>
-                        <p className="text-[10px] text-gray-400">Rendez-vous Cabinet</p>
-                      </div>
-                    </div>
-                    {tableDiagnostics ? (
-                      tableDiagnostics.calendarEvents ? (
-                        <span className="flex items-center gap-1 text-[11px] font-bold text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200">
-                          <CheckCircle2 size={12} /> Connectée
-                        </span>
-                      ) : (
-                        <span className="flex items-center gap-1 text-[11px] font-bold text-rose-600 bg-rose-50 px-2.5 py-1 rounded-full border border-rose-200">
-                          <XCircle size={12} /> À créer
-                        </span>
-                      )
-                    ) : (
-                      <span className="text-[10px] text-gray-400">En attente de test</span>
-                    )}
-                  </div>
-                </div>
-              </div>
-
-              {/* Sync Message Alert */}
-              {syncMessage && (
-                <div className={`p-3.5 rounded-2xl text-xs font-bold flex items-center gap-2 ${
-                  syncMessage.type === 'success' 
-                    ? 'bg-emerald-50 text-emerald-800 border border-emerald-200' 
-                    : 'bg-rose-50 text-rose-800 border border-rose-200'
-                }`}>
-                  {syncMessage.type === 'success' ? <CheckCircle2 size={16} /> : <AlertTriangle size={16} />}
-                  <span>{syncMessage.text}</span>
-                </div>
-              )}
-
-              {/* SQL Script Box */}
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <h4 className="text-xs font-bold uppercase tracking-wider text-gray-400">
-                    {lang === 'fr' ? 'Script SQL complet (Création des 4 tables)' : 'Full SQL Script (All 4 Tables)'}
-                  </h4>
-                  <button
-                    onClick={handleCopySql}
-                    className="flex items-center gap-1.5 px-3 py-1 bg-primary text-white hover:bg-primary/95 rounded-xl text-xs font-bold transition-all shadow-2xs"
-                  >
-                    {copiedSql ? <Check size={13} /> : <Copy size={13} />}
-                    <span>{copiedSql ? (lang === 'fr' ? 'Copié !' : 'Copied!') : (lang === 'fr' ? 'Copier le script SQL' : 'Copy SQL')}</span>
-                  </button>
-                </div>
-                <p className="text-[11px] text-gray-500">
-                  {lang === 'fr' 
-                    ? "Si vos tables de patients ou de factures ne sont pas encore créées dans Supabase : copiez ce script, ouvrez votre tableau de bord Supabase > SQL Editor > collez et cliquez sur Run." 
-                    : "If your patients or invoices tables are not created in Supabase yet: copy this script, open your Supabase dashboard > SQL Editor > paste and click Run."}
-                </p>
-                <div className="bg-[#1e1e1e] text-gray-200 p-3.5 rounded-2xl text-[11px] font-mono overflow-x-auto max-h-40 border border-black/10">
-                  <pre>{SUPABASE_SQL_SETUP}</pre>
-                </div>
-              </div>
-
-              {/* Sync Actions */}
-              <div className="pt-2 border-t border-black/5 flex flex-col sm:flex-row items-center justify-between gap-3">
-                <button
-                  onClick={handleSyncAllToSupabase}
-                  disabled={isSyncingAll}
-                  className="w-full sm:w-auto flex items-center justify-center gap-2 px-5 py-2.5 bg-primary hover:bg-primary/95 text-white rounded-2xl text-xs font-bold transition-all shadow-sm disabled:opacity-50"
-                >
-                  <RefreshCw size={14} className={isSyncingAll ? 'animate-spin' : ''} />
-                  <span>
-                    {isSyncingAll 
-                      ? (lang === 'fr' ? 'Synchronisation en cours...' : 'Syncing...') 
-                      : (lang === 'fr' ? 'Synchroniser les données locales vers Supabase' : 'Sync local data to Supabase')}
-                  </span>
-                </button>
-
-                <button
-                  onClick={() => setIsSupabaseModalOpen(false)}
-                  className="w-full sm:w-auto px-4 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-2xl text-xs font-bold transition-all"
-                >
-                  {lang === 'fr' ? 'Fermer' : 'Close'}
-                </button>
-              </div>
-            </motion.div>
-          </div>
-        )}
 
         {/* MODAL: CUSTOM IN-APP CONFIRMATION DIALOG (Guaranteed to work in iframe, Google AI Studio, and Deployed sites) */}
         {confirmDialog.isOpen && (
