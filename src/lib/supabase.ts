@@ -978,21 +978,11 @@ export const api = {
             return mapped;
           });
           
-          // SMART MERGE: Keep any locally added client that isn't yet present in Supabase remote data
-          const remoteIdMap = new Set(remoteClients.map(c => c.id));
-          const unsyncedLocals = localClients.filter(c => !remoteIdMap.has(c.id));
-          
-          const combined = [...remoteClients, ...unsyncedLocals].sort((a, b) => a.name.localeCompare(b.name));
-          saveLocal('clients', combined);
-
-          // Background push unsynced items if any
-          if (unsyncedLocals.length > 0) {
-            setTimeout(() => {
-              unsyncedLocals.forEach(c => this.createClient(c).catch(() => {}));
-            }, 1000);
-          }
-
-          return combined;
+          // If Supabase is active, the server is the absolute single source of truth.
+          // Save remote data as read-only cache and return it directly (no local "unsynced" merge
+          // to prevent resurrecting deleted clients or duplicating them).
+          saveLocal('clients', remoteClients);
+          return remoteClients;
         }
         if (error) {
           console.warn('Supabase clients fetch failed, using local storage:', error.message);
@@ -1320,9 +1310,8 @@ export const api = {
 
         if (!error && data) {
           const remoteNotes = data.map(mapNoteFromDB);
-          const remoteIdMap = new Set(remoteNotes.map(n => n.id));
-          const unsynced = localNotes.filter(n => !remoteIdMap.has(n.id));
-          return [...remoteNotes, ...unsynced].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+          // If Supabase is active, it is the single source of truth. No unsynced merge to avoid undead items.
+          return remoteNotes;
         }
       } catch (err) {
         console.warn('Supabase getClientNotes exception:', err);
@@ -1463,11 +1452,9 @@ export const api = {
         const { data, error } = await supabase.from('invoices').select('*').order('date', { ascending: false });
         if (!error && data) {
           const remoteInvoices = data.map(mapInvoiceFromDB);
-          const remoteIdMap = new Set(remoteInvoices.map(i => i.id));
-          const unsynced = localInvoices.filter(i => !remoteIdMap.has(i.id));
-          const combined = [...remoteInvoices, ...unsynced].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-          saveLocal('invoices', combined);
-          return combined;
+          // If Supabase is active, it is the single source of truth. No unsynced merge to avoid undead items.
+          saveLocal('invoices', remoteInvoices);
+          return remoteInvoices;
         }
         if (error) {
           console.warn('Supabase invoices fetch failed, using local storage:', error.message);
@@ -1659,16 +1646,16 @@ export const api = {
             }
             return mapped;
           });
-          const remoteIdMap = new Set(remoteEvents.map(e => e.id));
-          const unsynced = localEvents.filter(e => !remoteIdMap.has(e.id));
-          const combined = [...remoteEvents, ...unsynced].map(e => {
+          const mappedEvents = remoteEvents.map(e => {
             if (!e.clientName && e.clientId && clientMap.has(e.clientId)) {
               return { ...e, clientName: clientMap.get(e.clientId) };
             }
             return e;
           }).sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
-          saveLocal('events', combined);
-          return combined;
+
+          // If Supabase is active, it is the single source of truth. No unsynced merge to avoid duplicates.
+          saveLocal('events', mappedEvents);
+          return mappedEvents;
         }
       } catch (err) {
         console.warn('Supabase getLocalEvents exception:', err);
