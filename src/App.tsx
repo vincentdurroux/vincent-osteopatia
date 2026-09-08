@@ -521,7 +521,7 @@ const Location = () => {
   );
 };
 
-const Footer = ({ onOpenAdmin, isAdminAuthorized }: { onOpenAdmin: () => void; isAdminAuthorized: boolean }) => {
+const Footer = () => {
   const { t } = useTranslation();
   return (
     <footer id="contact" className="bg-primary text-white py-20 px-6">
@@ -569,17 +569,6 @@ const Footer = ({ onOpenAdmin, isAdminAuthorized }: { onOpenAdmin: () => void; i
         <div className="text-white/40 text-xs uppercase tracking-widest">
           © 2026 Vincent Osteopatía — {t.footer.rights}
         </div>
-        
-        {/* Subtle, premium cabinet/admin space entry point */}
-        {isAdminAuthorized && (
-          <button 
-            onClick={onOpenAdmin} 
-            className="mt-6 inline-flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-white/30 hover:text-white/80 transition-colors bg-white/5 hover:bg-white/10 px-4 py-2 rounded-full cursor-pointer border border-white/10"
-          >
-            <Shield size={12} />
-            Espace Praticien / Gestion Cabinet
-          </button>
-        )}
       </div>
     </footer>
   );
@@ -783,31 +772,6 @@ export default function App() {
   const [isAdminOpen, setIsAdminOpen] = useState(false);
   const [isPasscodeOpen, setIsPasscodeOpen] = useState(false);
 
-  const [isAdminAuthorized, setIsAdminAuthorized] = useState(() => {
-    if (typeof window !== 'undefined') {
-      return window.location.search.includes('admin=true') || window.location.hash.includes('admin');
-    }
-    return false;
-  });
-
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const isAuth = window.location.search.includes('admin=true') || window.location.hash.includes('admin');
-      setIsAdminAuthorized(isAuth);
-
-      // Dynamic robots meta tag protection: If any admin parameter is present, enforce noindex, nofollow
-      let metaRobots = document.querySelector('meta[name="robots"]') as HTMLMetaElement | null;
-      if (isAuth) {
-        if (!metaRobots) {
-          metaRobots = document.createElement('meta');
-          metaRobots.setAttribute('name', 'robots');
-          document.head.appendChild(metaRobots);
-        }
-        metaRobots.setAttribute('content', 'noindex, nofollow, noarchive');
-      }
-    }
-  }, []);
-
   return (
     <LanguageContext.Provider value={{ lang, setLang, t: translations[lang] }}>
       <div className="min-h-screen">
@@ -816,7 +780,7 @@ export default function App() {
         <Services />
         <About />
         <Location />
-        <Footer onOpenAdmin={() => setIsPasscodeOpen(true)} isAdminAuthorized={isAdminAuthorized} />
+        <Footer />
         <BookingModal isOpen={isBookingModalOpen} onClose={() => setIsBookingModalOpen(false)} />
         <PasscodeModal 
           isOpen={isPasscodeOpen} 
