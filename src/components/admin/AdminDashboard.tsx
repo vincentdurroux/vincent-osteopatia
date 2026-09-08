@@ -100,6 +100,8 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
     paymentMethod: 'card' as Invoice['paymentMethod'],
     description: "Séance d'Ostéopathie (1h)",
     language: 'fr' as 'fr' | 'en' | 'es',
+    date: new Date().toISOString().split('T')[0],
+    eventId: '',
   });
   
   const [isAddEventOpen, setIsAddEventOpen] = useState(false);
@@ -534,9 +536,10 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
         discountLabel: isDiscounted ? (finalDiscLabel || (finalDiscType === 'bono' ? (client.bonoType || 'Bono') : undefined)) : undefined,
         status: newInvoice.status || 'paid',
         paymentMethod: newInvoice.paymentMethod,
-        date: new Date().toISOString().split('T')[0],
+        date: newInvoice.date || new Date().toISOString().split('T')[0],
         description: finalDescription,
         language: newInvoice.language,
+        noteId: newInvoice.eventId || undefined,
       });
 
       // Update client Bono status
@@ -593,6 +596,8 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
         paymentMethod: 'card',
         description: "Séance d'Ostéopathie (1h)",
         language: lang as 'fr' | 'en' | 'es',
+        date: new Date().toISOString().split('T')[0],
+        eventId: '',
       });
     } catch (err) {
       console.error('Failed to create invoice:', err);
@@ -3472,11 +3477,11 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                         <td className="py-4 text-right">
                           <div className="flex flex-col items-end">
                             <div className="flex items-center gap-1.5">
-                              {inv.originalAmount && inv.discountAmount && inv.discountAmount > 0 && (
+                              {inv.originalAmount !== undefined && inv.discountAmount !== undefined && inv.discountAmount > 0 ? (
                                 <span className="text-[10px] text-gray-400 line-through">
                                   {inv.originalAmount} €
                                 </span>
-                              )}
+                              ) : null}
                               <span className="font-bold text-primary">{inv.amount} €</span>
                             </div>
                             {inv.discountAmount && inv.discountAmount > 0 ? (
@@ -4363,7 +4368,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="relative w-full max-w-md bg-white rounded-3xl shadow-2xl p-8 z-10 border border-black/5"
+              className="relative w-full max-w-md max-h-[90vh] overflow-y-auto bg-white rounded-3xl shadow-2xl p-8 z-10 border border-black/5 scrollbar-thin scrollbar-thumb-gray-200"
             >
               <h3 className="text-xl font-serif font-bold text-primary mb-6">
                 {lang === 'fr' ? 'Nouvelle Facture' : lang === 'es' ? 'Nueva Factura' : 'New Invoice'}
@@ -4417,6 +4422,81 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                     ))}
                   </select>
                 </div>
+
+                {newInvoice.clientId && (
+                  <div className="space-y-3 bg-[#f8f8f2] p-4 rounded-2xl border border-black/5">
+                    <div>
+                      <label className="text-[10px] uppercase tracking-wider font-bold text-gray-400 block mb-1">
+                        {lang === 'fr' ? 'Associer à un rendez-vous (Optionnel)' : lang === 'es' ? 'Asociar a una cita (Opcional)' : 'Link to an appointment (Optional)'}
+                      </label>
+                      {(() => {
+                        const clientEvents = events.filter(ev => ev.clientId === newInvoice.clientId).sort((a, b) => new Date(b.start).getTime() - new Date(a.start).getTime());
+                        if (clientEvents.length === 0) {
+                          return (
+                            <p className="text-[10px] text-gray-400 italic">
+                              {lang === 'fr' ? "Aucun rendez-vous trouvé pour ce patient." : lang === 'es' ? "No se encontraron citas para este paciente." : "No appointments found for this patient."}
+                            </p>
+                          );
+                        }
+                        return (
+                          <select
+                            value={newInvoice.eventId}
+                            onChange={(e) => {
+                              const selEventId = e.target.value;
+                              const selEvent = clientEvents.find(ev => ev.id === selEventId);
+                              if (selEvent) {
+                                const eventDate = selEvent.start.split('T')[0];
+                                const formattedDate = new Date(selEvent.start).toLocaleDateString(lang === 'fr' ? 'fr-FR' : 'es-ES', { day: 'numeric', month: 'long', year: 'numeric' });
+                                setNewInvoice(prev => ({
+                                  ...prev,
+                                  eventId: selEventId,
+                                  date: eventDate,
+                                  description: lang === 'fr' 
+                                    ? `Séance d'Ostéopathie du ${formattedDate}` 
+                                    : lang === 'es' 
+                                      ? `Sesión de Osteopatía del ${formattedDate}` 
+                                      : `Osteopathy Session of ${formattedDate}`
+                                }));
+                              } else {
+                                setNewInvoice(prev => ({
+                                  ...prev,
+                                  eventId: '',
+                                  date: new Date().toISOString().split('T')[0],
+                                  description: lang === 'fr' ? "Séance d'Ostéopathie" : lang === 'es' ? "Sesión de osteopatía" : "Osteopathy session"
+                                }));
+                              }
+                            }}
+                            className="w-full p-2.5 bg-white rounded-xl border border-black/10 text-xs focus:outline-none focus:ring-1 focus:ring-primary transition-all"
+                          >
+                            <option value="">-- {lang === 'fr' ? 'Ne pas associer (Date libre)' : lang === 'es' ? 'No asociar (Fecha libre)' : 'Do not link (Free date)'} --</option>
+                            {clientEvents.map(ev => {
+                              const evDate = new Date(ev.start).toLocaleDateString(lang === 'fr' ? 'fr-FR' : 'es-ES', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
+                              const evTime = new Date(ev.start).toLocaleTimeString(lang === 'fr' ? 'fr-FR' : 'es-ES', { hour: '2-digit', minute: '2-digit' });
+                              return (
+                                <option key={ev.id} value={ev.id}>
+                                  {evDate} à {evTime} - {ev.summary}
+                                </option>
+                              );
+                            })}
+                          </select>
+                        );
+                      })()}
+                    </div>
+
+                    <div>
+                      <label className="text-[10px] uppercase tracking-wider font-bold text-gray-400 block mb-1">
+                        {lang === 'fr' ? "Date de la facture" : lang === 'es' ? "Fecha de la factura" : "Invoice date"}
+                      </label>
+                      <input
+                        type="date"
+                        required
+                        value={newInvoice.date}
+                        onChange={(e) => setNewInvoice(prev => ({ ...prev, date: e.target.value }))}
+                        className="w-full p-2.5 bg-white rounded-xl border border-black/10 text-xs focus:outline-none focus:ring-1 focus:ring-primary transition-all"
+                      />
+                    </div>
+                  </div>
+                )}
 
                 {/* Package & Bono Plan Selector */}
                 {(() => {
@@ -5491,7 +5571,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                 {/* Total Recap */}
                 <div className="flex justify-end pt-4">
                   <div className="w-64 text-right space-y-2">
-                    {selectedInvoiceForPrint.discountAmount && selectedInvoiceForPrint.discountAmount > 0 && selectedInvoiceForPrint.originalAmount ? (
+                    {(selectedInvoiceForPrint.discountAmount !== undefined && selectedInvoiceForPrint.discountAmount > 0 && selectedInvoiceForPrint.originalAmount !== undefined) ? (
                       <>
                         <div className="flex justify-between text-[11px] text-gray-500">
                           <span>{receiptLang === 'fr' ? 'Tarif standard' : receiptLang === 'es' ? 'Tarifa estándar' : 'Standard fee'}</span>
