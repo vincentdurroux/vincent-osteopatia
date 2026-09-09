@@ -33,6 +33,7 @@ export interface Invoice {
   clientId: string;
   clientName: string;
   date: string;
+  paymentDate?: string;
   amount: number;
   originalAmount?: number;
   discountAmount?: number;

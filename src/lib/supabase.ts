@@ -398,6 +398,7 @@ export function mapInvoiceFromDB(i: any): Invoice {
     clientId: String(i.clientId || i.client_id || i.clientid || ''),
     clientName: i.clientName || i.client_name || i.clientname || '',
     date: i.date || new Date().toISOString().split('T')[0],
+    paymentDate: i.paymentDate || i.payment_date || i.paymentdate || undefined,
     amount: Number(i.amount) || 0,
     originalAmount: i.originalAmount !== undefined ? Number(i.originalAmount) : (i.original_amount !== undefined ? Number(i.original_amount) : undefined),
     discountAmount: i.discountAmount !== undefined ? Number(i.discountAmount) : (i.discount_amount !== undefined ? Number(i.discount_amount) : undefined),
@@ -1113,19 +1114,35 @@ export const api = {
     const prevClient = existingClients.find(c => c.id === normalizedClient.id);
     const oldName = prevClient?.name;
 
-    // Helper: Cascade patient name updates to related appointments and invoices
+    // Helper: Cascade patient name updates to related appointments (invoices are preserved for accounting integrity)
     const syncRelatedEventsAndInvoices = async () => {
       // 1. Local Events Sync
       const localEvents = loadLocal('events', mockEvents);
       let eventsModified = false;
       const updatedEvents = localEvents.map(ev => {
-        if (ev.clientId === normalizedClient.id || (oldName && ev.clientName === oldName)) {
+        const isMatching = 
+          ev.clientId === normalizedClient.id ||
+          (oldName && (
+            ev.clientName?.trim().toLowerCase() === oldName.trim().toLowerCase() ||
+            ev.summary?.trim().toLowerCase() === oldName.trim().toLowerCase() ||
+            ev.summary?.trim().toLowerCase().startsWith(oldName.trim().toLowerCase() + ' -')
+          )) ||
+          (prevClient && prevClient.lastName && prevClient.firstName && (
+            ev.clientName?.toLowerCase().includes(prevClient.lastName.toLowerCase()) &&
+            ev.clientName?.toLowerCase().includes(prevClient.firstName.toLowerCase())
+          )) ||
+          (cleanLastName && cleanFirstName && (
+            ev.clientName?.toLowerCase().includes(cleanLastName.toLowerCase()) &&
+            ev.clientName?.toLowerCase().includes(cleanFirstName.toLowerCase())
+          ));
+
+        if (isMatching) {
           eventsModified = true;
           let newSummary = ev.summary;
           if (ev.summary && ev.summary.includes(' - ')) {
             const parts = ev.summary.split(' - ');
             newSummary = `${fullName} - ${parts.slice(1).join(' - ')}`;
-          } else if (!ev.summary || ev.summary === ev.clientName || (oldName && ev.summary === oldName)) {
+          } else if (!ev.summary || ev.summary === ev.clientName || (oldName && ev.summary === oldName) || (prevClient && ev.summary === prevClient.name)) {
             newSummary = fullName;
           }
           return {
@@ -1141,7 +1158,8 @@ export const api = {
         saveLocal('events', updatedEvents);
       }
 
-      // 2. Local Invoices Sync
+      // 2. Local Invoices Sync - Disabled to preserve historical name at the time of issuance for accounting integrity
+      /*
       const localInvoices = loadLocal('invoices', mockInvoices);
       let invoicesModified = false;
       const updatedInvoices = localInvoices.map(inv => {
@@ -1158,40 +1176,35 @@ export const api = {
       if (invoicesModified) {
         saveLocal('invoices', updatedInvoices);
       }
+      */
 
-      // 3. Supabase Cloud Sync for Calendar Events and Invoices
+      // 3. Supabase Cloud Sync for Calendar Events (Invoices are excluded to preserve historical records)
       if (isSupabaseConfigured && supabase) {
         try {
-          const clientFilter = (normalizedClient.id && normalizedClient.id.includes('-'))
-            ? `client_id.eq.${normalizedClient.id},clientId.eq.${normalizedClient.id}`
-            : undefined;
-
-          // Update calendar_events table
-          if (clientFilter) {
+          // Update calendar_events & events by clientId
+          if (normalizedClient.id) {
             await supabase
               .from('calendar_events')
-              .update({ client_name: fullName, clientName: fullName })
-              .or(clientFilter);
+              .update({ client_name: fullName, clientName: fullName, patient_name: fullName })
+              .or(`client_id.eq.${normalizedClient.id},clientId.eq.${normalizedClient.id}`);
 
             await supabase
               .from('events')
-              .update({ client_name: fullName, clientName: fullName })
-              .or(clientFilter);
+              .update({ client_name: fullName, clientName: fullName, patient_name: fullName })
+              .or(`client_id.eq.${normalizedClient.id},clientId.eq.${normalizedClient.id}`);
+          }
 
-            await supabase
-              .from('invoices')
-              .update({ client_name: fullName, clientName: fullName })
-              .or(clientFilter);
-          } else if (oldName) {
+          // Update calendar_events & events by oldName if available
+          if (oldName && oldName !== fullName) {
             await supabase
               .from('calendar_events')
-              .update({ client_name: fullName, clientName: fullName })
-              .or(`client_name.eq.${oldName},clientName.eq.${oldName}`);
+              .update({ client_name: fullName, clientName: fullName, patient_name: fullName, client_id: normalizedClient.id, clientId: normalizedClient.id })
+              .or(`client_name.eq.${oldName},clientName.eq.${oldName},patient_name.eq.${oldName}`);
 
             await supabase
-              .from('invoices')
-              .update({ client_name: fullName, clientName: fullName })
-              .or(`client_name.eq.${oldName},clientName.eq.${oldName}`);
+              .from('events')
+              .update({ client_name: fullName, clientName: fullName, patient_name: fullName, client_id: normalizedClient.id, clientId: normalizedClient.id })
+              .or(`client_name.eq.${oldName},clientName.eq.${oldName},patient_name.eq.${oldName}`);
           }
         } catch (cloudErr) {
           console.warn('[Supabase] Cascade update failed silently:', cloudErr);
@@ -1490,6 +1503,7 @@ export const api = {
           payment_method: newInvoice.paymentMethod || 'card',
           description: newInvoice.description || "Séance d'Ostéopathie",
           language: newInvoice.language || 'fr',
+          ...(newInvoice.paymentDate ? { payment_date: newInvoice.paymentDate } : {}),
           ...(newInvoice.originalAmount !== undefined ? { original_amount: newInvoice.originalAmount } : {}),
           ...(newInvoice.discountAmount !== undefined ? { discount_amount: newInvoice.discountAmount } : {}),
           ...(newInvoice.discountType ? { discount_type: newInvoice.discountType } : {}),
@@ -1508,6 +1522,7 @@ export const api = {
           paymentMethod: newInvoice.paymentMethod || 'card',
           description: newInvoice.description || "Séance d'Ostéopathie",
           language: newInvoice.language || 'fr',
+          ...(newInvoice.paymentDate ? { paymentDate: newInvoice.paymentDate } : {}),
           ...(newInvoice.originalAmount !== undefined ? { originalAmount: newInvoice.originalAmount } : {}),
           ...(newInvoice.discountAmount !== undefined ? { discountAmount: newInvoice.discountAmount } : {}),
           ...(newInvoice.discountType ? { discountType: newInvoice.discountType } : {}),
@@ -1550,6 +1565,7 @@ export const api = {
           payment_method: invoice.paymentMethod,
           description: invoice.description,
           language: invoice.language,
+          ...(invoice.paymentDate !== undefined ? { payment_date: invoice.paymentDate } : {}),
           ...(invoice.originalAmount !== undefined ? { original_amount: invoice.originalAmount } : {}),
           ...(invoice.discountAmount !== undefined ? { discount_amount: invoice.discountAmount } : {}),
           ...(invoice.discountType ? { discount_type: invoice.discountType } : {}),
@@ -1566,6 +1582,7 @@ export const api = {
           paymentMethod: invoice.paymentMethod,
           description: invoice.description,
           language: invoice.language,
+          ...(invoice.paymentDate !== undefined ? { paymentDate: invoice.paymentDate } : {}),
           ...(invoice.originalAmount !== undefined ? { originalAmount: invoice.originalAmount } : {}),
           ...(invoice.discountAmount !== undefined ? { discountAmount: invoice.discountAmount } : {}),
           ...(invoice.discountType ? { discountType: invoice.discountType } : {}),
@@ -1622,6 +1639,48 @@ export const api = {
       allClients = loadLocal('clients', mockClients);
     }
     const clientMap = new Map(allClients.map(c => [c.id, c.name]));
+    const clientByNameMap = new Map<string, Client>();
+    allClients.forEach(c => {
+      if (c.name) clientByNameMap.set(c.name.toLowerCase().trim(), c);
+      if (c.firstName && c.lastName) {
+        clientByNameMap.set(`${c.firstName} ${c.lastName}`.toLowerCase().trim(), c);
+        clientByNameMap.set(`${c.lastName} ${c.firstName}`.toLowerCase().trim(), c);
+      }
+    });
+
+    const enrichEvent = (ev: CalendarEvent): CalendarEvent => {
+      let resolvedClientId = ev.clientId;
+      let resolvedClientName = ev.clientName;
+
+      // 1. If we have a valid clientId pointing to an existing client, ALWAYS resolve to current up-to-date name
+      if (resolvedClientId && clientMap.has(resolvedClientId)) {
+        resolvedClientName = clientMap.get(resolvedClientId);
+      } else if (resolvedClientName) {
+        // If no valid clientId or not found, try matching by name to link clientId
+        const matched = clientByNameMap.get(resolvedClientName.toLowerCase().trim());
+        if (matched) {
+          resolvedClientId = matched.id;
+          resolvedClientName = matched.name;
+        }
+      } else if (ev.summary) {
+        // Try resolving from summary (e.g. "LAURENT Marie - Consultation")
+        const parts = ev.summary.split(' - ');
+        const candidate = parts[0].trim();
+        const matched = clientByNameMap.get(candidate.toLowerCase());
+        if (matched) {
+          resolvedClientId = matched.id;
+          resolvedClientName = matched.name;
+        } else if (parts.length > 1 && candidate.length > 1) {
+          resolvedClientName = candidate;
+        }
+      }
+
+      return {
+        ...ev,
+        clientId: resolvedClientId,
+        clientName: resolvedClientName || ev.summary,
+      };
+    };
 
     if (isSupabaseConfigured && supabase) {
       try {
@@ -1633,47 +1692,18 @@ export const api = {
         }
 
         if (!error && data) {
-          const remoteEvents = data.map(row => {
-            const mapped = mapEventFromDB(row);
-            if (!mapped.clientName && mapped.clientId && clientMap.has(mapped.clientId)) {
-              mapped.clientName = clientMap.get(mapped.clientId);
-            }
-            if (!mapped.clientName && mapped.summary.includes(' - ')) {
-              const parts = mapped.summary.split(' - ');
-              if (parts[0] && parts[0].trim().length > 1) {
-                mapped.clientName = parts[0].trim();
-              }
-            }
-            return mapped;
-          });
-          const mappedEvents = remoteEvents.map(e => {
-            if (!e.clientName && e.clientId && clientMap.has(e.clientId)) {
-              return { ...e, clientName: clientMap.get(e.clientId) };
-            }
-            return e;
-          }).sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
+          const remoteEvents = data.map(row => enrichEvent(mapEventFromDB(row)));
+          const sortedEvents = remoteEvents.sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
 
-          // If Supabase is active, it is the single source of truth. No unsynced merge to avoid duplicates.
-          saveLocal('events', mappedEvents);
-          return mappedEvents;
+          // If Supabase is active, it is the single source of truth.
+          saveLocal('events', sortedEvents);
+          return sortedEvents;
         }
       } catch (err) {
         console.warn('Supabase getLocalEvents exception:', err);
       }
     }
-    return localEvents.map(e => {
-      let name = e.clientName;
-      if (!name && e.clientId && clientMap.has(e.clientId)) {
-        name = clientMap.get(e.clientId);
-      }
-      if (!name && e.summary.includes(' - ')) {
-        const parts = e.summary.split(' - ');
-        if (parts[0] && parts[0].trim().length > 1) {
-          name = parts[0].trim();
-        }
-      }
-      return { ...e, clientName: name };
-    }).sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
+    return localEvents.map(enrichEvent).sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
   },
 
   async createLocalEvent(event: Omit<CalendarEvent, 'id'> & { id?: string }): Promise<CalendarEvent> {

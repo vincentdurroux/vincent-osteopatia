@@ -6,7 +6,7 @@ import {
   CreditCard, Shield, Clock, MapPin, Phone, Mail, FileCheck, Printer,
   ChevronRight, Pencil, ChevronLeft, LayoutGrid, List, ArrowRight,
   Copy, CheckCircle2, XCircle, AlertTriangle, Database, Server, UserPlus, User,
-  Tag, BadgePercent, Percent, Sparkles, IdCard, X
+  Tag, BadgePercent, Percent, Sparkles, IdCard, X, Columns3
 } from 'lucide-react';
 import { Client, ClientNote, Invoice, CalendarEvent } from '../../types';
 import { api, isSupabaseConfigured, SUPABASE_SQL_SETUP, capitalizeFirstName } from '../../lib/supabase';
@@ -52,8 +52,8 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [events, setEvents] = useState<CalendarEvent[]>([]);
   
-  // Calendar View Mode: 'grid' (Month grid), 'list' (List view)
-  const [calendarViewMode, setCalendarViewMode] = useState<'grid' | 'list'>('grid');
+  // Calendar View Mode: 'month' (Month grid), 'week' (Weekly columns), 'day' (Daily timeline)
+  const [calendarViewMode, setCalendarViewMode] = useState<'month' | 'week' | 'day'>('month');
   const [currentCalendarDate, setCurrentCalendarDate] = useState(new Date());
   const [isSyncing, setIsSyncing] = useState(false);
   
@@ -85,6 +85,52 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
     date: new Date().toISOString().split('T')[0],
     motif: '',
   });
+
+  // Keep note drafts in sync per patient when switching clients
+  const noteDraftsRef = useRef<Record<string, typeof newNote>>({});
+  const prevClientIdRef = useRef<string | null>(null);
+  const newNoteRef = useRef(newNote);
+
+  // Keep newNoteRef up-to-date with state changes
+  useEffect(() => {
+    newNoteRef.current = newNote;
+  }, [newNote]);
+
+  useEffect(() => {
+    const prevClientId = prevClientIdRef.current;
+    const currentClientId = selectedClient?.id || null;
+
+    // 1. Save the draft of the previous patient
+    if (prevClientId) {
+      noteDraftsRef.current[prevClientId] = { ...newNoteRef.current };
+    }
+
+    // 2. Load the draft of the newly selected patient or reset
+    if (currentClientId) {
+      const draft = noteDraftsRef.current[currentClientId];
+      if (draft) {
+        setNewNote(draft);
+      } else {
+        setNewNote({
+          anamnese: '',
+          treatment: '',
+          category: 'treatment',
+          date: new Date().toISOString().split('T')[0],
+          motif: '',
+        });
+      }
+    } else {
+      setNewNote({
+        anamnese: '',
+        treatment: '',
+        category: 'treatment',
+        date: new Date().toISOString().split('T')[0],
+        motif: '',
+      });
+    }
+
+    prevClientIdRef.current = currentClientId;
+  }, [selectedClient?.id]);
   
   const [isAddInvoiceOpen, setIsAddInvoiceOpen] = useState(false);
   const [newInvoiceBillingPlan, setNewInvoiceBillingPlan] = useState<'single' | 'bono3' | 'bono5' | 'deduct_bono' | 'custom'>('single');
@@ -101,6 +147,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
     description: "Séance d'Ostéopathie (1h)",
     language: 'fr' as 'fr' | 'en' | 'es',
     date: new Date().toISOString().split('T')[0],
+    paymentDate: new Date().toISOString().split('T')[0],
     eventId: '',
   });
   
@@ -416,6 +463,9 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
         date: new Date(newNote.date).toISOString(),
       });
       setClientNotes(prev => [created, ...prev]);
+      if (selectedClient?.id) {
+        delete noteDraftsRef.current[selectedClient.id];
+      }
       setNewNote({
         anamnese: '',
         treatment: '',
@@ -537,6 +587,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
         status: newInvoice.status || 'paid',
         paymentMethod: newInvoice.paymentMethod,
         date: newInvoice.date || new Date().toISOString().split('T')[0],
+        paymentDate: newInvoice.status === 'paid' ? (newInvoice.paymentDate || newInvoice.date || new Date().toISOString().split('T')[0]) : undefined,
         description: finalDescription,
         language: newInvoice.language,
         noteId: newInvoice.eventId || undefined,
@@ -652,6 +703,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
         status: inlineInvoiceStatus,
         paymentMethod: inlineInvoicePaymentMethod,
         date: noteDateStr,
+        paymentDate: inlineInvoiceStatus === 'paid' ? noteDateStr : undefined,
         description: finalDescription,
         language: lang as 'fr' | 'en' | 'es',
         noteId: note.id,
@@ -697,6 +749,15 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
     }
   };
 
+  // Helper to dynamically get the most up-to-date patient name for an appointment
+  const getEventDisplayName = (ev: CalendarEvent): string => {
+    if (ev.clientId) {
+      const found = clients.find(c => c.id === ev.clientId);
+      if (found?.name) return found.name;
+    }
+    return ev.clientName || ev.summary || '';
+  };
+
   // Update Client Handler
   const handleUpdateClient = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -719,12 +780,28 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
 
       // Synchronize appointment events with updated patient name in React state
       setEvents(prev => prev.map(ev => {
-        if (ev.clientId === updated.id || (oldClientName && ev.clientName === oldClientName)) {
+        const isMatchingClient = 
+          ev.clientId === updated.id || 
+          (oldClientName && (
+            ev.clientName?.trim().toLowerCase() === oldClientName.trim().toLowerCase() ||
+            ev.summary?.trim().toLowerCase() === oldClientName.trim().toLowerCase() ||
+            ev.summary?.trim().toLowerCase().startsWith(oldClientName.trim().toLowerCase() + ' -')
+          )) ||
+          (editingClient.firstName && editingClient.lastName && (
+            ev.clientName?.toLowerCase().includes(editingClient.lastName.toLowerCase()) && 
+            ev.clientName?.toLowerCase().includes(editingClient.firstName.toLowerCase())
+          )) ||
+          (formattedLastName && formattedFirstName && (
+            ev.clientName?.toLowerCase().includes(formattedLastName.toLowerCase()) &&
+            ev.clientName?.toLowerCase().includes(formattedFirstName.toLowerCase())
+          ));
+
+        if (isMatchingClient) {
           let updatedSummary = ev.summary;
           if (ev.summary && ev.summary.includes(' - ')) {
             const parts = ev.summary.split(' - ');
             updatedSummary = `${fullName} - ${parts.slice(1).join(' - ')}`;
-          } else if (!ev.summary || ev.summary === ev.clientName || (oldClientName && ev.summary === oldClientName)) {
+          } else if (!ev.summary || ev.summary === ev.clientName || (oldClientName && ev.summary === oldClientName) || ev.summary === "Sesión de osteopatía" || ev.summary === "Séance d'ostéopathie" || ev.summary === "Consultation d'ostéopathie") {
             updatedSummary = fullName;
           }
           return {
@@ -737,7 +814,8 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
         return ev;
       }));
 
-      // Synchronize invoices with updated patient name in React state
+      // Synchronize invoices with updated patient name in React state - Disabled to preserve historical records on existing invoices
+      /*
       setInvoices(prev => prev.map(inv => {
         if (inv.clientId === updated.id || (oldClientName && inv.clientName === oldClientName)) {
           return {
@@ -748,6 +826,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
         }
         return inv;
       }));
+      */
 
       if (selectedClient?.id === updated.id) {
         setSelectedClient(updated);
@@ -819,6 +898,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
         const updated = await api.updateInvoice({
           ...invoice,
           status: newStatus,
+          paymentDate: newStatus === 'paid' ? (invoice.paymentDate || new Date().toISOString().split('T')[0]) : undefined,
         });
         setInvoices(prev => prev.map(i => i.id === updated.id ? updated : i));
         if (selectedInvoiceForPrint?.id === updated.id) {
@@ -1492,7 +1572,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                 </div>
                                 <div>
                                   <h4 className="text-xs font-bold text-gray-900 leading-tight">
-                                    {event.summary}
+                                    {getEventDisplayName(event)}
                                   </h4>
                                   <p className="text-[11px] text-emerald-800 font-semibold mt-1">
                                     {new Date(event.start).toLocaleTimeString(lang === 'fr' ? 'fr-FR' : 'es-ES', { hour: '2-digit', minute: '2-digit' })} - {new Date(event.end).toLocaleTimeString(lang === 'fr' ? 'fr-FR' : 'es-ES', { hour: '2-digit', minute: '2-digit' })}
@@ -1517,7 +1597,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                             {/* Action bar on appointment card */}
                             <div className="pt-2 border-t border-emerald-200/40 flex items-center justify-between gap-2">
                               <span className="text-[10px] text-gray-500 font-medium truncate max-w-[150px]">
-                                {event.clientName || (lang === 'fr' ? "Patient associé" : "Linked patient")}
+                                {getEventDisplayName(event)}
                               </span>
                               <button
                                 onClick={() => handleGoToNotes(event)}
@@ -1580,7 +1660,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                     </span>
                                   </div>
                                   <h5 className="text-xs font-bold text-gray-800 line-clamp-1">
-                                    {event.clientName || event.summary}
+                                    {getEventDisplayName(event)}
                                   </h5>
                                   {event.clientName && event.summary && event.summary !== event.clientName && 
                                    event.summary !== "Sesión de osteopatía" && event.summary !== "Séance d'ostéopathie" && 
@@ -1973,20 +2053,6 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
 
                         <div>
                           <label className="text-[10px] uppercase tracking-wider font-bold text-gray-400 block mb-1">
-                            {lang === 'fr' ? "Motif de consultation" : lang === 'es' ? "Motivo de consulta" : "Reason for consultation"}
-                          </label>
-                          <input
-                            type="text"
-                            required
-                            placeholder={lang === 'fr' ? "ex: Douleur lombaire aiguë, Bilan..." : lang === 'es' ? "ej: Dolor lumbar agudo, Evaluación..." : "e.g., Acute lower back pain, Assessment..."}
-                            value={newNote.motif}
-                            onChange={(e) => setNewNote(prev => ({ ...prev, motif: e.target.value }))}
-                            className="w-full p-2.5 bg-[#f4f4ec] rounded-xl border border-black/5 text-xs focus:outline-none focus:ring-1 focus:ring-primary focus:bg-white transition-all"
-                          />
-                        </div>
-
-                        <div>
-                          <label className="text-[10px] uppercase tracking-wider font-bold text-gray-400 block mb-1">
                             {lang === 'fr' ? "Anamnèse & Symptômes" : lang === 'es' ? "Anamnesis y Síntomas" : "Anamnesis & Symptoms"}
                           </label>
                           <textarea
@@ -2057,29 +2123,16 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                   </span>
                                 </div>
 
-                                <div className="grid grid-cols-2 gap-2">
-                                  <div>
-                                    <label className="text-[9px] uppercase tracking-wider font-bold text-gray-400 block mb-1">
-                                      {lang === 'fr' ? "Date" : lang === 'es' ? "Fecha" : "Date"}
-                                    </label>
-                                    <input
-                                      type="date"
-                                      value={editingNoteDate}
-                                      onChange={(e) => setEditingNoteDate(e.target.value)}
-                                      className="w-full p-1.5 bg-[#f4f4ec] rounded-lg border border-black/5 text-[11px] focus:outline-none focus:ring-1 focus:ring-primary focus:bg-white transition-all"
-                                    />
-                                  </div>
-                                  <div>
-                                    <label className="text-[9px] uppercase tracking-wider font-bold text-gray-400 block mb-1">
-                                      {lang === 'fr' ? "Motif" : lang === 'es' ? "Motivo" : "Reason"}
-                                    </label>
-                                    <input
-                                      type="text"
-                                      value={editingNoteMotif}
-                                      onChange={(e) => setEditingNoteMotif(e.target.value)}
-                                      className="w-full p-1.5 bg-[#f4f4ec] rounded-lg border border-black/5 text-[11px] focus:outline-none focus:ring-1 focus:ring-primary focus:bg-white transition-all"
-                                    />
-                                  </div>
+                                <div className="w-full max-w-xs">
+                                  <label className="text-[9px] uppercase tracking-wider font-bold text-gray-400 block mb-1">
+                                    {lang === 'fr' ? "Date" : lang === 'es' ? "Fecha" : "Date"}
+                                  </label>
+                                  <input
+                                    type="date"
+                                    value={editingNoteDate}
+                                    onChange={(e) => setEditingNoteDate(e.target.value)}
+                                    className="w-full p-1.5 bg-[#f4f4ec] rounded-lg border border-black/5 text-[11px] focus:outline-none focus:ring-1 focus:ring-primary focus:bg-white transition-all"
+                                  />
                                 </div>
 
                                 <div className="space-y-2">
@@ -2186,12 +2239,6 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                   </div>
                                 </div>
 
-                                {note.motif && (
-                                  <div className="flex items-center gap-1.5 py-1 px-2.5 bg-primary/5 text-primary rounded-xl w-fit text-[11px] font-medium border border-primary/10">
-                                    <span className="font-bold">{lang === 'fr' ? 'Motif' : lang === 'es' ? 'Motivo' : 'Reason'} :</span> {note.motif}
-                                  </div>
-                                )}
-
                                 {note.anamnese || note.treatment ? (
                                   <div className="space-y-3 pt-1">
                                     {note.anamnese && (
@@ -2225,7 +2272,18 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
 
                             {/* Associated Invoice or Inline Creation Options */}
                             {(() => {
-                              const associatedInvoice = invoices.find(inv => inv.noteId === note.id);
+                              const associatedInvoice = invoices.find(inv => {
+                                if (inv.noteId === note.id) return true;
+                                if (!selectedClient) return false;
+                                if (inv.clientId !== selectedClient.id) return false;
+                                try {
+                                  const invDateStr = new Date(inv.date).toISOString().split('T')[0];
+                                  const noteDateStr = new Date(note.date).toISOString().split('T')[0];
+                                  return invDateStr === noteDateStr;
+                                } catch (e) {
+                                  return false;
+                                }
+                              });
 
                               return associatedInvoice ? (
                                 <div className="mt-4 pt-4 border-t border-black/5 flex flex-wrap items-center justify-between gap-3 bg-secondary/30 p-3 rounded-2xl">
@@ -2686,29 +2744,40 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
               </div>
 
               <div className="flex flex-wrap items-center gap-2.5 w-full lg:w-auto justify-between lg:justify-end">
-                {/* View Switcher: Grid vs List */}
+                {/* View Switcher: Month / Week / Day */}
                 <div className="flex items-center bg-[#f4f4ec] p-1 rounded-2xl border border-black/5">
                   <button
-                    onClick={() => setCalendarViewMode('grid')}
+                    onClick={() => setCalendarViewMode('month')}
                     className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
-                      calendarViewMode === 'grid' 
+                      calendarViewMode === 'month' 
                         ? 'bg-white text-primary shadow-sm' 
                         : 'text-gray-600 hover:text-gray-900'
                     }`}
                   >
-                    <LayoutGrid size={14} />
-                    <span>{lang === 'fr' ? "Vue Grille" : lang === 'es' ? "Vista Cuadrícula" : "Grid View"}</span>
+                    <CalendarIcon size={14} />
+                    <span>{lang === 'fr' ? "Mois" : lang === 'es' ? "Mes" : "Month"}</span>
                   </button>
                   <button
-                    onClick={() => setCalendarViewMode('list')}
+                    onClick={() => setCalendarViewMode('week')}
                     className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
-                      calendarViewMode === 'list' 
+                      calendarViewMode === 'week' 
                         ? 'bg-white text-primary shadow-sm' 
                         : 'text-gray-600 hover:text-gray-900'
                     }`}
                   >
-                    <List size={14} />
-                    <span>{lang === 'fr' ? "Liste" : lang === 'es' ? "Lista" : "List View"}</span>
+                    <Columns3 size={14} />
+                    <span>{lang === 'fr' ? "Semaine" : lang === 'es' ? "Semana" : "Week"}</span>
+                  </button>
+                  <button
+                    onClick={() => setCalendarViewMode('day')}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                      calendarViewMode === 'day' 
+                        ? 'bg-white text-primary shadow-sm' 
+                        : 'text-gray-600 hover:text-gray-900'
+                    }`}
+                  >
+                    <Clock size={14} />
+                    <span>{lang === 'fr' ? "Jour" : lang === 'es' ? "Día" : "Day"}</span>
                   </button>
                 </div>
 
@@ -2731,340 +2800,696 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
               </div>
             </div>
 
-            {/* VIEW 1: MONTH/DAY GRID */}
-            {calendarViewMode === 'grid' && (
-              <div className="bg-white p-6 rounded-3xl border border-black/5 shadow-sm space-y-6">
-                
-                {/* Month Navigator Header */}
-                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pb-4 border-b border-black/5">
-                  <div className="flex items-center gap-4">
-                    <h4 className="text-xl font-bold font-serif text-gray-800 capitalize">
-                      {currentCalendarDate.toLocaleDateString(lang === 'fr' ? 'fr-FR' : lang === 'es' ? 'es-ES' : 'en-US', { month: 'long', year: 'numeric' })}
-                    </h4>
-                    
-                    <div className="flex items-center gap-1 bg-[#f4f4ec] p-1 rounded-xl">
-                      <button
-                        onClick={() => {
-                          const prev = new Date(currentCalendarDate);
-                          prev.setMonth(prev.getMonth() - 1);
-                          setCurrentCalendarDate(prev);
-                        }}
-                        className="p-1.5 hover:bg-white rounded-lg text-gray-700 transition-all"
-                        title={lang === 'fr' ? "Mois précédent" : "Previous month"}
-                      >
-                        <ChevronLeft size={16} />
-                      </button>
-                      
-                      <button
-                        onClick={() => setCurrentCalendarDate(new Date())}
-                        className="px-2.5 py-1 text-xs font-bold text-gray-700 hover:bg-white rounded-lg transition-all"
-                      >
-                        {lang === 'fr' ? "Aujourd'hui" : lang === 'es' ? "Hoy" : "Today"}
-                      </button>
+            {/* SHARED CALENDAR LOGIC & RENDER */}
+            {(() => {
+              const todayStr = (() => {
+                const now = new Date();
+                const y = now.getFullYear();
+                const m = String(now.getMonth() + 1).padStart(2, '0');
+                const d = String(now.getDate()).padStart(2, '0');
+                return `${y}-${m}-${d}`;
+              })();
 
-                      <button
-                        onClick={() => {
-                          const next = new Date(currentCalendarDate);
-                          next.setMonth(next.getMonth() + 1);
-                          setCurrentCalendarDate(next);
-                        }}
-                        className="p-1.5 hover:bg-white rounded-lg text-gray-700 transition-all"
-                        title={lang === 'fr' ? "Mois suivant" : "Next month"}
-                      >
-                        <ChevronRight size={16} />
-                      </button>
+              const getWeekDates = (baseDate: Date) => {
+                const d = new Date(baseDate);
+                const day = d.getDay();
+                const diffToMonday = d.getDate() - (day === 0 ? 6 : day - 1);
+                const monday = new Date(d.getFullYear(), d.getMonth(), diffToMonday);
+
+                const weekDays = [];
+                for (let i = 0; i < 7; i++) {
+                  const dayDate = new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + i);
+                  const y = dayDate.getFullYear();
+                  const m = String(dayDate.getMonth() + 1).padStart(2, '0');
+                  const dayNum = String(dayDate.getDate()).padStart(2, '0');
+                  const dateStr = `${y}-${m}-${dayNum}`;
+                  weekDays.push({
+                    date: dayDate,
+                    dateString: dateStr,
+                    dayNumber: dayDate.getDate(),
+                    dayName: dayDate.toLocaleDateString(lang === 'fr' ? 'fr-FR' : lang === 'es' ? 'es-ES' : 'en-US', { weekday: 'short' }),
+                    fullDayName: dayDate.toLocaleDateString(lang === 'fr' ? 'fr-FR' : lang === 'es' ? 'es-ES' : 'en-US', { weekday: 'long' }),
+                    isToday: dateStr === todayStr,
+                  });
+                }
+                return weekDays;
+              };
+
+              const handleCalendarPrev = () => {
+                const prev = new Date(currentCalendarDate);
+                if (calendarViewMode === 'month') {
+                  prev.setMonth(prev.getMonth() - 1);
+                } else if (calendarViewMode === 'week') {
+                  prev.setDate(prev.getDate() - 7);
+                } else {
+                  prev.setDate(prev.getDate() - 1);
+                }
+                setCurrentCalendarDate(prev);
+              };
+
+              const handleCalendarNext = () => {
+                const next = new Date(currentCalendarDate);
+                if (calendarViewMode === 'month') {
+                  next.setMonth(next.getMonth() + 1);
+                } else if (calendarViewMode === 'week') {
+                  next.setDate(next.getDate() + 7);
+                } else {
+                  next.setDate(next.getDate() + 1);
+                }
+                setCurrentCalendarDate(next);
+              };
+
+              const getCalendarHeaderTitle = () => {
+                if (calendarViewMode === 'month') {
+                  return currentCalendarDate.toLocaleDateString(lang === 'fr' ? 'fr-FR' : lang === 'es' ? 'es-ES' : 'en-US', { month: 'long', year: 'numeric' });
+                }
+                if (calendarViewMode === 'week') {
+                  const week = getWeekDates(currentCalendarDate);
+                  const first = week[0].date;
+                  const last = week[6].date;
+                  const sameMonth = first.getMonth() === last.getMonth();
+                  const sameYear = first.getFullYear() === last.getFullYear();
+
+                  if (sameMonth && sameYear) {
+                    return `${first.getDate()} - ${last.getDate()} ${first.toLocaleDateString(lang === 'fr' ? 'fr-FR' : lang === 'es' ? 'es-ES' : 'en-US', { month: 'long', year: 'numeric' })}`;
+                  } else if (sameYear) {
+                    return `${first.getDate()} ${first.toLocaleDateString(lang === 'fr' ? 'fr-FR' : lang === 'es' ? 'es-ES' : 'en-US', { month: 'short' })} - ${last.getDate()} ${last.toLocaleDateString(lang === 'fr' ? 'fr-FR' : lang === 'es' ? 'es-ES' : 'en-US', { month: 'short', year: 'numeric' })}`;
+                  } else {
+                    return `${first.toLocaleDateString(lang === 'fr' ? 'fr-FR' : lang === 'es' ? 'es-ES' : 'en-US', { day: 'numeric', month: 'short' })} - ${last.toLocaleDateString(lang === 'fr' ? 'fr-FR' : lang === 'es' ? 'es-ES' : 'en-US', { day: 'numeric', month: 'short', year: 'numeric' })}`;
+                  }
+                }
+                // Day view
+                return currentCalendarDate.toLocaleDateString(lang === 'fr' ? 'fr-FR' : lang === 'es' ? 'es-ES' : 'en-US', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+              };
+
+              const getEventsForDate = (dateString: string) => {
+                return events.filter(ev => {
+                  try {
+                    const evDate = new Date(ev.start);
+                    const y = evDate.getFullYear();
+                    const m = String(evDate.getMonth() + 1).padStart(2, '0');
+                    const d = String(evDate.getDate()).padStart(2, '0');
+                    return `${y}-${m}-${d}` === dateString;
+                  } catch (e) {
+                    return false;
+                  }
+                }).sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
+              };
+
+              const handleQuickAddEvent = (dateStr: string, timeStr?: string) => {
+                const startTime = timeStr || '10:00';
+                let endTime = '11:00';
+                if (timeStr) {
+                  const [h, m] = timeStr.split(':').map(Number);
+                  const endH = String((h + 1) % 24).padStart(2, '0');
+                  endTime = `${endH}:${String(m).padStart(2, '0')}`;
+                }
+                setNewEvent(prev => ({
+                  ...prev,
+                  date: dateStr,
+                  startTime: startTime,
+                  endTime: endTime,
+                  title: getDefaultAppointmentTitle(lang),
+                  description: '',
+                }));
+                setIsAddEventOpen(true);
+              };
+
+              return (
+                <div className="bg-white p-6 rounded-3xl border border-black/5 shadow-sm space-y-6">
+                  
+                  {/* Navigator Header */}
+                  <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pb-4 border-b border-black/5">
+                    <div className="flex items-center gap-3 sm:gap-4 flex-wrap">
+                      <h4 className="text-xl font-bold font-serif text-gray-800 capitalize">
+                        {getCalendarHeaderTitle()}
+                      </h4>
+                      
+                      <div className="flex items-center gap-1 bg-[#f4f4ec] p-1 rounded-xl">
+                        <button
+                          onClick={handleCalendarPrev}
+                          className="p-1.5 hover:bg-white rounded-lg text-gray-700 transition-all"
+                          title={lang === 'fr' ? "Précédent" : "Previous"}
+                        >
+                          <ChevronLeft size={16} />
+                        </button>
+                        
+                        <button
+                          onClick={() => setCurrentCalendarDate(new Date())}
+                          className="px-2.5 py-1 text-xs font-bold text-gray-700 hover:bg-white rounded-lg transition-all"
+                        >
+                          {lang === 'fr' ? "Aujourd'hui" : lang === 'es' ? "Hoy" : "Today"}
+                        </button>
+
+                        <button
+                          onClick={handleCalendarNext}
+                          className="p-1.5 hover:bg-white rounded-lg text-gray-700 transition-all"
+                          title={lang === 'fr' ? "Suivant" : "Next"}
+                        >
+                          <ChevronRight size={16} />
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-3 text-xs text-gray-500">
+                      <span className="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
+                      <span>
+                        {calendarViewMode === 'month' 
+                          ? (lang === 'fr' ? "Cliquez sur un jour pour voir les détails, ou sur + pour créer un RDV" : "Click on a day to see details or + to add an appointment")
+                          : calendarViewMode === 'week'
+                          ? (lang === 'fr' ? "Cliquez sur un créneau pour ajouter ou modifier un RDV" : "Click on a slot to add or edit an appointment")
+                          : (lang === 'fr' ? "Planning détaillé de la journée avec accès direct aux notes" : "Detailed daily schedule with direct note access")}
+                      </span>
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-3 text-xs text-gray-500">
-                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
-                    <span>{lang === 'fr' ? "Cliquez sur un jour pour ajouter un RDV, ou sur un créneau pour le modifier" : "Click on a day to add, or an event to edit"}</span>
-                  </div>
-                </div>
+                  {/* VIEW 1: MONTH VIEW */}
+                  {calendarViewMode === 'month' && (
+                    <div className="w-full overflow-x-auto">
+                      <div className="min-w-[700px]">
+                        {/* Days of week header */}
+                        <div className="grid grid-cols-7 gap-px mb-2 text-center text-xs font-bold text-gray-500 uppercase tracking-wider">
+                          {(lang === 'fr' 
+                            ? ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'] 
+                            : lang === 'es' 
+                            ? ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'] 
+                            : ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+                          ).map((d, i) => (
+                            <div key={i} className="py-2">{d}</div>
+                          ))}
+                        </div>
 
-                {/* Monthly Calendar Grid Layout */}
-                <div className="w-full overflow-x-auto">
-                  <div className="min-w-[700px]">
-                    {/* Days of week header */}
-                    <div className="grid grid-cols-7 gap-px mb-2 text-center text-xs font-bold text-gray-500 uppercase tracking-wider">
-                      {(lang === 'fr' 
-                        ? ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'] 
-                        : lang === 'es' 
-                        ? ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'] 
-                        : ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
-                      ).map((d, i) => (
-                        <div key={i} className="py-2">{d}</div>
-                      ))}
-                    </div>
+                        {/* Month Days Calculation */}
+                        {(() => {
+                          const year = currentCalendarDate.getFullYear();
+                          const month = currentCalendarDate.getMonth();
+                          
+                          const firstDayDate = new Date(year, month, 1);
+                          let startDay = firstDayDate.getDay();
+                          startDay = startDay === 0 ? 6 : startDay - 1; // 0 = Monday
+                          
+                          const daysInMonth = new Date(year, month + 1, 0).getDate();
+                          const daysInPrevMonth = new Date(year, month, 0).getDate();
 
-                    {/* Month Days Calculation */}
-                    {(() => {
-                      const year = currentCalendarDate.getFullYear();
-                      const month = currentCalendarDate.getMonth();
-                      
-                      const firstDayDate = new Date(year, month, 1);
-                      let startDay = firstDayDate.getDay();
-                      startDay = startDay === 0 ? 6 : startDay - 1; // 0 = Monday
-                      
-                      const daysInMonth = new Date(year, month + 1, 0).getDate();
-                      const daysInPrevMonth = new Date(year, month, 0).getDate();
+                          const allDays: { day: number; currentMonth: boolean; dateString: string }[] = [];
 
-                      const allDays: { day: number; currentMonth: boolean; dateString: string }[] = [];
+                          // Leading days from prev month
+                          for (let i = startDay - 1; i >= 0; i--) {
+                            const dayNum = daysInPrevMonth - i;
+                            const prevMonthDate = new Date(year, month - 1, dayNum);
+                            const y = prevMonthDate.getFullYear();
+                            const m = String(prevMonthDate.getMonth() + 1).padStart(2, '0');
+                            const d = String(dayNum).padStart(2, '0');
+                            allDays.push({ day: dayNum, currentMonth: false, dateString: `${y}-${m}-${d}` });
+                          }
 
-                      // Leading days from prev month
-                      for (let i = startDay - 1; i >= 0; i--) {
-                        const dayNum = daysInPrevMonth - i;
-                        const prevMonthDate = new Date(year, month - 1, dayNum);
-                        const y = prevMonthDate.getFullYear();
-                        const m = String(prevMonthDate.getMonth() + 1).padStart(2, '0');
-                        const d = String(dayNum).padStart(2, '0');
-                        allDays.push({ day: dayNum, currentMonth: false, dateString: `${y}-${m}-${d}` });
-                      }
+                          // Current month days
+                          for (let i = 1; i <= daysInMonth; i++) {
+                            const m = String(month + 1).padStart(2, '0');
+                            const d = String(i).padStart(2, '0');
+                            allDays.push({ day: i, currentMonth: true, dateString: `${year}-${m}-${d}` });
+                          }
 
-                      // Current month days
-                      for (let i = 1; i <= daysInMonth; i++) {
-                        const m = String(month + 1).padStart(2, '0');
-                        const d = String(i).padStart(2, '0');
-                        allDays.push({ day: i, currentMonth: true, dateString: `${year}-${m}-${d}` });
-                      }
+                          // Trailing days to complete grid cells
+                          const remaining = (7 - (allDays.length % 7)) % 7;
+                          for (let i = 1; i <= remaining; i++) {
+                            const nextMonthDate = new Date(year, month + 1, i);
+                            const y = nextMonthDate.getFullYear();
+                            const m = String(nextMonthDate.getMonth() + 1).padStart(2, '0');
+                            const d = String(i).padStart(2, '0');
+                            allDays.push({ day: i, currentMonth: false, dateString: `${y}-${m}-${d}` });
+                          }
 
-                      // Trailing days to complete grid cells
-                      const remaining = (7 - (allDays.length % 7)) % 7;
-                      for (let i = 1; i <= remaining; i++) {
-                        const nextMonthDate = new Date(year, month + 1, i);
-                        const y = nextMonthDate.getFullYear();
-                        const m = String(nextMonthDate.getMonth() + 1).padStart(2, '0');
-                        const d = String(i).padStart(2, '0');
-                        allDays.push({ day: i, currentMonth: false, dateString: `${y}-${m}-${d}` });
-                      }
+                          return (
+                            <div className="grid grid-cols-7 gap-2">
+                              {allDays.map((cell, idx) => {
+                                const dayEvents = getEventsForDate(cell.dateString);
+                                const isToday = cell.dateString === todayStr;
 
-                      const todayStr = (() => {
-                        const now = new Date();
-                        const y = now.getFullYear();
-                        const m = String(now.getMonth() + 1).padStart(2, '0');
-                        const d = String(now.getDate()).padStart(2, '0');
-                        return `${y}-${m}-${d}`;
-                      })();
-
-                      return (
-                        <div className="grid grid-cols-7 gap-2">
-                          {allDays.map((cell, idx) => {
-                            // Find events for this day
-                            const dayEvents = events.filter(ev => {
-                              try {
-                                const evDate = new Date(ev.start);
-                                const y = evDate.getFullYear();
-                                const m = String(evDate.getMonth() + 1).padStart(2, '0');
-                                const d = String(evDate.getDate()).padStart(2, '0');
-                                return `${y}-${m}-${d}` === cell.dateString;
-                              } catch (e) {
-                                return false;
-                              }
-                            });
-
-                            const isToday = cell.dateString === todayStr;
-
-                             return (
-                              <div
-                                key={idx}
-                                onClick={() => {
-                                  setSelectedDayModalDate(cell.dateString);
-                                }}
-                                className={`min-h-[115px] p-2 rounded-2xl border transition-all cursor-pointer flex flex-col justify-between group/cell ${
-                                  cell.currentMonth 
-                                    ? isToday 
-                                      ? 'bg-primary/5 border-primary/40 shadow-sm' 
-                                      : 'bg-[#fafafa] border-black/5 hover:border-primary/30 hover:bg-white' 
-                                    : 'bg-black/[0.02] border-transparent opacity-40 hover:opacity-80'
-                                }`}
-                              >
-                                <div className="flex items-center justify-between">
-                                  <span className={`text-xs font-bold rounded-full w-6 h-6 flex items-center justify-center ${
-                                    isToday 
-                                      ? 'bg-primary text-white shadow-sm' 
-                                      : 'text-gray-700'
-                                  }`}>
-                                    {cell.day}
-                                  </span>
-                                  <div className="flex items-center gap-1">
-                                    {dayEvents.length > 0 && (
-                                      <span className="text-[10px] font-bold text-gray-400">
-                                        {dayEvents.length} {dayEvents.length === 1 ? 'rdv' : 'rdvs'}
-                                      </span>
-                                    )}
-                                    <span 
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        setNewEvent(prev => ({
-                                          ...prev,
-                                          date: cell.dateString,
-                                          title: "Sesión de osteopatía",
-                                          description: ""
-                                        }));
-                                        setIsAddEventOpen(true);
-                                      }}
-                                      className="opacity-0 group-hover/cell:opacity-100 text-primary p-0.5 rounded hover:bg-primary/10 transition-opacity" 
-                                      title={lang === 'fr' ? "Nouveau RDV rapide" : "Quick Add RDV"}
-                                    >
-                                      <Plus size={12} />
-                                    </span>
-                                  </div>
-                                </div>
-
-                                {/* Events snippets in cell */}
-                                <div className="mt-1 space-y-1 overflow-hidden">
-                                  {dayEvents.slice(0, 3).map((ev, evIdx) => {
-                                    const timeStr = new Date(ev.start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-
-                                    return (
-                                      <div
-                                        key={evIdx}
+                                return (
+                                  <div
+                                    key={idx}
+                                    onClick={() => {
+                                      setSelectedDayModalDate(cell.dateString);
+                                    }}
+                                    className={`min-h-[115px] p-2 rounded-2xl border transition-all cursor-pointer flex flex-col justify-between group/cell ${
+                                      cell.currentMonth 
+                                        ? isToday 
+                                          ? 'bg-primary/5 border-primary/40 shadow-sm' 
+                                          : 'bg-[#fafafa] border-black/5 hover:border-primary/30 hover:bg-white' 
+                                        : 'bg-black/[0.02] border-transparent opacity-40 hover:opacity-80'
+                                    }`}
+                                  >
+                                    <div className="flex items-center justify-between">
+                                      <span 
                                         onClick={(e) => {
                                           e.stopPropagation();
-                                          setSelectedDayModalDate(cell.dateString);
+                                          const [y, m, d] = cell.dateString.split('-').map(Number);
+                                          setCurrentCalendarDate(new Date(y, m - 1, d));
+                                          setCalendarViewMode('day');
                                         }}
-                                        className="px-2 py-1 rounded-lg text-[10px] font-bold truncate leading-tight flex items-center justify-between bg-emerald-100/90 hover:bg-emerald-200 text-emerald-900 border border-emerald-300/80 transition-colors shadow-2xs"
-                                        title={`${timeStr} - ${ev.summary} (Cliquer pour voir la journée)`}
+                                        className={`text-xs font-bold rounded-full w-6 h-6 flex items-center justify-center transition-transform hover:scale-110 ${
+                                          isToday 
+                                            ? 'bg-primary text-white shadow-sm' 
+                                            : 'text-gray-700 hover:bg-black/5'
+                                        }`}
+                                        title={lang === 'fr' ? "Voir la journée en vue Jour" : "Switch to Day View"}
                                       >
-                                        <span className="truncate">{timeStr} {ev.clientName ? `${ev.clientName} (${ev.summary})` : ev.summary}</span>
-                                        <Pencil size={10} className="shrink-0 opacity-60 hover:opacity-100 ml-1" />
+                                        {cell.day}
+                                      </span>
+                                      <div className="flex items-center gap-1">
+                                        {dayEvents.length > 0 && (
+                                          <span className="text-[10px] font-bold text-gray-400">
+                                            {dayEvents.length} {dayEvents.length === 1 ? 'rdv' : 'rdvs'}
+                                          </span>
+                                        )}
+                                        <span 
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            handleQuickAddEvent(cell.dateString);
+                                          }}
+                                          className="opacity-0 group-hover/cell:opacity-100 text-primary p-0.5 rounded hover:bg-primary/10 transition-opacity" 
+                                          title={lang === 'fr' ? "Nouveau RDV rapide" : "Quick Add RDV"}
+                                        >
+                                          <Plus size={12} />
+                                        </span>
                                       </div>
-                                    );
-                                  })}
-                                  {dayEvents.length > 3 && (
-                                    <p className="text-[9px] font-bold text-gray-500 pl-1">
-                                      +{dayEvents.length - 3} {lang === 'fr' ? 'autre(s)' : 'more'}
-                                    </p>
-                                  )}
+                                    </div>
+
+                                    {/* Events snippets in cell */}
+                                    <div className="mt-1 space-y-1 overflow-hidden">
+                                      {dayEvents.slice(0, 3).map((ev, evIdx) => {
+                                        const timeStr = new Date(ev.start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+                                        return (
+                                          <div
+                                            key={evIdx}
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              setSelectedDayModalDate(cell.dateString);
+                                            }}
+                                            className="px-2 py-1 rounded-lg text-[10px] font-bold truncate leading-tight flex items-center justify-between bg-emerald-100/90 hover:bg-emerald-200 text-emerald-900 border border-emerald-300/80 transition-colors shadow-2xs"
+                                            title={`${timeStr} - ${getEventDisplayName(ev)} (Cliquer pour voir la journée)`}
+                                          >
+                                            <span className="truncate">{timeStr} {getEventDisplayName(ev)}</span>
+                                            <Pencil size={10} className="shrink-0 opacity-60 hover:opacity-100 ml-1" />
+                                          </div>
+                                        );
+                                      })}
+                                      {dayEvents.length > 3 && (
+                                        <p className="text-[9px] font-bold text-gray-500 pl-1">
+                                          +{dayEvents.length - 3} {lang === 'fr' ? 'autre(s)' : 'more'}
+                                        </p>
+                                      )}
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          );
+                        })()}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* VIEW 2: WEEK VIEW */}
+                  {calendarViewMode === 'week' && (
+                    <div className="w-full overflow-x-auto">
+                      <div className="min-w-[860px]">
+                        <div className="grid grid-cols-7 gap-3">
+                          {getWeekDates(currentCalendarDate).map((dayItem, dayIdx) => {
+                            const dayEvents = getEventsForDate(dayItem.dateString);
+
+                            return (
+                              <div
+                                key={dayIdx}
+                                className={`flex flex-col rounded-2xl border transition-all ${
+                                  dayItem.isToday
+                                    ? 'bg-primary/[0.03] border-primary/40 shadow-xs'
+                                    : 'bg-[#fafafa] border-black/5 hover:border-black/10'
+                                }`}
+                              >
+                                {/* Week Day Column Header */}
+                                <div className="p-3 border-b border-black/5 flex items-center justify-between gap-1">
+                                  <div>
+                                    <span className="text-[11px] font-bold text-gray-500 uppercase tracking-wider block">
+                                      {dayItem.dayName}
+                                    </span>
+                                    <div className="flex items-center gap-1.5 mt-0.5">
+                                      <button
+                                        onClick={() => {
+                                          setCurrentCalendarDate(dayItem.date);
+                                          setCalendarViewMode('day');
+                                        }}
+                                        className={`text-sm font-bold w-6 h-6 rounded-full flex items-center justify-center transition-all hover:scale-105 ${
+                                          dayItem.isToday
+                                            ? 'bg-primary text-white shadow-xs'
+                                            : 'text-gray-800 hover:bg-black/5'
+                                        }`}
+                                        title={lang === 'fr' ? "Basculer sur la vue Jour" : "Switch to Day View"}
+                                      >
+                                        {dayItem.dayNumber}
+                                      </button>
+                                      {dayEvents.length > 0 && (
+                                        <span className="text-[10px] font-bold text-emerald-700 bg-emerald-100/80 px-1.5 py-0.2 rounded-full">
+                                          {dayEvents.length}
+                                        </span>
+                                      )}
+                                    </div>
+                                  </div>
+
+                                  <button
+                                    onClick={() => handleQuickAddEvent(dayItem.dateString)}
+                                    className="p-1 rounded-lg text-primary hover:bg-primary/10 transition-colors"
+                                    title={lang === 'fr' ? `Ajouter un RDV le ${dayItem.dayName} ${dayItem.dayNumber}` : "Add appointment"}
+                                  >
+                                    <Plus size={14} />
+                                  </button>
+                                </div>
+
+                                {/* Week Day Column Content */}
+                                <div className="p-2 space-y-2 flex-1 min-h-[340px] flex flex-col justify-between">
+                                  <div className="space-y-2">
+                                    {dayEvents.map((ev) => {
+                                      const startStr = new Date(ev.start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                                      const endStr = new Date(ev.end).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+                                      return (
+                                        <div
+                                          key={ev.id}
+                                          onClick={() => openEditEventModal(ev)}
+                                          className="p-2.5 rounded-xl bg-white border border-emerald-200/90 shadow-2xs hover:shadow-sm hover:border-emerald-400 transition-all cursor-pointer group/wev"
+                                        >
+                                          <div className="flex items-center justify-between gap-1 mb-1">
+                                            <span className="text-[10px] font-extrabold text-emerald-800 bg-emerald-50 px-1.5 py-0.5 rounded-md border border-emerald-200/60">
+                                              {startStr} - {endStr}
+                                            </span>
+                                            <div className="opacity-0 group-hover/wev:opacity-100 transition-opacity flex items-center gap-1">
+                                              <button
+                                                type="button"
+                                                onClick={(e) => {
+                                                  e.stopPropagation();
+                                                  handleGoToNotes(ev);
+                                                }}
+                                                className="p-1 text-primary hover:bg-primary/10 rounded"
+                                                title={lang === 'fr' ? "Notes cliniques" : "Clinical notes"}
+                                              >
+                                                <FileCheck size={11} />
+                                              </button>
+                                              <button
+                                                type="button"
+                                                onClick={(e) => {
+                                                  e.stopPropagation();
+                                                  handleDeleteEvent(ev.id);
+                                                }}
+                                                className="p-1 text-rose-600 hover:bg-rose-50 rounded"
+                                                title={lang === 'fr' ? "Supprimer" : "Delete"}
+                                              >
+                                                <Trash2 size={11} />
+                                              </button>
+                                            </div>
+                                          </div>
+
+                                          <h5 className="text-xs font-bold text-gray-900 leading-tight truncate">
+                                            {getEventDisplayName(ev)}
+                                          </h5>
+                                          {ev.clientName && ev.summary !== ev.clientName && (
+                                            <p className="text-[10px] text-gray-500 truncate mt-0.5">{ev.summary}</p>
+                                          )}
+                                        </div>
+                                      );
+                                    })}
+
+                                    {dayEvents.length === 0 && (
+                                      <div className="py-8 text-center">
+                                        <p className="text-[10px] text-gray-400">
+                                          {lang === 'fr' ? "Aucun RDV" : lang === 'es' ? "Sin citas" : "No appointments"}
+                                        </p>
+                                      </div>
+                                    )}
+                                  </div>
+
+                                  {/* Quick add footer button */}
+                                  <button
+                                    onClick={() => handleQuickAddEvent(dayItem.dateString)}
+                                    className="w-full py-1.5 px-2 mt-2 rounded-xl text-[10px] font-bold text-primary/80 hover:text-primary hover:bg-primary/5 border border-dashed border-primary/20 transition-all flex items-center justify-center gap-1"
+                                  >
+                                    <Plus size={11} />
+                                    <span>{lang === 'fr' ? "Ajouter" : lang === 'es' ? "Añadir" : "Add"}</span>
+                                  </button>
                                 </div>
                               </div>
                             );
                           })}
                         </div>
-                      );
-                    })()}
-                  </div>
-                </div>
-              </div>
-            )}
+                      </div>
+                    </div>
+                  )}
 
-            {/* VIEW 2: APPOINTMENT LIST & CABINET HOURS */}
-            {calendarViewMode === 'list' && (
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                
-                {/* Left col: Appointment list */}
-                <div className="bg-white p-6 rounded-3xl border border-black/5 shadow-sm lg:col-span-2 flex flex-col">
-                  <div className="flex items-center justify-between mb-4">
-                    <h4 className="text-xs font-bold uppercase tracking-wider text-primary flex items-center gap-2">
-                      <CalendarIcon size={14} /> {lang === 'fr' ? "Prochains rendez-vous cliniques" : "Upcoming Clinical Appointments"}
-                    </h4>
-                    <span className="text-[11px] font-bold text-gray-400">{events.length} rdv(s)</span>
-                  </div>
+                  {/* VIEW 3: DAY VIEW */}
+                  {calendarViewMode === 'day' && (
+                    <div className="space-y-6">
+                      {(() => {
+                        const currentDateStr = (() => {
+                          const y = currentCalendarDate.getFullYear();
+                          const m = String(currentCalendarDate.getMonth() + 1).padStart(2, '0');
+                          const d = String(currentCalendarDate.getDate()).padStart(2, '0');
+                          return `${y}-${m}-${d}`;
+                        })();
 
-                  <div className="space-y-3 overflow-y-auto max-h-[60vh] pr-1">
-                    {events.map(event => (
-                      <div 
-                        key={event.id} 
-                        onClick={() => openEditEventModal(event)}
-                        className="p-4 rounded-2xl bg-emerald-50/40 hover:bg-emerald-50/80 border border-emerald-100/90 flex items-start justify-between group cursor-pointer transition-colors"
-                      >
-                        <div className="flex items-start gap-3">
-                          <div className="w-9 h-9 rounded-xl bg-emerald-100 text-emerald-800 flex items-center justify-center shrink-0 mt-0.5">
-                            <CalendarIcon size={18} />
+                        const dayEvents = getEventsForDate(currentDateStr);
+                        const isToday = currentDateStr === todayStr;
+
+                        const hours = [
+                          '08:00', '09:00', '10:00', '11:00', '12:00', 
+                          '13:00', '14:00', '15:00', '16:00', '17:00', 
+                          '18:00', '19:00', '20:00'
+                        ];
+
+                        return (
+                          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                            {/* Left 2 Cols: Timeline Schedule */}
+                            <div className="lg:col-span-2 space-y-4">
+                              {/* Day Summary Header */}
+                              <div className="p-4 rounded-2xl bg-[#fafafa] border border-black/5 flex flex-wrap items-center justify-between gap-3">
+                                <div>
+                                  <div className="flex items-center gap-2">
+                                    <h4 className="text-sm font-bold text-gray-900 capitalize">
+                                      {currentCalendarDate.toLocaleDateString(lang === 'fr' ? 'fr-FR' : lang === 'es' ? 'es-ES' : 'en-US', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
+                                    </h4>
+                                    {isToday && (
+                                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-primary text-white">
+                                        {lang === 'fr' ? "Aujourd'hui" : lang === 'es' ? "Hoy" : "Today"}
+                                      </span>
+                                    )}
+                                  </div>
+                                  <p className="text-xs text-gray-500 mt-0.5">
+                                    {dayEvents.length} {dayEvents.length <= 1 ? (lang === 'fr' ? 'consultation prévue' : 'appointment scheduled') : (lang === 'fr' ? 'consultations prévues' : 'appointments scheduled')}
+                                  </p>
+                                </div>
+
+                                <button
+                                  onClick={() => handleQuickAddEvent(currentDateStr)}
+                                  className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-white rounded-xl text-xs font-bold hover:bg-primary/95 transition-all shadow-xs"
+                                >
+                                  <Plus size={14} />
+                                  <span>{lang === 'fr' ? "Ajouter un rendez-vous ce jour" : "Add appointment today"}</span>
+                                </button>
+                              </div>
+
+                              {/* Hourly Schedule Table */}
+                              <div className="space-y-2">
+                                {hours.map((hourStr, hIdx) => {
+                                  const hourNum = parseInt(hourStr.split(':')[0], 10);
+                                  
+                                  // Find events that start in this hour slot
+                                  const slotEvents = dayEvents.filter(ev => {
+                                    try {
+                                      const evDate = new Date(ev.start);
+                                      return evDate.getHours() === hourNum;
+                                    } catch (e) {
+                                      return false;
+                                    }
+                                  });
+
+                                  return (
+                                    <div key={hIdx} className="flex items-start gap-3 py-1">
+                                      {/* Hour Label */}
+                                      <div className="w-14 shrink-0 text-right pt-2.5">
+                                        <span className="text-xs font-bold text-gray-500">{hourStr}</span>
+                                      </div>
+
+                                      {/* Slot Content */}
+                                      <div className="flex-1 space-y-2">
+                                        {slotEvents.length > 0 ? (
+                                          slotEvents.map(ev => {
+                                            const startStr = new Date(ev.start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                                            const endStr = new Date(ev.end).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+                                            return (
+                                              <div
+                                                key={ev.id}
+                                                onClick={() => openEditEventModal(ev)}
+                                                className="p-4 rounded-2xl bg-white border border-emerald-200/90 shadow-xs hover:border-emerald-400 hover:shadow-sm transition-all cursor-pointer flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 group/dev"
+                                              >
+                                                <div className="flex items-start gap-3">
+                                                  <div className="w-9 h-9 rounded-xl bg-emerald-100 text-emerald-800 flex items-center justify-center shrink-0 mt-0.5">
+                                                    <CalendarIcon size={18} />
+                                                  </div>
+                                                  <div>
+                                                    <div className="flex items-center gap-2 flex-wrap">
+                                                      <h5 className="text-sm font-bold text-gray-900 leading-tight">
+                                                        {getEventDisplayName(ev)}
+                                                      </h5>
+                                                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-800 border border-emerald-200">
+                                                        {startStr} - {endStr}
+                                                      </span>
+                                                    </div>
+                                                    <p className="text-xs text-gray-500 mt-1">
+                                                      {ev.summary !== ev.clientName ? ev.summary : (lang === 'fr' ? "Consultation d'ostéopathie" : "Osteopathy consultation")}
+                                                    </p>
+                                                    {ev.description && (
+                                                      <p className="text-[11px] text-gray-400 italic mt-1 line-clamp-1">
+                                                        {ev.description}
+                                                      </p>
+                                                    )}
+                                                  </div>
+                                                </div>
+
+                                                <div className="flex items-center gap-1.5 self-end sm:self-center">
+                                                  <button
+                                                    type="button"
+                                                    onClick={(e) => {
+                                                      e.stopPropagation();
+                                                      handleGoToNotes(ev);
+                                                    }}
+                                                    className="flex items-center gap-1 px-3 py-1.5 bg-primary text-white hover:bg-primary/95 rounded-xl text-xs font-bold transition-all shadow-xs"
+                                                    title={lang === 'fr' ? "Rédiger des notes cliniques" : "Take notes"}
+                                                  >
+                                                    <FileCheck size={13} />
+                                                    <span>{lang === 'fr' ? "Prise de notes" : "Notes"}</span>
+                                                  </button>
+                                                  <button
+                                                    type="button"
+                                                    onClick={(e) => {
+                                                      e.stopPropagation();
+                                                      openEditEventModal(ev);
+                                                    }}
+                                                    className="p-1.5 hover:bg-emerald-100 text-emerald-800 rounded-lg transition-all"
+                                                    title={lang === 'fr' ? "Modifier" : "Edit"}
+                                                  >
+                                                    <Pencil size={13} />
+                                                  </button>
+                                                  <button
+                                                    type="button"
+                                                    onClick={(e) => {
+                                                      e.stopPropagation();
+                                                      handleDeleteEvent(ev.id);
+                                                    }}
+                                                    className="p-1.5 hover:bg-rose-100 text-rose-600 rounded-lg transition-all"
+                                                    title={lang === 'fr' ? "Supprimer ce rendez-vous" : "Delete"}
+                                                  >
+                                                    <Trash2 size={13} />
+                                                  </button>
+                                                </div>
+                                              </div>
+                                            );
+                                          })
+                                        ) : (
+                                          <div
+                                            onClick={() => handleQuickAddEvent(currentDateStr, hourStr)}
+                                            className="h-10 rounded-xl border border-dashed border-black/10 hover:border-primary/40 hover:bg-primary/[0.02] flex items-center justify-between px-3 cursor-pointer group/slot transition-all"
+                                          >
+                                            <span className="text-[11px] text-gray-400 group-hover/slot:text-primary transition-colors flex items-center gap-1 font-medium">
+                                              <Plus size={12} className="opacity-0 group-hover/slot:opacity-100 transition-opacity" />
+                                              <span>{lang === 'fr' ? `Créneau libre (${hourStr})` : `Free slot (${hourStr})`}</span>
+                                            </span>
+                                            <span className="text-[10px] font-bold text-primary opacity-0 group-hover/slot:opacity-100 transition-opacity">
+                                              {lang === 'fr' ? "+ Planifier un RDV" : "+ Book slot"}
+                                            </span>
+                                          </div>
+                                        )}
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+
+                            {/* Right 1 Col: Day Insights & Quick Actions */}
+                            <div className="space-y-6">
+                              {/* Quick summary of today's patients */}
+                              <div className="bg-[#fafafa] p-5 rounded-2xl border border-black/5 space-y-3">
+                                <h4 className="text-xs font-bold uppercase tracking-wider text-primary flex items-center gap-2">
+                                  <Users size={14} /> {lang === 'fr' ? "Patients du jour" : "Patients of the day"}
+                                </h4>
+                                
+                                <div className="space-y-2">
+                                  {dayEvents.map(ev => (
+                                    <div 
+                                      key={ev.id}
+                                      className="p-2.5 rounded-xl bg-white border border-black/5 flex items-center justify-between gap-2 shadow-2xs"
+                                    >
+                                      <div>
+                                        <h5 className="text-xs font-bold text-gray-900 leading-tight">
+                                          {getEventDisplayName(ev)}
+                                        </h5>
+                                        <p className="text-[10px] text-gray-500 mt-0.5">
+                                          {new Date(ev.start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                        </p>
+                                      </div>
+                                      <button
+                                        onClick={() => handleGoToNotes(ev)}
+                                        className="px-2.5 py-1 bg-primary/10 hover:bg-primary text-primary hover:text-white rounded-lg text-[10px] font-bold transition-all"
+                                        title={lang === 'fr' ? "Notes cliniques" : "Notes"}
+                                      >
+                                        {lang === 'fr' ? "Fiche" : "File"}
+                                      </button>
+                                    </div>
+                                  ))}
+
+                                  {dayEvents.length === 0 && (
+                                    <p className="text-xs text-gray-400 italic py-2">
+                                      {lang === 'fr' ? "Aucun patient prévu pour cette journée." : "No patients scheduled for this day."}
+                                    </p>
+                                  )}
+                                </div>
+                              </div>
+
+                              {/* Consultation Hours Summary */}
+                              <div className="bg-[#fafafa] p-5 rounded-2xl border border-black/5 space-y-4">
+                                <div>
+                                  <h4 className="text-xs font-bold uppercase tracking-wider text-primary mb-1">
+                                    {lang === 'fr' ? "Horaires du Cabinet" : lang === 'es' ? "Horarios de consulta" : "Consultation hours"}
+                                  </h4>
+                                  <p className="text-[11px] text-gray-500">
+                                    {lang === 'fr' ? "Plages d'ouverture habituelles du cabinet." : "Standard active clinic hours."}
+                                  </p>
+                                </div>
+
+                                <div className="space-y-2.5">
+                                  {[
+                                    { day: lang === 'fr' ? 'Lundi - Vendredi' : lang === 'es' ? 'Lunes - Viernes' : 'Monday - Friday', hours: '09:00 - 13:00, 16:00 - 20:00' },
+                                    { day: lang === 'fr' ? 'Samedi' : lang === 'es' ? 'Sábado' : 'Saturday', hours: '09:00 - 13:00' },
+                                    { day: lang === 'fr' ? 'Dimanche' : lang === 'es' ? 'Domingo' : 'Sunday', hours: lang === 'fr' ? 'Fermé' : lang === 'es' ? 'Cerrado' : 'Closed' },
+                                  ].map((sched, i) => (
+                                    <div key={i} className="flex justify-between items-center text-xs py-1 border-b border-black/[0.03] last:border-0">
+                                      <span className="font-bold text-gray-700">{sched.day}</span>
+                                      <span className="text-gray-500 text-[11px]">{sched.hours}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            </div>
                           </div>
-                          <div>
-                            <h5 className="text-xs font-bold text-gray-800 leading-tight">
-                              {event.summary} 
-                            </h5>
-                            <p className="text-[10px] text-gray-500 mt-1 flex items-center gap-1">
-                              <Clock size={12} /> {new Date(event.start).toLocaleDateString(lang === 'fr' ? 'fr-FR' : lang === 'es' ? 'es-ES' : 'en-US', { weekday: 'long', day: 'numeric', month: 'short' })} • {new Date(event.start).toLocaleTimeString(lang === 'fr' ? 'fr-FR' : lang === 'es' ? 'es-ES' : 'en-US', { hour: '2-digit', minute: '2-digit' })} - {new Date(event.end).toLocaleTimeString(lang === 'fr' ? 'fr-FR' : lang === 'es' ? 'es-ES' : 'en-US', { hour: '2-digit', minute: '2-digit' })}
-                            </p>
-                            {event.description && <p className="text-[10px] text-gray-400 mt-2 italic leading-relaxed">{event.description}</p>}
-                          </div>
-                        </div>
+                        );
+                      })()}
+                    </div>
+                  )}
 
-                        <div className="flex items-center gap-2">
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleGoToNotes(event);
-                            }}
-                            className="flex items-center gap-1 px-3 py-1.5 bg-primary text-white hover:bg-primary/95 rounded-xl text-xs font-bold transition-all shadow-xs"
-                            title={lang === 'fr' ? "Prendre des notes / Ouvrir la fiche patient" : "Take notes / Open patient file"}
-                          >
-                            <FileCheck size={13} />
-                            <span>{lang === 'fr' ? "Prise de notes" : "Notes"}</span>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              openEditEventModal(event);
-                            }}
-                            className="p-1.5 hover:bg-emerald-100 text-emerald-800 rounded-lg transition-all"
-                            title={lang === 'fr' ? "Modifier" : "Edit"}
-                          >
-                            <Pencil size={13} />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleDeleteEvent(event.id);
-                            }}
-                            className="p-1.5 hover:bg-rose-100 text-rose-600 rounded-lg transition-all"
-                            title={lang === 'fr' ? "Supprimer ce rendez-vous" : "Delete this appointment"}
-                          >
-                            <Trash2 size={13} />
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-
-                    {events.length === 0 && (
-                      <div className="text-center py-12">
-                        <p className="text-xs text-gray-400">
-                          {lang === 'fr' ? "Aucun rendez-vous enregistré pour le moment." : "No appointments scheduled at the moment."}
-                        </p>
-                        <button
-                          onClick={() => setIsAddEventOpen(true)}
-                          className="mt-3 px-4 py-2 bg-primary text-white text-xs font-bold rounded-xl"
-                        >
-                          {lang === 'fr' ? "Ajouter un premier rendez-vous" : "Add first appointment"}
-                        </button>
-                      </div>
-                    )}
-                  </div>
                 </div>
-
-                {/* Right col: Cabinet Details Card */}
-                <div className="bg-white p-6 rounded-3xl border border-black/5 shadow-sm space-y-6">
-                  <div>
-                    <h4 className="text-sm font-serif font-bold text-primary mb-1">
-                      {lang === 'fr' ? "Horaires de consultations" : lang === 'es' ? "Horarios de consulta" : "Consultation hours"}
-                    </h4>
-                    <p className="text-xs text-gray-500">
-                      {lang === 'fr' ? "Vos créneaux d'activité générale définis." : lang === 'es' ? "Sus franjas horarias de actividad general definidas." : "Your defined general active time slots."}
-                    </p>
-                  </div>
-
-                  <div className="space-y-3">
-                    {[
-                      { day: lang === 'fr' ? 'Lundi - Vendredi' : lang === 'es' ? 'Lunes - Viernes' : 'Monday - Friday', hours: '09:00 - 13:00, 16:00 - 20:00' },
-                      { day: lang === 'fr' ? 'Samedi' : lang === 'es' ? 'Sábado' : 'Saturday', hours: '09:00 - 13:00' },
-                      { day: lang === 'fr' ? 'Dimanche' : lang === 'es' ? 'Domingo' : 'Sunday', hours: lang === 'fr' ? 'Fermé' : lang === 'es' ? 'Cerrado' : 'Closed' },
-                    ].map((sched, i) => (
-                      <div key={i} className="flex justify-between items-center text-xs py-1">
-                        <span className="font-bold text-gray-600">{sched.day}</span>
-                        <span className="text-gray-500">{sched.hours}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-              </div>
-            )}
+              );
+            })()}
 
           </div>
         )}
@@ -3438,7 +3863,15 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                       <tr key={inv.id} className="border-b border-black/5 hover:bg-black/[0.01] transition-colors group">
                         <td className="py-4 font-bold text-primary">{inv.invoiceNumber}</td>
                         <td className="py-4 font-bold">{inv.clientName}</td>
-                        <td className="py-4 text-gray-500">{new Date(inv.date).toLocaleDateString(lang === 'fr' ? 'fr-FR' : lang === 'es' ? 'es-ES' : 'en-US')}</td>
+                        <td className="py-4 text-gray-500 text-xs">
+                          <div>{new Date(inv.date).toLocaleDateString(lang === 'fr' ? 'fr-FR' : lang === 'es' ? 'es-ES' : 'en-US')}</div>
+                          {inv.status === 'paid' && inv.paymentDate && inv.paymentDate !== inv.date && (
+                            <div className="text-[10px] text-emerald-700 font-semibold mt-0.5">
+                              {lang === 'fr' ? 'Règlement : ' : lang === 'es' ? 'Pago: ' : 'Paid: '}
+                              {new Date(inv.paymentDate).toLocaleDateString(lang === 'fr' ? 'fr-FR' : lang === 'es' ? 'es-ES' : 'en-US')}
+                            </div>
+                          )}
+                        </td>
                         <td className="py-4">
                           <span className={`text-[9px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-full ${
                             inv.paymentMethod === 'card' ? 'bg-indigo-50 text-indigo-700' :
@@ -3890,12 +4323,12 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                               {startTime} - {endTime}
                             </span>
                             <div className="flex flex-col">
-                              {ev.clientName && (
-                                <span className="text-xs font-bold text-gray-900">{ev.clientName}</span>
+                              <span className="text-xs font-bold text-gray-900">{getEventDisplayName(ev)}</span>
+                              {ev.summary && ev.summary !== getEventDisplayName(ev) && (
+                                <span className="text-xs font-medium text-gray-600 group-hover:text-primary transition-colors">
+                                  {ev.summary}
+                                </span>
                               )}
-                              <span className="text-xs font-medium text-gray-600 group-hover:text-primary transition-colors">
-                                {ev.summary}
-                              </span>
                             </div>
                           </div>
 
@@ -4140,11 +4573,11 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
 
                 <div>
                   <label className="text-[10px] uppercase tracking-wider font-bold text-gray-400 block mb-1">
-                    {lang === 'fr' ? 'Note / Motif de consultation' : 'Notes / Reason'}
+                    {lang === 'fr' ? 'Notes / Remarques' : 'Notes / Remarks'}
                   </label>
                   <textarea
                     value={newEvent.description}
-                    placeholder={lang === 'fr' ? 'Motif, remarques (optionnel)...' : lang === 'es' ? 'Motivo, notas (opcional)...' : 'Notes / Reason (optional)...'}
+                    placeholder={lang === 'fr' ? 'Remarques (optionnel)...' : lang === 'es' ? 'Notas (opcional)...' : 'Remarks (optional)...'}
                     onChange={(e) => setNewEvent(prev => ({ ...prev, description: e.target.value }))}
                     rows={3}
                     className="w-full p-3 bg-secondary rounded-xl border border-black/5 text-xs focus:outline-none focus:ring-1 focus:ring-primary focus:bg-white transition-all resize-none"
@@ -4319,7 +4752,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
 
                 <div>
                   <label className="text-[10px] uppercase tracking-wider font-bold text-gray-400 block mb-1">
-                    {lang === 'fr' ? 'Note / Motif de consultation' : 'Notes / Reason'}
+                    {lang === 'fr' ? 'Notes / Remarques' : 'Notes / Remarks'}
                   </label>
                   <textarea
                     value={editingEvent.description}
@@ -4474,7 +4907,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                               const evTime = new Date(ev.start).toLocaleTimeString(lang === 'fr' ? 'fr-FR' : 'es-ES', { hour: '2-digit', minute: '2-digit' });
                               return (
                                 <option key={ev.id} value={ev.id}>
-                                  {evDate} à {evTime} - {ev.summary}
+                                  {lang === 'fr' ? `${evDate} à ${evTime}` : lang === 'es' ? `${evDate} a las ${evTime}` : `${evDate} at ${evTime}`}
                                 </option>
                               );
                             })}
@@ -4816,6 +5249,21 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                     className="w-full p-2.5 bg-secondary rounded-xl border border-black/5 text-xs focus:outline-none focus:ring-1 focus:ring-primary focus:bg-white transition-all"
                   />
                 </div>
+
+                {newInvoice.status === 'paid' && (
+                  <div>
+                    <label className="text-[10px] uppercase tracking-wider font-bold text-gray-400 block mb-1">
+                      {lang === 'fr' ? 'Date de règlement' : lang === 'es' ? 'Fecha de pago' : 'Payment date'}
+                    </label>
+                    <input
+                      type="date"
+                      required
+                      value={newInvoice.paymentDate || newInvoice.date}
+                      onChange={(e) => setNewInvoice(prev => ({ ...prev, paymentDate: e.target.value }))}
+                      className="w-full p-2.5 bg-secondary rounded-xl border border-black/5 text-xs focus:outline-none focus:ring-1 focus:ring-primary focus:bg-white transition-all"
+                    />
+                  </div>
+                )}
 
                 <div>
                   <label className="text-[10px] uppercase tracking-wider font-bold text-gray-400 block mb-1">
@@ -5284,6 +5732,21 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                   />
                 </div>
 
+                {editingInvoice.status === 'paid' && (
+                  <div>
+                    <label className="text-[10px] uppercase tracking-wider font-bold text-gray-400 block mb-1">
+                      {lang === 'fr' ? 'Date de règlement' : lang === 'es' ? 'Fecha de pago' : 'Payment date'}
+                    </label>
+                    <input
+                      type="date"
+                      required
+                      value={editingInvoice.paymentDate || editingInvoice.date}
+                      onChange={(e) => setEditingInvoice(prev => prev ? ({ ...prev, paymentDate: e.target.value }) : null)}
+                      className="w-full p-2.5 bg-secondary rounded-xl border border-black/5 text-xs focus:outline-none focus:ring-1 focus:ring-primary focus:bg-white transition-all"
+                    />
+                  </div>
+                )}
+
                 <div>
                   <label className="text-[10px] uppercase tracking-wider font-bold text-gray-400 block mb-1">
                     {lang === 'fr' ? 'Langue du reçu' : lang === 'es' ? 'Idioma del recibo' : 'Receipt language'}
@@ -5504,6 +5967,25 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                      "Osteopathy Session";
                             }
 
+                            // 2.5. Standard session with date: "Séance d'Ostéopathie du [DATE]"
+                            if (
+                              trimmed.startsWith("Séance d'Ostéopathie du") ||
+                              trimmed.startsWith("Sesión de Osteopatía del") ||
+                              trimmed.startsWith("Osteopathy Session of")
+                            ) {
+                              try {
+                                const formattedSessionDate = new Date(selectedInvoiceForPrint.date).toLocaleDateString(
+                                  receiptLang === 'fr' ? 'fr-FR' : receiptLang === 'es' ? 'es-ES' : 'en-US',
+                                  { day: 'numeric', month: 'long', year: 'numeric' }
+                                );
+                                return receiptLang === 'fr' ? `Séance d'Ostéopathie du ${formattedSessionDate}` :
+                                       receiptLang === 'es' ? `Sesión de Osteopatía del ${formattedSessionDate}` :
+                                       `Osteopathy Session of ${formattedSessionDate}`;
+                              } catch (e) {
+                                return desc;
+                              }
+                            }
+
                             // 3. Bono Deduct: "Séance d'Ostéopathie (Prise en compte Bono)"
                             if (
                               trimmed.startsWith("Séance d'Ostéopathie (Prise en compte Bono)") ||
@@ -5613,7 +6095,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                             ? "Documento de factura pendiente de pago (no saldada)."
                             : "Invoice document pending payment (unpaid).")
                         : ((translations[receiptLang]?.invoice?.receiptDeclaration || "Reçu valant facture acquittée le {date} par {paymentMethod}.")
-                            .replace('{date}', new Date(selectedInvoiceForPrint.date).toLocaleDateString(receiptLang === 'fr' ? 'fr-FR' : receiptLang === 'es' ? 'es-ES' : 'en-US'))
+                            .replace('{date}', new Date(selectedInvoiceForPrint.paymentDate || selectedInvoiceForPrint.date).toLocaleDateString(receiptLang === 'fr' ? 'fr-FR' : receiptLang === 'es' ? 'es-ES' : 'en-US'))
                             .replace('{paymentMethod}', selectedInvoiceForPrint.paymentMethod === 'card' 
                               ? (translations[receiptLang]?.invoice?.methods?.card || 'Carte bancaire')
                               : selectedInvoiceForPrint.paymentMethod === 'cash' 
