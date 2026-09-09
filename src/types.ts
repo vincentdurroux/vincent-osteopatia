@@ -46,7 +46,7 @@ export interface Invoice {
   noteId?: string;
 }
 
-export type EventType = 'appointment' | 'blocked' | 'admin' | 'personal' | 'other';
+export type EventType = 'appointment' | 'blocked';
 
 export interface CalendarEvent {
   id: string;

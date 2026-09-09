@@ -963,13 +963,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
   const getEventTypeLabel = (type?: EventType) => {
     switch (type) {
       case 'blocked':
-        return lang === 'fr' ? 'Créneau bloqué' : lang === 'es' ? 'Bloqueado' : 'Blocked slot';
-      case 'personal':
-        return lang === 'fr' ? 'Pause / Personnel' : lang === 'es' ? 'Pausa / Personal' : 'Break / Personal';
-      case 'admin':
-        return lang === 'fr' ? 'Administratif' : lang === 'es' ? 'Administrativo' : 'Admin';
-      case 'other':
-        return lang === 'fr' ? 'Autre créneau' : lang === 'es' ? 'Otro' : 'Other';
+        return lang === 'fr' ? 'Bloqué / Indispo' : lang === 'es' ? 'Bloqueado / No disp.' : 'Blocked slot';
       case 'appointment':
       default:
         return lang === 'fr' ? 'Rendez-vous' : lang === 'es' ? 'Cita' : 'Appointment';
@@ -980,12 +974,6 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
     switch (type) {
       case 'blocked':
         return 'bg-amber-100 text-amber-900 border-amber-300/80';
-      case 'personal':
-        return 'bg-violet-100 text-violet-900 border-violet-300/80';
-      case 'admin':
-        return 'bg-slate-100 text-slate-800 border-slate-300/80';
-      case 'other':
-        return 'bg-orange-100 text-orange-900 border-orange-300/80';
       case 'appointment':
       default:
         return 'bg-emerald-100 text-emerald-900 border-emerald-300/80';
@@ -3188,6 +3176,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                     {/* Events snippets in cell */}
                                     <div className="mt-1 space-y-1 overflow-hidden">
                                       {dayEvents.slice(0, 3).map((ev, evIdx) => {
+                                        const isOther = ev.eventType && ev.eventType !== 'appointment';
                                         const timeStr = new Date(ev.start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
                                         return (
@@ -3197,10 +3186,17 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                               e.stopPropagation();
                                               setSelectedDayModalDate(cell.dateString);
                                             }}
-                                            className="px-2 py-1 rounded-lg text-[10px] font-bold truncate leading-tight flex items-center justify-between bg-emerald-100/90 hover:bg-emerald-200 text-emerald-900 border border-emerald-300/80 transition-colors shadow-2xs"
-                                            title={`${timeStr} - ${getEventDisplayName(ev)} (Cliquer pour voir la journée)`}
+                                            className={`px-2 py-1 rounded-lg text-[10px] font-bold truncate leading-tight flex items-center justify-between transition-colors shadow-2xs ${
+                                              isOther
+                                                ? 'bg-amber-100 text-amber-900 border border-amber-300/90 hover:bg-amber-200'
+                                                : 'bg-emerald-100/90 hover:bg-emerald-200 text-emerald-900 border border-emerald-300/80'
+                                            }`}
+                                            title={`${timeStr} - ${getEventDisplayName(ev)} (${lang === 'fr' ? 'Cliquer pour voir la journée' : 'Click to see day'})`}
                                           >
-                                            <span className="truncate">{timeStr} {getEventDisplayName(ev)}</span>
+                                            <span className="truncate flex items-center gap-1">
+                                              {isOther && <Lock size={10} className="shrink-0 text-amber-800" />}
+                                              {timeStr} {getEventDisplayName(ev)}
+                                            </span>
                                             <Pencil size={10} className="shrink-0 opacity-60 hover:opacity-100 ml-1" />
                                           </div>
                                         );
@@ -3280,6 +3276,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                 <div className="p-2 space-y-2 flex-1 min-h-[340px] flex flex-col justify-between">
                                   <div className="space-y-2">
                                     {dayEvents.map((ev) => {
+                                      const isOther = ev.eventType && ev.eventType !== 'appointment';
                                       const startStr = new Date(ev.start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
                                       const endStr = new Date(ev.end).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
@@ -3287,24 +3284,35 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                         <div
                                           key={ev.id}
                                           onClick={() => openEditEventModal(ev)}
-                                          className="p-2.5 rounded-xl bg-white border border-emerald-200/90 shadow-2xs hover:shadow-sm hover:border-emerald-400 transition-all cursor-pointer group/wev"
+                                          className={`p-2.5 rounded-xl border shadow-2xs hover:shadow-sm transition-all cursor-pointer group/wev ${
+                                            isOther 
+                                              ? 'bg-amber-50/80 border-amber-200/90 hover:border-amber-400' 
+                                              : 'bg-white border-emerald-200/90 hover:border-emerald-400'
+                                          }`}
                                         >
                                           <div className="flex items-center justify-between gap-1 mb-1">
-                                            <span className="text-[10px] font-extrabold text-emerald-800 bg-emerald-50 px-1.5 py-0.5 rounded-md border border-emerald-200/60">
+                                            <span className={`text-[10px] font-extrabold px-1.5 py-0.5 rounded-md border flex items-center gap-1 ${
+                                              isOther 
+                                                ? 'text-amber-900 bg-amber-100 border-amber-300/60' 
+                                                : 'text-emerald-800 bg-emerald-50 border-emerald-200/60'
+                                            }`}>
+                                              {isOther && <Lock size={10} className="shrink-0 text-amber-800" />}
                                               {startStr} - {endStr}
                                             </span>
                                             <div className="opacity-0 group-hover/wev:opacity-100 transition-opacity flex items-center gap-1">
-                                              <button
-                                                type="button"
-                                                onClick={(e) => {
-                                                  e.stopPropagation();
-                                                  handleGoToNotes(ev);
-                                                }}
-                                                className="p-1 text-primary hover:bg-primary/10 rounded"
-                                                title={lang === 'fr' ? "Notes cliniques" : "Clinical notes"}
-                                              >
-                                                <FileCheck size={11} />
-                                              </button>
+                                              {!isOther && (
+                                                <button
+                                                  type="button"
+                                                  onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    handleGoToNotes(ev);
+                                                  }}
+                                                  className="p-1 text-primary hover:bg-primary/10 rounded"
+                                                  title={lang === 'fr' ? "Notes cliniques" : "Clinical notes"}
+                                                >
+                                                  <FileCheck size={11} />
+                                                </button>
+                                              )}
                                               <button
                                                 type="button"
                                                 onClick={(e) => {
@@ -3319,11 +3327,17 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                             </div>
                                           </div>
 
-                                          <h5 className="text-xs font-bold text-gray-900 leading-tight truncate">
+                                          <h5 className={`text-xs font-bold leading-tight truncate ${isOther ? 'text-amber-950' : 'text-gray-900'}`}>
                                             {getEventDisplayName(ev)}
                                           </h5>
-                                          {ev.clientName && ev.summary !== ev.clientName && (
-                                            <p className="text-[10px] text-gray-500 truncate mt-0.5">{ev.summary}</p>
+                                          {isOther ? (
+                                            <span className="text-[9px] font-bold text-amber-800 bg-amber-100/90 px-1.5 py-0.2 rounded mt-1 inline-block border border-amber-200">
+                                              {getEventTypeLabel(ev.eventType)}
+                                            </span>
+                                          ) : (
+                                            ev.clientName && ev.summary !== ev.clientName && (
+                                              <p className="text-[10px] text-gray-500 truncate mt-0.5">{ev.summary}</p>
+                                            )
                                           )}
                                         </div>
                                       );
@@ -3432,6 +3446,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                       <div className="flex-1 space-y-2">
                                         {slotEvents.length > 0 ? (
                                           slotEvents.map(ev => {
+                                            const isOther = ev.eventType && ev.eventType !== 'appointment';
                                             const startStr = new Date(ev.start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
                                             const endStr = new Date(ev.end).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
@@ -3439,25 +3454,43 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                               <div
                                                 key={ev.id}
                                                 onClick={() => openEditEventModal(ev)}
-                                                className="p-4 rounded-2xl bg-white border border-emerald-200/90 shadow-xs hover:border-emerald-400 hover:shadow-sm transition-all cursor-pointer flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 group/dev"
+                                                className={`p-4 rounded-2xl border shadow-xs transition-all cursor-pointer flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 group/dev ${
+                                                  isOther 
+                                                    ? 'bg-amber-50/60 border-amber-200/90 hover:border-amber-400 hover:shadow-sm' 
+                                                    : 'bg-white border-emerald-200/90 hover:border-emerald-400 hover:shadow-sm'
+                                                }`}
                                               >
                                                 <div className="flex items-start gap-3">
-                                                  <div className="w-9 h-9 rounded-xl bg-emerald-100 text-emerald-800 flex items-center justify-center shrink-0 mt-0.5">
-                                                    <CalendarIcon size={18} />
+                                                  <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 mt-0.5 ${
+                                                    isOther ? 'bg-amber-100 text-amber-900 border border-amber-300/80' : 'bg-emerald-100 text-emerald-800'
+                                                  }`}>
+                                                    {isOther ? <Lock size={18} /> : <CalendarIcon size={18} />}
                                                   </div>
                                                   <div>
                                                     <div className="flex items-center gap-2 flex-wrap">
                                                       <h5 className="text-sm font-bold text-gray-900 leading-tight">
                                                         {getEventDisplayName(ev)}
                                                       </h5>
-                                                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-800 border border-emerald-200">
+                                                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md border ${
+                                                        isOther 
+                                                          ? 'bg-amber-100 text-amber-900 border-amber-300' 
+                                                          : 'bg-emerald-100 text-emerald-800 border-emerald-200'
+                                                      }`}>
                                                         {startStr} - {endStr}
                                                       </span>
+                                                      {isOther && (
+                                                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-amber-200/80 text-amber-900 border border-amber-300">
+                                                          {getEventTypeLabel(ev.eventType)}
+                                                        </span>
+                                                      )}
                                                     </div>
                                                     <p className="text-xs text-gray-500 mt-1">
-                                                      {ev.summary !== ev.clientName ? ev.summary : (lang === 'fr' ? "Consultation d'ostéopathie" : "Osteopathy consultation")}
+                                                      {isOther 
+                                                        ? (ev.description || (lang === 'fr' ? 'Créneau indisponible / bloqué' : 'Blocked slot'))
+                                                        : (ev.summary !== ev.clientName ? ev.summary : (lang === 'fr' ? "Consultation d'ostéopathie" : "Osteopathy consultation"))
+                                                      }
                                                     </p>
-                                                    {ev.description && (
+                                                    {!isOther && ev.description && (
                                                       <p className="text-[11px] text-gray-400 italic mt-1 line-clamp-1">
                                                         {ev.description}
                                                       </p>
@@ -3466,25 +3499,29 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                                 </div>
 
                                                 <div className="flex items-center gap-1.5 self-end sm:self-center">
-                                                  <button
-                                                    type="button"
-                                                    onClick={(e) => {
-                                                      e.stopPropagation();
-                                                      handleGoToNotes(ev);
-                                                    }}
-                                                    className="flex items-center gap-1 px-3 py-1.5 bg-primary text-white hover:bg-primary/95 rounded-xl text-xs font-bold transition-all shadow-xs"
-                                                    title={lang === 'fr' ? "Rédiger des notes cliniques" : "Take notes"}
-                                                  >
-                                                    <FileCheck size={13} />
-                                                    <span>{lang === 'fr' ? "Prise de notes" : "Notes"}</span>
-                                                  </button>
+                                                  {!isOther && (
+                                                    <button
+                                                      type="button"
+                                                      onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        handleGoToNotes(ev);
+                                                      }}
+                                                      className="flex items-center gap-1 px-3 py-1.5 bg-primary text-white hover:bg-primary/95 rounded-xl text-xs font-bold transition-all shadow-xs"
+                                                      title={lang === 'fr' ? "Rédiger des notes cliniques" : "Take notes"}
+                                                    >
+                                                      <FileCheck size={13} />
+                                                      <span>{lang === 'fr' ? "Prise de notes" : "Notes"}</span>
+                                                    </button>
+                                                  )}
                                                   <button
                                                     type="button"
                                                     onClick={(e) => {
                                                       e.stopPropagation();
                                                       openEditEventModal(ev);
                                                     }}
-                                                    className="p-1.5 hover:bg-emerald-100 text-emerald-800 rounded-lg transition-all"
+                                                    className={`p-1.5 rounded-lg transition-all ${
+                                                      isOther ? 'text-amber-800 hover:bg-amber-100' : 'hover:bg-emerald-100 text-emerald-800'
+                                                    }`}
                                                     title={lang === 'fr' ? "Modifier" : "Edit"}
                                                   >
                                                     <Pencil size={13} />
@@ -3534,7 +3571,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                 </h4>
                                 
                                 <div className="space-y-2">
-                                  {dayEvents.map(ev => (
+                                  {dayEvents.filter(ev => !ev.eventType || ev.eventType === 'appointment').map(ev => (
                                     <div 
                                       key={ev.id}
                                       className="p-2.5 rounded-xl bg-white border border-black/5 flex items-center justify-between gap-2 shadow-2xs"
@@ -3557,7 +3594,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                     </div>
                                   ))}
 
-                                  {dayEvents.length === 0 && (
+                                  {dayEvents.filter(ev => !ev.eventType || ev.eventType === 'appointment').length === 0 && (
                                     <p className="text-xs text-gray-400 italic py-2">
                                       {lang === 'fr' ? "Aucun patient prévu pour cette journée." : "No patients scheduled for this day."}
                                     </p>
@@ -4532,7 +4569,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                   <h3 className="text-xl font-serif font-bold text-primary">
                     {newEvent.eventType === 'appointment'
                       ? (lang === 'fr' ? 'Nouveau Rendez-vous' : lang === 'es' ? 'Nueva Cita' : 'New Appointment')
-                      : (lang === 'fr' ? 'Nouveau Créneau (Autre / Bloqué)' : lang === 'es' ? 'Nuevo Horario / Bloqueo' : 'New Time Slot / Blocked')}
+                      : (lang === 'fr' ? 'Nouveau Créneau Bloqué / Indispo' : lang === 'es' ? 'Nuevo Horario Bloqueado' : 'New Blocked Slot')}
                   </h3>
                   <p className="text-xs text-gray-500 mt-0.5">
                     {lang === 'fr' ? 'Planifier sur votre agenda' : lang === 'es' ? 'Planificar en su agenda' : 'Schedule on your calendar'}
@@ -4541,18 +4578,9 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                 <div className={`w-9 h-9 rounded-2xl flex items-center justify-center ${
                   newEvent.eventType === 'appointment' 
                     ? 'bg-emerald-100 text-emerald-800' 
-                    : newEvent.eventType === 'blocked'
-                    ? 'bg-amber-100 text-amber-900'
-                    : newEvent.eventType === 'personal'
-                    ? 'bg-violet-100 text-violet-900'
-                    : newEvent.eventType === 'admin'
-                    ? 'bg-slate-100 text-slate-800'
-                    : 'bg-orange-100 text-orange-900'
+                    : 'bg-amber-100 text-amber-900'
                 }`}>
-                  {newEvent.eventType === 'appointment' ? <CalendarIcon size={18} /> :
-                   newEvent.eventType === 'blocked' ? <Lock size={18} /> :
-                   newEvent.eventType === 'personal' ? <Coffee size={18} /> :
-                   newEvent.eventType === 'admin' ? <Briefcase size={18} /> : <Bookmark size={18} />}
+                  {newEvent.eventType === 'appointment' ? <CalendarIcon size={18} /> : <Lock size={18} />}
                 </div>
               </div>
 
@@ -4561,13 +4589,10 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                 <label className="text-[10px] uppercase tracking-wider font-bold text-gray-400 block mb-2">
                   {lang === 'fr' ? 'Type de créneau' : lang === 'es' ? 'Tipo de horario' : 'Slot Type'}
                 </label>
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                <div className="grid grid-cols-2 gap-2">
                   {[
                     { type: 'appointment' as EventType, label: lang === 'fr' ? 'RDV Patient' : lang === 'es' ? 'Cita Paciente' : 'Patient Appt', icon: CalendarIcon, color: 'border-emerald-500 bg-emerald-50 text-emerald-900' },
                     { type: 'blocked' as EventType, label: lang === 'fr' ? 'Bloqué / Indispo' : lang === 'es' ? 'Bloqueado / No disp.' : 'Blocked', icon: Lock, color: 'border-amber-500 bg-amber-50 text-amber-900' },
-                    { type: 'personal' as EventType, label: lang === 'fr' ? 'Pause / Perso' : lang === 'es' ? 'Pausa / Personal' : 'Break / Personal', icon: Coffee, color: 'border-violet-500 bg-violet-50 text-violet-900' },
-                    { type: 'admin' as EventType, label: lang === 'fr' ? 'Administratif' : lang === 'es' ? 'Administrativo' : 'Admin', icon: Briefcase, color: 'border-slate-500 bg-slate-50 text-slate-900' },
-                    { type: 'other' as EventType, label: lang === 'fr' ? 'Autre motif' : lang === 'es' ? 'Otro motivo' : 'Other', icon: Bookmark, color: 'border-orange-500 bg-orange-50 text-orange-900' },
                   ].map(item => {
                     const isSelected = (newEvent.eventType || 'appointment') === item.type;
                     const ItemIcon = item.icon;
@@ -4581,20 +4606,14 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                             eventType: item.type,
                             title: item.type === 'appointment' 
                               ? (prev.clientId ? (clients.find(c => c.id === prev.clientId)?.name || getDefaultAppointmentTitle(lang)) : getDefaultAppointmentTitle(lang))
-                              : item.type === 'blocked'
-                              ? (lang === 'fr' ? 'Créneau bloqué' : lang === 'es' ? 'Horario bloqueado' : 'Blocked slot')
-                              : item.type === 'personal'
-                              ? (lang === 'fr' ? 'Pause / Déjeuner' : lang === 'es' ? 'Pausa / Almuerzo' : 'Lunch break')
-                              : item.type === 'admin'
-                              ? (lang === 'fr' ? 'Gestion administrative' : lang === 'es' ? 'Gestión administrativa' : 'Admin work')
-                              : (lang === 'fr' ? 'Autre créneau' : lang === 'es' ? 'Otro horario' : 'Other slot')
+                              : (lang === 'fr' ? 'Créneau bloqué' : lang === 'es' ? 'Horario bloqueado' : 'Blocked slot')
                           }));
                         }}
-                        className={`flex items-center gap-1.5 p-2 rounded-xl text-xs font-bold transition-all border text-left ${
+                        className={`flex items-center gap-1.5 p-2.5 rounded-xl text-xs font-bold transition-all border text-left ${
                           isSelected ? `${item.color} shadow-xs` : 'bg-secondary/60 border-transparent text-gray-600 hover:bg-secondary'
                         }`}
                       >
-                        <ItemIcon size={14} className="shrink-0" />
+                        <ItemIcon size={16} className="shrink-0" />
                         <span className="truncate">{item.label}</span>
                       </button>
                     );
@@ -4702,23 +4721,11 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                       <span className="text-[10px] uppercase tracking-wider font-bold text-gray-400">
                         {lang === 'fr' ? 'Suggestions rapides :' : lang === 'es' ? 'Sugerencias rápidas:' : 'Quick suggestions:'}
                       </span>
-                      {(newEvent.eventType === 'blocked' ? (
-                        lang === 'fr' ? ['Indisponible', 'Formation', 'Congés / Vacances', 'Déplacement'] :
+                      {(
+                        lang === 'fr' ? ['Indisponible', 'Indispo / Bloqué', 'Formation', 'Congés / Vacances', 'Déplacement'] :
                         lang === 'es' ? ['No disponible', 'Formación', 'Vacaciones', 'Desplazamiento'] :
                         ['Unavailable', 'Training', 'Vacation', 'Travel']
-                      ) : newEvent.eventType === 'personal' ? (
-                        lang === 'fr' ? ['Pause déjeuner', 'Pause café', 'Rendez-vous personnel'] :
-                        lang === 'es' ? ['Pausa almuerzo', 'Pausa café', 'Cita personal'] :
-                        ['Lunch break', 'Coffee break', 'Personal appointment']
-                      ) : newEvent.eventType === 'admin' ? (
-                        lang === 'fr' ? ['Comptabilité / Factures', 'Dossiers médicaux', 'Télétransmission', 'Réunion'] :
-                        lang === 'es' ? ['Contabilidad / Facturas', 'Historiales médicos', 'Facturación', 'Reunión'] :
-                        ['Accounting / Invoices', 'Medical records', 'Billing', 'Meeting']
-                      ) : (
-                        lang === 'fr' ? ['Autre créneau', 'Entretien cabinet', 'Appel téléphonique'] :
-                        lang === 'es' ? ['Otro horario', 'Mantenimiento clínica', 'Llamada telefónica'] :
-                        ['Other slot', 'Office maintenance', 'Phone call']
-                      )).map(suggestion => (
+                      ).map(suggestion => (
                         <button
                           key={suggestion}
                           type="button"
@@ -4884,13 +4891,10 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                 <label className="text-[10px] uppercase tracking-wider font-bold text-gray-400 block mb-2">
                   {lang === 'fr' ? 'Type de créneau' : lang === 'es' ? 'Tipo de horario' : 'Slot Type'}
                 </label>
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                <div className="grid grid-cols-2 gap-2">
                   {[
                     { type: 'appointment' as EventType, label: lang === 'fr' ? 'RDV Patient' : lang === 'es' ? 'Cita Paciente' : 'Patient Appt', icon: CalendarIcon, color: 'border-emerald-500 bg-emerald-50 text-emerald-900' },
                     { type: 'blocked' as EventType, label: lang === 'fr' ? 'Bloqué / Indispo' : lang === 'es' ? 'Bloqueado / No disp.' : 'Blocked', icon: Lock, color: 'border-amber-500 bg-amber-50 text-amber-900' },
-                    { type: 'personal' as EventType, label: lang === 'fr' ? 'Pause / Perso' : lang === 'es' ? 'Pausa / Personal' : 'Break / Personal', icon: Coffee, color: 'border-violet-500 bg-violet-50 text-violet-900' },
-                    { type: 'admin' as EventType, label: lang === 'fr' ? 'Administratif' : lang === 'es' ? 'Administrativo' : 'Admin', icon: Briefcase, color: 'border-slate-500 bg-slate-50 text-slate-900' },
-                    { type: 'other' as EventType, label: lang === 'fr' ? 'Autre motif' : lang === 'es' ? 'Otro motivo' : 'Other', icon: Bookmark, color: 'border-orange-500 bg-orange-50 text-orange-900' },
                   ].map(item => {
                     const isSelected = (editingEvent.eventType || 'appointment') === item.type;
                     const ItemIcon = item.icon;
@@ -4904,11 +4908,11 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                             eventType: item.type,
                           }) : null);
                         }}
-                        className={`flex items-center gap-1.5 p-2 rounded-xl text-xs font-bold transition-all border text-left ${
+                        className={`flex items-center gap-1.5 p-2.5 rounded-xl text-xs font-bold transition-all border text-left ${
                           isSelected ? `${item.color} shadow-xs` : 'bg-secondary/60 border-transparent text-gray-600 hover:bg-secondary'
                         }`}
                       >
-                        <ItemIcon size={14} className="shrink-0" />
+                        <ItemIcon size={16} className="shrink-0" />
                         <span className="truncate">{item.label}</span>
                       </button>
                     );

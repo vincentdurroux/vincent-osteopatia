@@ -1,5 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
-import { Client, ClientNote, Invoice, CalendarEvent } from '../types';
+import { Client, ClientNote, Invoice, CalendarEvent, EventType } from '../types';
 
 // Default Supabase project credentials as robust production fallback
 const DEFAULT_SUPABASE_URL = 'https://lnlemynayesjduntoran.supabase.co';
@@ -415,7 +415,7 @@ export function mapInvoiceFromDB(i: any): Invoice {
 function prepareDescriptionWithMeta(description?: string, eventType?: EventType): string {
   const clean = (description || '').replace(/\[eventType:[a-z]+\]/gi, '').replace(/\[type:[a-z]+\]/gi, '').trim();
   if (eventType && eventType !== 'appointment') {
-    return clean ? `${clean}\n[eventType:${eventType}]` : `[eventType:${eventType}]`;
+    return clean ? `${clean}\n[eventType:blocked]` : `[eventType:blocked]`;
   }
   return clean;
 }
@@ -427,7 +427,8 @@ export function mapEventFromDB(e: any): CalendarEvent {
   if (!eventType && rawDesc) {
     const match = rawDesc.match(/\[eventType:([a-z]+)\]/i) || rawDesc.match(/\[type:([a-z]+)\]/i);
     if (match && match[1]) {
-      eventType = match[1].toLowerCase() as EventType;
+      const parsed = match[1].toLowerCase();
+      eventType = (parsed === 'appointment') ? 'appointment' : 'blocked';
     }
   }
 
@@ -439,48 +440,14 @@ export function mapEventFromDB(e: any): CalendarEvent {
       eventType = 'appointment';
     } else {
       const lowerSummary = summaryStr.toLowerCase().trim();
-      const lowerDesc = cleanDesc.toLowerCase();
-
-      if (
-        lowerSummary.includes('pause') ||
-        lowerSummary.includes('déjeuner') ||
-        lowerSummary.includes('dejeuner') ||
-        lowerSummary.includes('perso') ||
-        lowerSummary.includes('repas') ||
-        lowerSummary.includes('break') ||
-        lowerSummary.includes('lunch') ||
-        lowerDesc.includes('pause') ||
-        lowerDesc.includes('déjeuner')
-      ) {
-        eventType = 'personal';
-      } else if (
-        lowerSummary.includes('bloqué') ||
-        lowerSummary.includes('bloque') ||
-        lowerSummary.includes('indispo') ||
-        lowerSummary.includes('blocked') ||
-        lowerSummary.includes('fermé') ||
-        lowerSummary.includes('ferme') ||
-        lowerSummary.includes('absent')
-      ) {
-        eventType = 'blocked';
-      } else if (
-        lowerSummary.includes('admin') ||
-        lowerSummary.includes('compta') ||
-        lowerSummary.includes('gestion') ||
-        lowerSummary.includes('paperasse')
-      ) {
-        eventType = 'admin';
-      } else if (lowerSummary.includes('autre') || lowerSummary.includes('other')) {
-        eventType = 'other';
-      } else if (
-        summaryStr &&
-        !['rdv patient', 'rendez-vous', 'cita', 'appointment', 'sesión de osteopatía', "séance d'ostéopathie", 'osteopathy session'].includes(lowerSummary)
-      ) {
-        eventType = 'other';
-      } else {
+      if (!summaryStr || ['rdv patient', 'rendez-vous', 'cita', 'appointment', 'sesión de osteopatía', "séance d'ostéopathie", 'osteopathy session'].includes(lowerSummary)) {
         eventType = 'appointment';
+      } else {
+        eventType = 'blocked';
       }
     }
+  } else if (eventType !== 'appointment') {
+    eventType = 'blocked';
   }
 
   const hasClient = Boolean(e.clientId || e.client_id || e.clientid || e.patient_id || e.patientId);
