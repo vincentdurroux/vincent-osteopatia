@@ -412,16 +412,88 @@ export function mapInvoiceFromDB(i: any): Invoice {
   };
 }
 
+function prepareDescriptionWithMeta(description?: string, eventType?: EventType): string {
+  const clean = (description || '').replace(/\[eventType:[a-z]+\]/gi, '').replace(/\[type:[a-z]+\]/gi, '').trim();
+  if (eventType && eventType !== 'appointment') {
+    return clean ? `${clean}\n[eventType:${eventType}]` : `[eventType:${eventType}]`;
+  }
+  return clean;
+}
+
 export function mapEventFromDB(e: any): CalendarEvent {
+  const rawDesc = e.description || e.notes || e.note || '';
+  let eventType: EventType | undefined = e.eventType || e.event_type || e.type;
+
+  if (!eventType && rawDesc) {
+    const match = rawDesc.match(/\[eventType:([a-z]+)\]/i) || rawDesc.match(/\[type:([a-z]+)\]/i);
+    if (match && match[1]) {
+      eventType = match[1].toLowerCase() as EventType;
+    }
+  }
+
+  const cleanDesc = rawDesc.replace(/\[eventType:[a-z]+\]/gi, '').replace(/\[type:[a-z]+\]/gi, '').trim();
+  const summaryStr = e.summary || e.title || e.intitule || '';
+
+  if (!eventType) {
+    if (e.clientId || e.client_id || e.clientid || e.patient_id || e.patientId) {
+      eventType = 'appointment';
+    } else {
+      const lowerSummary = summaryStr.toLowerCase().trim();
+      const lowerDesc = cleanDesc.toLowerCase();
+
+      if (
+        lowerSummary.includes('pause') ||
+        lowerSummary.includes('déjeuner') ||
+        lowerSummary.includes('dejeuner') ||
+        lowerSummary.includes('perso') ||
+        lowerSummary.includes('repas') ||
+        lowerSummary.includes('break') ||
+        lowerSummary.includes('lunch') ||
+        lowerDesc.includes('pause') ||
+        lowerDesc.includes('déjeuner')
+      ) {
+        eventType = 'personal';
+      } else if (
+        lowerSummary.includes('bloqué') ||
+        lowerSummary.includes('bloque') ||
+        lowerSummary.includes('indispo') ||
+        lowerSummary.includes('blocked') ||
+        lowerSummary.includes('fermé') ||
+        lowerSummary.includes('ferme') ||
+        lowerSummary.includes('absent')
+      ) {
+        eventType = 'blocked';
+      } else if (
+        lowerSummary.includes('admin') ||
+        lowerSummary.includes('compta') ||
+        lowerSummary.includes('gestion') ||
+        lowerSummary.includes('paperasse')
+      ) {
+        eventType = 'admin';
+      } else if (lowerSummary.includes('autre') || lowerSummary.includes('other')) {
+        eventType = 'other';
+      } else if (
+        summaryStr &&
+        !['rdv patient', 'rendez-vous', 'cita', 'appointment', 'sesión de osteopatía', "séance d'ostéopathie", 'osteopathy session'].includes(lowerSummary)
+      ) {
+        eventType = 'other';
+      } else {
+        eventType = 'appointment';
+      }
+    }
+  }
+
+  const hasClient = Boolean(e.clientId || e.client_id || e.clientid || e.patient_id || e.patientId);
+
   return {
     id: String(e.id),
-    summary: e.summary || e.title || e.intitule || '',
-    description: e.description || e.notes || e.note || '',
+    summary: summaryStr,
+    description: cleanDesc,
     start: e.start || e.start_time || e.startTime || '',
     end: e.end || e.end_time || e.endTime || '',
-    clientId: e.clientId || e.client_id || e.clientid || e.patient_id || e.patientId || undefined,
-    clientName: e.clientName || e.client_name || e.clientname || e.patient_name || e.patientName || undefined,
-    eventType: e.eventType || e.event_type || e.type || (e.clientId || e.client_id ? 'appointment' : undefined),
+    clientId: hasClient ? (e.clientId || e.client_id || e.clientid || e.patient_id || e.patientId) : undefined,
+    clientName: hasClient ? (e.clientName || e.client_name || e.clientname || e.patient_name || e.patientName) : undefined,
+    eventType: eventType || 'appointment',
   };
 }
 
@@ -1650,6 +1722,15 @@ export const api = {
     });
 
     const enrichEvent = (ev: CalendarEvent): CalendarEvent => {
+      // Non-appointment events (e.g. Pause déjeuner, Bloqué, Admin, Autre) should never be linked to clients
+      if (ev.eventType && ev.eventType !== 'appointment') {
+        return {
+          ...ev,
+          clientId: undefined,
+          clientName: undefined,
+        };
+      }
+
       let resolvedClientId = ev.clientId;
       let resolvedClientName = ev.clientName;
 
@@ -1716,10 +1797,11 @@ export const api = {
 
     if (isSupabaseConfigured && supabase) {
       try {
+        const descWithMeta = prepareDescriptionWithMeta(newEvent.description, newEvent.eventType);
         const snakePayload: Record<string, any> = {
           id: newEvent.id,
           summary: newEvent.summary,
-          description: newEvent.description || '',
+          description: descWithMeta,
           start: newEvent.start,
           end: newEvent.end,
           client_id: (newEvent.clientId && newEvent.clientId.includes('-')) ? newEvent.clientId : null,
@@ -1731,7 +1813,7 @@ export const api = {
         const camelPayload: Record<string, any> = {
           id: newEvent.id,
           summary: newEvent.summary,
-          description: newEvent.description || '',
+          description: descWithMeta,
           start: newEvent.start,
           end: newEvent.end,
           clientId: (newEvent.clientId && newEvent.clientId.includes('-')) ? newEvent.clientId : null,
@@ -1742,16 +1824,18 @@ export const api = {
         const timePayload: Record<string, any> = {
           id: newEvent.id,
           summary: newEvent.summary,
-          description: newEvent.description || '',
+          description: descWithMeta,
           start_time: newEvent.start,
           end_time: newEvent.end,
           client_id: (newEvent.clientId && newEvent.clientId.includes('-')) ? newEvent.clientId : null,
           client_name: newEvent.clientName || '',
+          event_type: newEvent.eventType || 'appointment',
         };
 
         const minimalPayload: Record<string, any> = {
           id: newEvent.id,
           summary: newEvent.summary,
+          description: descWithMeta,
           start: newEvent.start,
           end: newEvent.end,
         };
@@ -1798,9 +1882,10 @@ export const api = {
   async updateLocalEvent(event: CalendarEvent): Promise<CalendarEvent> {
     if (isSupabaseConfigured && supabase) {
       try {
+        const descWithMeta = prepareDescriptionWithMeta(event.description, event.eventType);
         const snakePayload: Record<string, any> = {
           summary: event.summary,
-          description: event.description || '',
+          description: descWithMeta,
           start: event.start,
           end: event.end,
           client_id: (event.clientId && event.clientId.includes('-')) ? event.clientId : null,
@@ -1811,7 +1896,7 @@ export const api = {
 
         const camelPayload: Record<string, any> = {
           summary: event.summary,
-          description: event.description || '',
+          description: descWithMeta,
           start: event.start,
           end: event.end,
           clientId: (event.clientId && event.clientId.includes('-')) ? event.clientId : null,
@@ -1821,9 +1906,10 @@ export const api = {
 
         const timePayload: Record<string, any> = {
           summary: event.summary,
-          description: event.description || '',
+          description: descWithMeta,
           start_time: event.start,
           end_time: event.end,
+          event_type: event.eventType || 'appointment',
         };
 
         let result = await executeResilientUpdate('calendar_events', event.id, [snakePayload, camelPayload, timePayload]);
