@@ -46,6 +46,8 @@ export interface Invoice {
   noteId?: string;
 }
 
+export type EventType = 'appointment' | 'blocked' | 'admin' | 'personal' | 'other';
+
 export interface CalendarEvent {
   id: string;
   summary: string;
@@ -55,4 +57,5 @@ export interface CalendarEvent {
   clientId?: string;
   clientName?: string;
   isGoogleEvent?: boolean;
+  eventType?: EventType;
 }

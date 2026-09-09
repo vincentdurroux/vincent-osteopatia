@@ -421,6 +421,7 @@ export function mapEventFromDB(e: any): CalendarEvent {
     end: e.end || e.end_time || e.endTime || '',
     clientId: e.clientId || e.client_id || e.clientid || e.patient_id || e.patientId || undefined,
     clientName: e.clientName || e.client_name || e.clientname || e.patient_name || e.patientName || undefined,
+    eventType: e.eventType || e.event_type || e.type || (e.clientId || e.client_id ? 'appointment' : undefined),
   };
 }
 
@@ -1724,6 +1725,7 @@ export const api = {
           client_id: (newEvent.clientId && newEvent.clientId.includes('-')) ? newEvent.clientId : null,
           client_name: newEvent.clientName || '',
           patient_name: newEvent.clientName || '',
+          event_type: newEvent.eventType || 'appointment',
         };
 
         const camelPayload: Record<string, any> = {
@@ -1734,6 +1736,7 @@ export const api = {
           end: newEvent.end,
           clientId: (newEvent.clientId && newEvent.clientId.includes('-')) ? newEvent.clientId : null,
           clientName: newEvent.clientName || '',
+          eventType: newEvent.eventType || 'appointment',
         };
 
         const timePayload: Record<string, any> = {
@@ -1768,6 +1771,7 @@ export const api = {
             clientId: mapped.clientId || newEvent.clientId,
             clientName: mapped.clientName || newEvent.clientName,
             summary: mapped.summary || newEvent.summary,
+            eventType: mapped.eventType || newEvent.eventType,
           };
           const current = loadLocal('events', mockEvents);
           const idx = current.findIndex(e => e.id === finalEvent.id);
@@ -1802,6 +1806,7 @@ export const api = {
           client_id: (event.clientId && event.clientId.includes('-')) ? event.clientId : null,
           client_name: event.clientName || '',
           patient_name: event.clientName || '',
+          event_type: event.eventType || 'appointment',
         };
 
         const camelPayload: Record<string, any> = {
@@ -1811,6 +1816,7 @@ export const api = {
           end: event.end,
           clientId: (event.clientId && event.clientId.includes('-')) ? event.clientId : null,
           clientName: event.clientName || '',
+          eventType: event.eventType || 'appointment',
         };
 
         const timePayload: Record<string, any> = {
@@ -1834,6 +1840,7 @@ export const api = {
             clientId: mapped.clientId || event.clientId,
             clientName: mapped.clientName || event.clientName,
             summary: mapped.summary || event.summary,
+            eventType: mapped.eventType || event.eventType,
           };
           const current = loadLocal('events', mockEvents);
           const index = current.findIndex(e => e.id === event.id);

@@ -6,9 +6,9 @@ import {
   CreditCard, Shield, Clock, MapPin, Phone, Mail, FileCheck, Printer,
   ChevronRight, Pencil, ChevronLeft, LayoutGrid, List, ArrowRight,
   Copy, CheckCircle2, XCircle, AlertTriangle, Database, Server, UserPlus, User,
-  Tag, BadgePercent, Percent, Sparkles, IdCard, X, Columns3
+  Tag, BadgePercent, Percent, Sparkles, IdCard, X, Columns3, Lock, Coffee, Briefcase, Bookmark
 } from 'lucide-react';
-import { Client, ClientNote, Invoice, CalendarEvent } from '../../types';
+import { Client, ClientNote, Invoice, CalendarEvent, EventType } from '../../types';
 import { api, isSupabaseConfigured, SUPABASE_SQL_SETUP, capitalizeFirstName } from '../../lib/supabase';
 import SpineLogo from '../SpineLogo';
 import { useTranslation } from '../../App';
@@ -161,20 +161,29 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
     phone: '',
     email: '',
   });
-  const [newEvent, setNewEvent] = useState({
+  const [newEvent, setNewEvent] = useState<{
+    clientId: string;
+    title: string;
+    date: string;
+    startTime: string;
+    endTime: string;
+    description: string;
+    eventType: EventType;
+  }>({
     clientId: '',
     title: "Sesión de osteopatía",
     date: new Date().toISOString().split('T')[0],
     startTime: '10:00',
     endTime: '11:00',
     description: '',
+    eventType: 'appointment',
   });
 
   // Keep appointment title set to Spanish default if empty
   useEffect(() => {
     setNewEvent(prev => ({
       ...prev,
-      title: prev.title || "Sesión de osteopatía",
+      title: prev.title || (prev.eventType === 'appointment' ? "Sesión de osteopatía" : (lang === 'fr' ? "Créneau bloqué / Autre" : "Horario bloqueado")),
     }));
   }, [lang]);
 
@@ -188,6 +197,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
     description: string;
     clientId?: string;
     clientName?: string;
+    eventType?: EventType;
   } | null>(null);
 
   const [selectedInvoiceForPrint, setSelectedInvoiceForPrint] = useState<Invoice | null>(null);
@@ -749,15 +759,6 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
     }
   };
 
-  // Helper to dynamically get the most up-to-date patient name for an appointment
-  const getEventDisplayName = (ev: CalendarEvent): string => {
-    if (ev.clientId) {
-      const found = clients.find(c => c.id === ev.clientId);
-      if (found?.name) return found.name;
-    }
-    return ev.clientName || ev.summary || '';
-  };
-
   // Update Client Handler
   const handleUpdateClient = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -944,6 +945,53 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
     }
   };
 
+  // Event Helper Functions for display & styling
+  const getEventDisplayName = (ev: { clientName?: string; clientId?: string; summary?: string; eventType?: EventType }) => {
+    if (ev.eventType && ev.eventType !== 'appointment') {
+      return ev.summary || (lang === 'fr' ? 'Créneau bloqué / Autre' : lang === 'es' ? 'Horario bloqueado' : 'Blocked slot');
+    }
+    if (ev.clientId) {
+      const foundClient = clients.find(c => c.id === ev.clientId);
+      if (foundClient?.name) return foundClient.name;
+    }
+    if (ev.clientName && ev.clientName.trim() && ev.clientName !== 'Patient sans nom') {
+      return ev.clientName;
+    }
+    return ev.summary || (lang === 'fr' ? "Rendez-vous" : lang === 'es' ? "Cita" : "Appointment");
+  };
+
+  const getEventTypeLabel = (type?: EventType) => {
+    switch (type) {
+      case 'blocked':
+        return lang === 'fr' ? 'Créneau bloqué' : lang === 'es' ? 'Bloqueado' : 'Blocked slot';
+      case 'personal':
+        return lang === 'fr' ? 'Pause / Personnel' : lang === 'es' ? 'Pausa / Personal' : 'Break / Personal';
+      case 'admin':
+        return lang === 'fr' ? 'Administratif' : lang === 'es' ? 'Administrativo' : 'Admin';
+      case 'other':
+        return lang === 'fr' ? 'Autre créneau' : lang === 'es' ? 'Otro' : 'Other';
+      case 'appointment':
+      default:
+        return lang === 'fr' ? 'Rendez-vous' : lang === 'es' ? 'Cita' : 'Appointment';
+    }
+  };
+
+  const getEventTypeBadgeClass = (type?: EventType) => {
+    switch (type) {
+      case 'blocked':
+        return 'bg-amber-100 text-amber-900 border-amber-300/80';
+      case 'personal':
+        return 'bg-violet-100 text-violet-900 border-violet-300/80';
+      case 'admin':
+        return 'bg-slate-100 text-slate-800 border-slate-300/80';
+      case 'other':
+        return 'bg-orange-100 text-orange-900 border-orange-300/80';
+      case 'appointment':
+      default:
+        return 'bg-emerald-100 text-emerald-900 border-emerald-300/80';
+    }
+  };
+
   // Helper to open edit event modal
   const openEditEventModal = (event: CalendarEvent) => {
     try {
@@ -973,6 +1021,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
         description: event.description || '',
         clientId: event.clientId,
         clientName: event.clientName,
+        eventType: event.eventType || 'appointment',
       });
       setIsEditEventOpen(true);
     } catch (err) {
@@ -981,7 +1030,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
   };
 
   // Direct Redirection to Clinical Notes from an Appointment
-  const handleGoToNotes = (event: { clientId?: string; clientName?: string; summary?: string; start?: string; description?: string }) => {
+  const handleGoToNotes = (event: { clientId?: string; clientName?: string; summary?: string; start?: string; description?: string; eventType?: EventType }) => {
     // 1. Try finding client by explicit clientId
     let targetClient = event.clientId ? clients.find(c => c.id === event.clientId) : undefined;
 
@@ -1042,14 +1091,15 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
     }
   };
 
-  // Create new session/appointment on local / Supabase calendar
+  // Create new session/appointment or other slot on local / Supabase calendar
   const handleAddEvent = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    let finalClientId: string | undefined = newEvent.clientId || undefined;
+    const isOtherType = newEvent.eventType && newEvent.eventType !== 'appointment';
+    let finalClientId: string | undefined = isOtherType ? undefined : (newEvent.clientId || undefined);
     let finalClientName: string | undefined = undefined;
 
-    if (isInlineNewPatient) {
+    if (!isOtherType && isInlineNewPatient) {
       const cleanFirstName = capitalizeFirstName(inlinePatient.firstName);
       const cleanLastName = inlinePatient.lastName.trim().toUpperCase();
       if (!cleanLastName || !cleanFirstName) {
@@ -1077,7 +1127,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
         alert(lang === 'fr' ? "Erreur lors de la création du patient." : "Error creating patient.");
         return;
       }
-    } else if (newEvent.clientId) {
+    } else if (!isOtherType && newEvent.clientId) {
       const client = clients.find(c => c.id === newEvent.clientId);
       if (client) {
         finalClientName = client.name;
@@ -1085,14 +1135,20 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
     }
 
     let summary = newEvent.title.trim();
-    if (!summary || summary === "Sesión de osteopatía" || summary === "Séance d'ostéopathie" || summary === "Osteopathy session" || summary === getDefaultAppointmentTitle(lang)) {
-      if (finalClientName) {
-        summary = finalClientName;
-      } else {
-        summary = "Sesión de osteopatía";
+    if (isOtherType) {
+      if (!summary) {
+        summary = getEventTypeLabel(newEvent.eventType);
+      }
+    } else {
+      if (!summary || summary === "Sesión de osteopatía" || summary === "Séance d'ostéopathie" || summary === "Osteopathy session" || summary === getDefaultAppointmentTitle(lang)) {
+        if (finalClientName) {
+          summary = finalClientName;
+        } else {
+          summary = getDefaultAppointmentTitle(lang);
+        }
       }
     }
-    let description = newEvent.description?.trim() || "";
+    const description = newEvent.description?.trim() || "";
     
     const startIso = new Date(`${newEvent.date}T${newEvent.startTime}:00`).toISOString();
     const endIso = new Date(`${newEvent.date}T${newEvent.endTime}:00`).toISOString();
@@ -1103,8 +1159,9 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
         description,
         start: startIso,
         end: endIso,
-        clientId: finalClientId,
-        clientName: finalClientName,
+        clientId: isOtherType ? undefined : finalClientId,
+        clientName: isOtherType ? undefined : finalClientName,
+        eventType: newEvent.eventType || 'appointment',
       });
 
       setEvents(prev => [...prev, created].sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime()));
@@ -1118,10 +1175,11 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
         startTime: '10:00',
         endTime: '11:00',
         description: '',
+        eventType: 'appointment',
       });
     } catch (err: any) {
-      console.error('Failed to create appointment:', err);
-      alert(lang === 'fr' ? "Erreur lors de l'enregistrement du rendez-vous." : "Error creating appointment.");
+      console.error('Failed to create event:', err);
+      alert(lang === 'fr' ? "Erreur lors de l'enregistrement de l'événement." : "Error creating event.");
     }
   };
 
@@ -1130,11 +1188,12 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
     e.preventDefault();
     if (!editingEvent) return;
 
+    const isOtherType = editingEvent.eventType && editingEvent.eventType !== 'appointment';
     const startIso = new Date(`${editingEvent.date}T${editingEvent.startTime}:00`).toISOString();
     const endIso = new Date(`${editingEvent.date}T${editingEvent.endTime}:00`).toISOString();
 
     let clientName = editingEvent.clientName;
-    if (editingEvent.clientId) {
+    if (!isOtherType && editingEvent.clientId) {
       const foundClient = clients.find(c => c.id === editingEvent.clientId);
       if (foundClient) {
         clientName = foundClient.name;
@@ -1149,8 +1208,9 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
         description: editingEvent.description,
         start: startIso,
         end: endIso,
-        clientId: editingEvent.clientId || existing?.clientId,
-        clientName: clientName || existing?.clientName,
+        clientId: isOtherType ? undefined : (editingEvent.clientId || existing?.clientId),
+        clientName: isOtherType ? undefined : (clientName || existing?.clientName),
+        eventType: editingEvent.eventType || 'appointment',
       });
 
       setEvents(prev => prev.map(ev => ev.id === updated.id ? updated : ev).sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime()));
@@ -1158,7 +1218,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
       setEditingEvent(null);
     } catch (err: any) {
       console.error('Failed to update event:', err);
-      alert(lang === 'fr' ? "Erreur lors de la modification du rendez-vous." : "Error updating appointment.");
+      alert(lang === 'fr' ? "Erreur lors de la modification de l'événement." : "Error updating event.");
     }
   };
 
@@ -1560,57 +1620,90 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                         {lang === 'fr' ? "Consultations prévues aujourd'hui" : "Appointments scheduled today"} ({todayEvents.length})
                       </p>
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                        {todayEvents.map(event => (
-                          <div 
-                            key={event.id} 
-                            className="p-4 rounded-2xl bg-emerald-50/50 hover:bg-emerald-50/90 border border-emerald-200/60 transition-all flex flex-col justify-between gap-3 group"
-                          >
-                            <div className="flex items-start justify-between gap-3">
-                              <div className="flex items-start gap-3">
-                                <div className="w-8 h-8 rounded-xl bg-emerald-100 text-emerald-800 flex items-center justify-center shrink-0 mt-0.5 font-bold text-xs">
-                                  <Clock size={16} />
-                                </div>
-                                <div>
-                                  <h4 className="text-xs font-bold text-gray-900 leading-tight">
-                                    {getEventDisplayName(event)}
-                                  </h4>
-                                  <p className="text-[11px] text-emerald-800 font-semibold mt-1">
-                                    {new Date(event.start).toLocaleTimeString(lang === 'fr' ? 'fr-FR' : 'es-ES', { hour: '2-digit', minute: '2-digit' })} - {new Date(event.end).toLocaleTimeString(lang === 'fr' ? 'fr-FR' : 'es-ES', { hour: '2-digit', minute: '2-digit' })}
-                                  </p>
-                                  {event.description && (
-                                    <p className="text-[10px] text-gray-500 mt-1 line-clamp-1 italic">
-                                      {event.description}
+                        {todayEvents.map(event => {
+                          const isOther = event.eventType && event.eventType !== 'appointment';
+                          const startTime = new Date(event.start).toLocaleTimeString(lang === 'fr' ? 'fr-FR' : 'es-ES', { hour: '2-digit', minute: '2-digit' });
+                          const endTime = new Date(event.end).toLocaleTimeString(lang === 'fr' ? 'fr-FR' : 'es-ES', { hour: '2-digit', minute: '2-digit' });
+
+                          return (
+                            <div 
+                              key={event.id} 
+                              className={`p-4 rounded-2xl border transition-all flex flex-col justify-between gap-3 group ${
+                                isOther 
+                                  ? 'bg-amber-50/50 hover:bg-amber-50/80 border-amber-200/80' 
+                                  : 'bg-emerald-50/50 hover:bg-emerald-50/90 border-emerald-200/60'
+                              }`}
+                            >
+                              <div className="flex items-start justify-between gap-3">
+                                <div className="flex items-start gap-3">
+                                  <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 mt-0.5 font-bold text-xs ${
+                                    isOther ? 'bg-amber-100 text-amber-900' : 'bg-emerald-100 text-emerald-800'
+                                  }`}>
+                                    {isOther ? <Lock size={15} /> : <Clock size={16} />}
+                                  </div>
+                                  <div>
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                      <h4 className="text-xs font-bold text-gray-900 leading-tight">
+                                        {getEventDisplayName(event)}
+                                      </h4>
+                                      {isOther && (
+                                        <span className="text-[9px] font-bold px-1.5 py-0.2 rounded-md bg-amber-200/80 text-amber-900 border border-amber-300">
+                                          {getEventTypeLabel(event.eventType)}
+                                        </span>
+                                      )}
+                                    </div>
+                                    <p className={`text-[11px] font-semibold mt-1 ${isOther ? 'text-amber-800' : 'text-emerald-800'}`}>
+                                      {startTime} - {endTime}
                                     </p>
-                                  )}
+                                    {event.description && (
+                                      <p className="text-[10px] text-gray-500 mt-1 line-clamp-1 italic">
+                                        {event.description}
+                                      </p>
+                                    )}
+                                  </div>
                                 </div>
+
+                                <button
+                                  onClick={() => openEditEventModal(event)}
+                                  className={`p-1.5 rounded-lg transition-all opacity-70 group-hover:opacity-100 ${
+                                    isOther ? 'hover:bg-amber-200 text-amber-900' : 'hover:bg-emerald-200/60 text-emerald-800'
+                                  }`}
+                                  title={lang === 'fr' ? "Modifier l'événement" : "Edit event"}
+                                >
+                                  <Pencil size={13} />
+                                </button>
                               </div>
 
-                              <button
-                                onClick={() => openEditEventModal(event)}
-                                className="p-1.5 hover:bg-emerald-200/60 text-emerald-800 rounded-lg transition-all opacity-70 group-hover:opacity-100"
-                                title={lang === 'fr' ? "Modifier le rendez-vous" : "Edit appointment"}
-                              >
-                                <Pencil size={13} />
-                              </button>
+                              {/* Action bar on appointment card */}
+                              <div className={`pt-2 border-t flex items-center justify-between gap-2 ${
+                                isOther ? 'border-amber-200/60' : 'border-emerald-200/40'
+                              }`}>
+                                <span className="text-[10px] text-gray-500 font-medium truncate max-w-[150px]">
+                                  {getEventDisplayName(event)}
+                                </span>
+                                {isOther ? (
+                                  <button
+                                    onClick={() => openEditEventModal(event)}
+                                    className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold transition-all shadow-xs"
+                                  >
+                                    <Pencil size={12} />
+                                    <span>{lang === 'fr' ? "Modifier" : "Edit"}</span>
+                                  </button>
+                                ) : (
+                                  <button
+                                    onClick={() => handleGoToNotes(event)}
+                                    className="flex items-center gap-1.5 px-3 py-1.5 bg-primary hover:bg-primary/95 text-white rounded-xl text-xs font-bold transition-all shadow-xs group/btn"
+                                    title={lang === 'fr' ? "Ouvrir la fiche médicale et rédiger les notes cliniques" : "Open medical record and write clinical notes"}
+                                  >
+                                    <FileCheck size={13} />
+                                    <span>{lang === 'fr' ? "Prise de notes" : lang === 'es' ? "Tomar notas" : "Take Notes"}</span>
+                                    <ArrowRight size={12} className="group-hover/btn:translate-x-0.5 transition-transform" />
+                                  </button>
+                                )}
+                              </div>
                             </div>
-
-                            {/* Action bar on appointment card */}
-                            <div className="pt-2 border-t border-emerald-200/40 flex items-center justify-between gap-2">
-                              <span className="text-[10px] text-gray-500 font-medium truncate max-w-[150px]">
-                                {getEventDisplayName(event)}
-                              </span>
-                              <button
-                                onClick={() => handleGoToNotes(event)}
-                                className="flex items-center gap-1.5 px-3 py-1.5 bg-primary hover:bg-primary/95 text-white rounded-xl text-xs font-bold transition-all shadow-xs group/btn"
-                                title={lang === 'fr' ? "Ouvrir la fiche médicale et rédiger les notes cliniques" : "Open medical record and write clinical notes"}
-                              >
-                                <FileCheck size={13} />
-                                <span>{lang === 'fr' ? "Prise de notes" : lang === 'es' ? "Tomar notas" : "Take Notes"}</span>
-                                <ArrowRight size={12} className="group-hover/btn:translate-x-0.5 transition-transform" />
-                              </button>
-                            </div>
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     </div>
                   ) : (
@@ -1645,51 +1738,67 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                             {lang === 'fr' ? "Prochaines consultations à venir" : "Upcoming appointments"}
                           </p>
                           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                            {upcomingEvents.map(event => (
-                              <div
-                                key={event.id}
-                                className="p-3.5 rounded-2xl bg-white hover:bg-[#fafafa] border border-black/5 hover:border-primary/20 transition-all flex flex-col justify-between gap-2 shadow-2xs group"
-                              >
-                                <div>
-                                  <div className="flex items-center justify-between text-[10px] text-gray-400 font-bold mb-1">
-                                    <span>
-                                      {new Date(event.start).toLocaleDateString(lang === 'fr' ? 'fr-FR' : 'es-ES', { weekday: 'short', day: 'numeric', month: 'short' })}
-                                    </span>
-                                    <span className="text-primary font-bold">
-                                      {new Date(event.start).toLocaleTimeString(lang === 'fr' ? 'fr-FR' : 'es-ES', { hour: '2-digit', minute: '2-digit' })}
-                                    </span>
+                            {upcomingEvents.map(event => {
+                              const isOther = event.eventType && event.eventType !== 'appointment';
+                              return (
+                                <div
+                                  key={event.id}
+                                  className={`p-3.5 rounded-2xl border transition-all flex flex-col justify-between gap-2 shadow-2xs group ${
+                                    isOther 
+                                      ? 'bg-amber-50/40 hover:bg-amber-50/80 border-amber-200/70' 
+                                      : 'bg-white hover:bg-[#fafafa] border-black/5 hover:border-primary/20'
+                                  }`}
+                                >
+                                  <div>
+                                    <div className="flex items-center justify-between text-[10px] text-gray-400 font-bold mb-1">
+                                      <span>
+                                        {new Date(event.start).toLocaleDateString(lang === 'fr' ? 'fr-FR' : 'es-ES', { weekday: 'short', day: 'numeric', month: 'short' })}
+                                      </span>
+                                      <span className={isOther ? "text-amber-800 font-bold" : "text-primary font-bold"}>
+                                        {new Date(event.start).toLocaleTimeString(lang === 'fr' ? 'fr-FR' : 'es-ES', { hour: '2-digit', minute: '2-digit' })}
+                                      </span>
+                                    </div>
+                                    <div className="flex items-center gap-1.5">
+                                      <h5 className="text-xs font-bold text-gray-800 line-clamp-1">
+                                        {getEventDisplayName(event)}
+                                      </h5>
+                                      {isOther && (
+                                        <span className="text-[8px] font-bold px-1 rounded bg-amber-100 text-amber-800 border border-amber-300">
+                                          {getEventTypeLabel(event.eventType)}
+                                        </span>
+                                      )}
+                                    </div>
+                                    {event.clientName && event.summary && event.summary !== event.clientName && 
+                                     event.summary !== "Sesión de osteopatía" && event.summary !== "Séance d'ostéopathie" && 
+                                     event.summary !== "Osteopathy session" && (
+                                      <p className="text-[10px] text-gray-400 mt-0.5 line-clamp-1">
+                                        {event.summary}
+                                      </p>
+                                    )}
                                   </div>
-                                  <h5 className="text-xs font-bold text-gray-800 line-clamp-1">
-                                    {getEventDisplayName(event)}
-                                  </h5>
-                                  {event.clientName && event.summary && event.summary !== event.clientName && 
-                                   event.summary !== "Sesión de osteopatía" && event.summary !== "Séance d'ostéopathie" && 
-                                   event.summary !== "Osteopathy session" && (
-                                    <p className="text-[10px] text-gray-400 mt-0.5 line-clamp-1">
-                                      {event.summary}
-                                    </p>
-                                  )}
-                                </div>
 
-                                <div className="flex items-center justify-between gap-2 pt-2 border-t border-black/5">
-                                  <button
-                                    onClick={() => openEditEventModal(event)}
-                                    className="text-[11px] text-gray-500 hover:text-primary transition-colors flex items-center gap-1 font-medium"
-                                  >
-                                    <Pencil size={11} />
-                                    <span>{lang === 'fr' ? "Détails" : "Details"}</span>
-                                  </button>
-                                  <button
-                                    onClick={() => handleGoToNotes(event)}
-                                    className="flex items-center gap-1 px-2.5 py-1 bg-primary/10 hover:bg-primary text-primary hover:text-white rounded-lg text-[11px] font-bold transition-all"
-                                    title={lang === 'fr' ? "Ouvrir la fiche et prendre des notes" : "Open file and take notes"}
-                                  >
-                                    <FileCheck size={11} />
-                                    <span>{lang === 'fr' ? "Notes" : "Notes"}</span>
-                                  </button>
+                                  <div className="flex items-center justify-between gap-2 pt-2 border-t border-black/5">
+                                    <button
+                                      onClick={() => openEditEventModal(event)}
+                                      className="text-[11px] text-gray-500 hover:text-primary transition-colors flex items-center gap-1 font-medium"
+                                    >
+                                      <Pencil size={11} />
+                                      <span>{lang === 'fr' ? "Détails" : "Details"}</span>
+                                    </button>
+                                    {!isOther && (
+                                      <button
+                                        onClick={() => handleGoToNotes(event)}
+                                        className="flex items-center gap-1 px-2.5 py-1 bg-primary/10 hover:bg-primary text-primary hover:text-white rounded-lg text-[11px] font-bold transition-all"
+                                        title={lang === 'fr' ? "Ouvrir la fiche et prendre des notes" : "Open file and take notes"}
+                                      >
+                                        <FileCheck size={11} />
+                                        <span>{lang === 'fr' ? "Notes" : "Notes"}</span>
+                                      </button>
+                                    )}
+                                  </div>
                                 </div>
-                              </div>
-                            ))}
+                              );
+                            })}
                           </div>
                         </div>
                       )}
@@ -2743,44 +2852,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                 </p>
               </div>
 
-              <div className="flex flex-wrap items-center gap-2.5 w-full lg:w-auto justify-between lg:justify-end">
-                {/* View Switcher: Month / Week / Day */}
-                <div className="flex items-center bg-[#f4f4ec] p-1 rounded-2xl border border-black/5">
-                  <button
-                    onClick={() => setCalendarViewMode('month')}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
-                      calendarViewMode === 'month' 
-                        ? 'bg-white text-primary shadow-sm' 
-                        : 'text-gray-600 hover:text-gray-900'
-                    }`}
-                  >
-                    <CalendarIcon size={14} />
-                    <span>{lang === 'fr' ? "Mois" : lang === 'es' ? "Mes" : "Month"}</span>
-                  </button>
-                  <button
-                    onClick={() => setCalendarViewMode('week')}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
-                      calendarViewMode === 'week' 
-                        ? 'bg-white text-primary shadow-sm' 
-                        : 'text-gray-600 hover:text-gray-900'
-                    }`}
-                  >
-                    <Columns3 size={14} />
-                    <span>{lang === 'fr' ? "Semaine" : lang === 'es' ? "Semana" : "Week"}</span>
-                  </button>
-                  <button
-                    onClick={() => setCalendarViewMode('day')}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
-                      calendarViewMode === 'day' 
-                        ? 'bg-white text-primary shadow-sm' 
-                        : 'text-gray-600 hover:text-gray-900'
-                    }`}
-                  >
-                    <Clock size={14} />
-                    <span>{lang === 'fr' ? "Jour" : lang === 'es' ? "Día" : "Day"}</span>
-                  </button>
-                </div>
-
+              <div className="flex flex-wrap items-center gap-2.5 w-full sm:w-auto justify-end">
                 <button 
                   onClick={loadData}
                   disabled={isSyncing}
@@ -2947,6 +3019,43 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                           title={lang === 'fr' ? "Suivant" : "Next"}
                         >
                           <ChevronRight size={16} />
+                        </button>
+                      </div>
+
+                      {/* View Switcher: Month / Week / Day */}
+                      <div className="flex items-center bg-[#f4f4ec] p-1 rounded-xl border border-black/5">
+                        <button
+                          onClick={() => setCalendarViewMode('month')}
+                          className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold transition-all ${
+                            calendarViewMode === 'month' 
+                              ? 'bg-white text-primary shadow-xs' 
+                              : 'text-gray-600 hover:text-gray-900'
+                          }`}
+                        >
+                          <CalendarIcon size={14} />
+                          <span>{lang === 'fr' ? "Mois" : lang === 'es' ? "Mes" : "Month"}</span>
+                        </button>
+                        <button
+                          onClick={() => setCalendarViewMode('week')}
+                          className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold transition-all ${
+                            calendarViewMode === 'week' 
+                              ? 'bg-white text-primary shadow-xs' 
+                              : 'text-gray-600 hover:text-gray-900'
+                          }`}
+                        >
+                          <Columns3 size={14} />
+                          <span>{lang === 'fr' ? "Semaine" : lang === 'es' ? "Semana" : "Week"}</span>
+                        </button>
+                        <button
+                          onClick={() => setCalendarViewMode('day')}
+                          className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold transition-all ${
+                            calendarViewMode === 'day' 
+                              ? 'bg-white text-primary shadow-xs' 
+                              : 'text-gray-600 hover:text-gray-900'
+                          }`}
+                        >
+                          <Clock size={14} />
+                          <span>{lang === 'fr' ? "Jour" : lang === 'es' ? "Día" : "Day"}</span>
                         </button>
                       </div>
                     </div>
@@ -4307,6 +4416,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                   }
 
                   return dayEvents.map((ev) => {
+                    const isOther = ev.eventType && ev.eventType !== 'appointment';
                     const startDate = new Date(ev.start);
                     const endDate = new Date(ev.end);
                     const startTime = startDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -4315,15 +4425,28 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                     return (
                       <div
                         key={ev.id}
-                        className="p-4 rounded-2xl bg-[#fafafa] hover:bg-white border border-black/5 hover:border-primary/20 shadow-2xs transition-all space-y-2.5 group"
+                        className={`p-4 rounded-2xl border shadow-2xs transition-all space-y-2.5 group ${
+                          isOther 
+                            ? 'bg-amber-50/40 hover:bg-amber-50/80 border-amber-200/70' 
+                            : 'bg-[#fafafa] hover:bg-white border-black/5 hover:border-primary/20'
+                        }`}
                       >
                         <div className="flex items-start justify-between gap-3">
-                          <div className="flex items-center gap-2">
-                            <span className="px-2.5 py-1 bg-emerald-100 text-emerald-800 text-xs font-bold rounded-lg border border-emerald-200/80 shrink-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className={`px-2.5 py-1 text-xs font-bold rounded-lg border shrink-0 ${
+                              isOther ? 'bg-amber-100 text-amber-900 border-amber-300' : 'bg-emerald-100 text-emerald-800 border-emerald-200/80'
+                            }`}>
                               {startTime} - {endTime}
                             </span>
                             <div className="flex flex-col">
-                              <span className="text-xs font-bold text-gray-900">{getEventDisplayName(ev)}</span>
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-xs font-bold text-gray-900">{getEventDisplayName(ev)}</span>
+                                {isOther && (
+                                  <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-amber-200/80 text-amber-900 border border-amber-300">
+                                    {getEventTypeLabel(ev.eventType)}
+                                  </span>
+                                )}
+                              </div>
                               {ev.summary && ev.summary !== getEventDisplayName(ev) && (
                                 <span className="text-xs font-medium text-gray-600 group-hover:text-primary transition-colors">
                                   {ev.summary}
@@ -4333,16 +4456,18 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                           </div>
 
                           <div className="flex items-center gap-1 shrink-0">
-                            <button
-                              onClick={() => {
-                                handleGoToNotes(ev);
-                              }}
-                              className="px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 rounded-lg text-xs font-bold transition-all border border-emerald-200 flex items-center gap-1"
-                              title={lang === 'fr' ? 'Fiche patient & Notes' : 'Patient Notes'}
-                            >
-                              <FileText size={12} />
-                              <span className="hidden sm:inline">{lang === 'fr' ? 'Fiche' : 'File'}</span>
-                            </button>
+                            {!isOther && (
+                              <button
+                                onClick={() => {
+                                  handleGoToNotes(ev);
+                                }}
+                                className="px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 rounded-lg text-xs font-bold transition-all border border-emerald-200 flex items-center gap-1"
+                                title={lang === 'fr' ? 'Fiche patient & Notes' : 'Patient Notes'}
+                              >
+                                <FileText size={12} />
+                                <span className="hidden sm:inline">{lang === 'fr' ? 'Fiche' : 'File'}</span>
+                              </button>
+                            )}
                             <button
                               onClick={() => openEditEventModal(ev)}
                               className="p-1.5 text-gray-500 hover:text-primary hover:bg-primary/5 rounded-lg transition-all"
@@ -4400,122 +4525,225 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="relative w-full max-w-md bg-white rounded-3xl shadow-2xl p-8 z-10 border border-black/5"
+              className="relative w-full max-w-lg bg-white rounded-3xl shadow-2xl p-6 sm:p-8 z-10 border border-black/5 max-h-[90vh] overflow-y-auto"
             >
-              <div className="flex items-center justify-between mb-6">
+              <div className="flex items-center justify-between mb-5">
                 <div>
                   <h3 className="text-xl font-serif font-bold text-primary">
-                    {lang === 'fr' ? 'Nouveau Rendez-vous' : lang === 'es' ? 'Nueva Cita' : 'New Appointment'}
+                    {newEvent.eventType === 'appointment'
+                      ? (lang === 'fr' ? 'Nouveau Rendez-vous' : lang === 'es' ? 'Nueva Cita' : 'New Appointment')
+                      : (lang === 'fr' ? 'Nouveau Créneau (Autre / Bloqué)' : lang === 'es' ? 'Nuevo Horario / Bloqueo' : 'New Time Slot / Blocked')}
                   </h3>
                   <p className="text-xs text-gray-500 mt-0.5">
-                    {lang === 'fr' ? 'Enregistrement sur votre agenda' : 'Saved to your calendar'}
+                    {lang === 'fr' ? 'Planifier sur votre agenda' : lang === 'es' ? 'Planificar en su agenda' : 'Schedule on your calendar'}
                   </p>
                 </div>
-                <div className="w-8 h-8 rounded-full bg-emerald-100 text-emerald-800 flex items-center justify-center">
-                  <CalendarIcon size={16} />
+                <div className={`w-9 h-9 rounded-2xl flex items-center justify-center ${
+                  newEvent.eventType === 'appointment' 
+                    ? 'bg-emerald-100 text-emerald-800' 
+                    : newEvent.eventType === 'blocked'
+                    ? 'bg-amber-100 text-amber-900'
+                    : newEvent.eventType === 'personal'
+                    ? 'bg-violet-100 text-violet-900'
+                    : newEvent.eventType === 'admin'
+                    ? 'bg-slate-100 text-slate-800'
+                    : 'bg-orange-100 text-orange-900'
+                }`}>
+                  {newEvent.eventType === 'appointment' ? <CalendarIcon size={18} /> :
+                   newEvent.eventType === 'blocked' ? <Lock size={18} /> :
+                   newEvent.eventType === 'personal' ? <Coffee size={18} /> :
+                   newEvent.eventType === 'admin' ? <Briefcase size={18} /> : <Bookmark size={18} />}
+                </div>
+              </div>
+
+              {/* Event Type Selector */}
+              <div className="mb-5">
+                <label className="text-[10px] uppercase tracking-wider font-bold text-gray-400 block mb-2">
+                  {lang === 'fr' ? 'Type de créneau' : lang === 'es' ? 'Tipo de horario' : 'Slot Type'}
+                </label>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                  {[
+                    { type: 'appointment' as EventType, label: lang === 'fr' ? 'RDV Patient' : lang === 'es' ? 'Cita Paciente' : 'Patient Appt', icon: CalendarIcon, color: 'border-emerald-500 bg-emerald-50 text-emerald-900' },
+                    { type: 'blocked' as EventType, label: lang === 'fr' ? 'Bloqué / Indispo' : lang === 'es' ? 'Bloqueado / No disp.' : 'Blocked', icon: Lock, color: 'border-amber-500 bg-amber-50 text-amber-900' },
+                    { type: 'personal' as EventType, label: lang === 'fr' ? 'Pause / Perso' : lang === 'es' ? 'Pausa / Personal' : 'Break / Personal', icon: Coffee, color: 'border-violet-500 bg-violet-50 text-violet-900' },
+                    { type: 'admin' as EventType, label: lang === 'fr' ? 'Administratif' : lang === 'es' ? 'Administrativo' : 'Admin', icon: Briefcase, color: 'border-slate-500 bg-slate-50 text-slate-900' },
+                    { type: 'other' as EventType, label: lang === 'fr' ? 'Autre motif' : lang === 'es' ? 'Otro motivo' : 'Other', icon: Bookmark, color: 'border-orange-500 bg-orange-50 text-orange-900' },
+                  ].map(item => {
+                    const isSelected = (newEvent.eventType || 'appointment') === item.type;
+                    const ItemIcon = item.icon;
+                    return (
+                      <button
+                        key={item.type}
+                        type="button"
+                        onClick={() => {
+                          setNewEvent(prev => ({
+                            ...prev,
+                            eventType: item.type,
+                            title: item.type === 'appointment' 
+                              ? (prev.clientId ? (clients.find(c => c.id === prev.clientId)?.name || getDefaultAppointmentTitle(lang)) : getDefaultAppointmentTitle(lang))
+                              : item.type === 'blocked'
+                              ? (lang === 'fr' ? 'Créneau bloqué' : lang === 'es' ? 'Horario bloqueado' : 'Blocked slot')
+                              : item.type === 'personal'
+                              ? (lang === 'fr' ? 'Pause / Déjeuner' : lang === 'es' ? 'Pausa / Almuerzo' : 'Lunch break')
+                              : item.type === 'admin'
+                              ? (lang === 'fr' ? 'Gestion administrative' : lang === 'es' ? 'Gestión administrativa' : 'Admin work')
+                              : (lang === 'fr' ? 'Autre créneau' : lang === 'es' ? 'Otro horario' : 'Other slot')
+                          }));
+                        }}
+                        className={`flex items-center gap-1.5 p-2 rounded-xl text-xs font-bold transition-all border text-left ${
+                          isSelected ? `${item.color} shadow-xs` : 'bg-secondary/60 border-transparent text-gray-600 hover:bg-secondary'
+                        }`}
+                      >
+                        <ItemIcon size={14} className="shrink-0" />
+                        <span className="truncate">{item.label}</span>
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
               
               <form onSubmit={handleAddEvent} className="space-y-4">
-                <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <label className="text-[10px] uppercase tracking-wider font-bold text-gray-400 block">
-                      {lang === 'fr' ? 'Patient associé' : 'Associated Patient'}
-                    </label>
-                    <button
-                      type="button"
-                      onClick={() => setIsInlineNewPatient(!isInlineNewPatient)}
-                      className="text-xs font-bold text-primary hover:underline flex items-center gap-1"
-                    >
-                      <UserPlus size={13} />
-                      <span>
-                        {isInlineNewPatient
-                          ? (lang === 'fr' ? 'Choisir patient existant' : 'Select existing patient')
-                          : (lang === 'fr' ? '+ Nouveau patient' : '+ New patient')}
-                      </span>
-                    </button>
-                  </div>
-
-                  {isInlineNewPatient ? (
-                    <div className="p-3 bg-primary/5 rounded-2xl border border-primary/20 space-y-2.5">
-                      <p className="text-[11px] font-bold text-primary flex items-center gap-1.5">
+                {/* Patient selection only for appointment */}
+                {(!newEvent.eventType || newEvent.eventType === 'appointment') ? (
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="text-[10px] uppercase tracking-wider font-bold text-gray-400 block">
+                        {lang === 'fr' ? 'Patient associé' : lang === 'es' ? 'Paciente asociado' : 'Associated Patient'}
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => setIsInlineNewPatient(!isInlineNewPatient)}
+                        className="text-xs font-bold text-primary hover:underline flex items-center gap-1"
+                      >
                         <UserPlus size={13} />
-                        <span>{lang === 'fr' ? 'Nouveau patient (création automatique)' : 'New patient (auto-created)'}</span>
-                      </p>
-                      <div className="grid grid-cols-2 gap-2">
-                        <input
-                          type="text"
-                          required
-                          placeholder={lang === 'fr' ? 'Nom *' : 'Last Name *'}
-                          value={inlinePatient.lastName}
-                          onChange={(e) => setInlinePatient(prev => ({ ...prev, lastName: e.target.value.toUpperCase() }))}
-                          className="w-full p-2 bg-white rounded-xl border border-black/10 text-xs focus:outline-none focus:ring-1 focus:ring-primary uppercase"
-                        />
-                        <input
-                          type="text"
-                          required
-                          placeholder={lang === 'fr' ? 'Prénom *' : 'First Name *'}
-                          value={inlinePatient.firstName}
-                          onChange={(e) => setInlinePatient(prev => ({ ...prev, firstName: capitalizeFirstName(e.target.value) }))}
-                          className="w-full p-2 bg-white rounded-xl border border-black/10 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
-                        />
-                      </div>
-                      <div className="grid grid-cols-2 gap-2">
-                        <input
-                          type="tel"
-                          placeholder={lang === 'fr' ? 'Téléphone' : 'Phone'}
-                          value={inlinePatient.phone}
-                          onChange={(e) => setInlinePatient(prev => ({ ...prev, phone: e.target.value }))}
-                          className="w-full p-2 bg-white rounded-xl border border-black/10 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
-                        />
-                        <input
-                          type="email"
-                          placeholder={lang === 'fr' ? 'Email' : 'Email'}
-                          value={inlinePatient.email}
-                          onChange={(e) => setInlinePatient(prev => ({ ...prev, email: e.target.value }))}
-                          className="w-full p-2 bg-white rounded-xl border border-black/10 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
-                        />
-                      </div>
-                      <div>
-                        <input
-                          type="text"
-                          placeholder={lang === 'fr' ? 'DNI / NIE (optionnel)' : lang === 'es' ? 'DNI / NIE (opcional)' : 'DNI / NIE (optional)'}
-                          value={inlinePatient.dni}
-                          onChange={(e) => setInlinePatient(prev => ({ ...prev, dni: e.target.value.toUpperCase() }))}
-                          className="w-full p-2 bg-white rounded-xl border border-black/10 text-xs focus:outline-none focus:ring-1 focus:ring-primary uppercase placeholder:normal-case font-mono"
-                        />
-                      </div>
+                        <span>
+                          {isInlineNewPatient
+                            ? (lang === 'fr' ? 'Choisir patient existant' : lang === 'es' ? 'Elegir paciente existente' : 'Select existing patient')
+                            : (lang === 'fr' ? '+ Nouveau patient' : lang === 'es' ? '+ Nuevo paciente' : '+ New patient')}
+                        </span>
+                      </button>
                     </div>
-                  ) : (
-                    <select
-                      value={newEvent.clientId}
-                      onChange={(e) => {
-                        const selectedId = e.target.value;
-                        const client = clients.find(c => c.id === selectedId);
-                        setNewEvent(prev => ({
-                          ...prev,
-                          clientId: selectedId,
-                          title: client ? client.name : getDefaultAppointmentTitle(lang)
-                        }));
-                      }}
-                      className="w-full p-2.5 bg-secondary rounded-xl border border-black/5 text-xs focus:outline-none focus:ring-1 focus:ring-primary focus:bg-white transition-all"
-                    >
-                      <option value="">-- Aucun ou patient non répertorié --</option>
-                      {clients.map(c => (
-                        <option key={c.id} value={c.id}>{c.name} ({c.phone || c.email})</option>
+
+                    {isInlineNewPatient ? (
+                      <div className="p-3 bg-primary/5 rounded-2xl border border-primary/20 space-y-2.5">
+                        <p className="text-[11px] font-bold text-primary flex items-center gap-1.5">
+                          <UserPlus size={13} />
+                          <span>{lang === 'fr' ? 'Nouveau patient (création automatique)' : lang === 'es' ? 'Nuevo paciente (creación automática)' : 'New patient (auto-created)'}</span>
+                        </p>
+                        <div className="grid grid-cols-2 gap-2">
+                          <input
+                            type="text"
+                            required
+                            placeholder={lang === 'fr' ? 'Nom *' : lang === 'es' ? 'Apellidos *' : 'Last Name *'}
+                            value={inlinePatient.lastName}
+                            onChange={(e) => setInlinePatient(prev => ({ ...prev, lastName: e.target.value.toUpperCase() }))}
+                            className="w-full p-2 bg-white rounded-xl border border-black/10 text-xs focus:outline-none focus:ring-1 focus:ring-primary uppercase"
+                          />
+                          <input
+                            type="text"
+                            required
+                            placeholder={lang === 'fr' ? 'Prénom *' : lang === 'es' ? 'Nombre *' : 'First Name *'}
+                            value={inlinePatient.firstName}
+                            onChange={(e) => setInlinePatient(prev => ({ ...prev, firstName: capitalizeFirstName(e.target.value) }))}
+                            className="w-full p-2 bg-white rounded-xl border border-black/10 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
+                          />
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                          <input
+                            type="tel"
+                            placeholder={lang === 'fr' ? 'Téléphone' : lang === 'es' ? 'Teléfono' : 'Phone'}
+                            value={inlinePatient.phone}
+                            onChange={(e) => setInlinePatient(prev => ({ ...prev, phone: e.target.value }))}
+                            className="w-full p-2 bg-white rounded-xl border border-black/10 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
+                          />
+                          <input
+                            type="email"
+                            placeholder={lang === 'fr' ? 'Email' : lang === 'es' ? 'Correo' : 'Email'}
+                            value={inlinePatient.email}
+                            onChange={(e) => setInlinePatient(prev => ({ ...prev, email: e.target.value }))}
+                            className="w-full p-2 bg-white rounded-xl border border-black/10 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
+                          />
+                        </div>
+                        <div>
+                          <input
+                            type="text"
+                            placeholder={lang === 'fr' ? 'DNI / NIE (optionnel)' : lang === 'es' ? 'DNI / NIE (opcional)' : 'DNI / NIE (optional)'}
+                            value={inlinePatient.dni}
+                            onChange={(e) => setInlinePatient(prev => ({ ...prev, dni: e.target.value.toUpperCase() }))}
+                            className="w-full p-2 bg-white rounded-xl border border-black/10 text-xs focus:outline-none focus:ring-1 focus:ring-primary uppercase placeholder:normal-case font-mono"
+                          />
+                        </div>
+                      </div>
+                    ) : (
+                      <select
+                        value={newEvent.clientId}
+                        onChange={(e) => {
+                          const selectedId = e.target.value;
+                          const client = clients.find(c => c.id === selectedId);
+                          setNewEvent(prev => ({
+                            ...prev,
+                            clientId: selectedId,
+                            title: client ? client.name : getDefaultAppointmentTitle(lang)
+                          }));
+                        }}
+                        className="w-full p-2.5 bg-secondary rounded-xl border border-black/5 text-xs focus:outline-none focus:ring-1 focus:ring-primary focus:bg-white transition-all"
+                      >
+                        <option value="">-- {lang === 'fr' ? 'Aucun ou patient non répertorié' : lang === 'es' ? 'Ninguno o no registrado' : 'None or unlisted'} --</option>
+                        {clients.map(c => (
+                          <option key={c.id} value={c.id}>{c.name} ({c.phone || c.email || 'N/A'})</option>
+                        ))}
+                      </select>
+                    )}
+                  </div>
+                ) : (
+                  <div>
+                    {/* Quick suggestion tags for non-RDV types */}
+                    <div className="flex items-center gap-1.5 flex-wrap mb-1">
+                      <span className="text-[10px] uppercase tracking-wider font-bold text-gray-400">
+                        {lang === 'fr' ? 'Suggestions rapides :' : lang === 'es' ? 'Sugerencias rápidas:' : 'Quick suggestions:'}
+                      </span>
+                      {(newEvent.eventType === 'blocked' ? (
+                        lang === 'fr' ? ['Indisponible', 'Formation', 'Congés / Vacances', 'Déplacement'] :
+                        lang === 'es' ? ['No disponible', 'Formación', 'Vacaciones', 'Desplazamiento'] :
+                        ['Unavailable', 'Training', 'Vacation', 'Travel']
+                      ) : newEvent.eventType === 'personal' ? (
+                        lang === 'fr' ? ['Pause déjeuner', 'Pause café', 'Rendez-vous personnel'] :
+                        lang === 'es' ? ['Pausa almuerzo', 'Pausa café', 'Cita personal'] :
+                        ['Lunch break', 'Coffee break', 'Personal appointment']
+                      ) : newEvent.eventType === 'admin' ? (
+                        lang === 'fr' ? ['Comptabilité / Factures', 'Dossiers médicaux', 'Télétransmission', 'Réunion'] :
+                        lang === 'es' ? ['Contabilidad / Facturas', 'Historiales médicos', 'Facturación', 'Reunión'] :
+                        ['Accounting / Invoices', 'Medical records', 'Billing', 'Meeting']
+                      ) : (
+                        lang === 'fr' ? ['Autre créneau', 'Entretien cabinet', 'Appel téléphonique'] :
+                        lang === 'es' ? ['Otro horario', 'Mantenimiento clínica', 'Llamada telefónica'] :
+                        ['Other slot', 'Office maintenance', 'Phone call']
+                      )).map(suggestion => (
+                        <button
+                          key={suggestion}
+                          type="button"
+                          onClick={() => setNewEvent(prev => ({ ...prev, title: suggestion }))}
+                          className="px-2 py-0.5 rounded-lg bg-secondary hover:bg-black/10 text-[11px] font-medium text-gray-700 transition-colors"
+                        >
+                          {suggestion}
+                        </button>
                       ))}
-                    </select>
-                  )}
-                </div>
+                    </div>
+                  </div>
+                )}
 
                 <div>
                   <label className="text-[10px] uppercase tracking-wider font-bold text-gray-400 block mb-1">
-                    {lang === 'fr' ? 'Intitulé de la consultation' : 'Appointment Title'} *
+                    {newEvent.eventType === 'appointment' 
+                      ? (lang === 'fr' ? 'Intitulé de la consultation' : lang === 'es' ? 'Título de la consulta' : 'Appointment Title') 
+                      : (lang === 'fr' ? 'Titre ou Motif du créneau' : lang === 'es' ? 'Título o Motivo del horario' : 'Slot Title / Reason')} *
                   </label>
                   <input
                     type="text"
                     required
-                    placeholder={getDefaultAppointmentTitle(lang)}
+                    placeholder={newEvent.eventType === 'appointment' 
+                      ? getDefaultAppointmentTitle(lang) 
+                      : (lang === 'fr' ? 'Ex: Pause déjeuner, Indisponible...' : lang === 'es' ? 'Ej: Pausa almuerzo, No disponible...' : 'Ex: Lunch break, Unavailable...')}
                     value={newEvent.title}
                     onChange={(e) => setNewEvent(prev => ({ ...prev, title: e.target.value }))}
                     className="w-full p-2.5 bg-secondary rounded-xl border border-black/5 text-xs focus:outline-none focus:ring-1 focus:ring-primary focus:bg-white transition-all"
@@ -4525,7 +4753,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="text-[10px] uppercase tracking-wider font-bold text-gray-400 block mb-1">
-                      {lang === 'fr' ? 'Date' : 'Date'} *
+                      {lang === 'fr' ? 'Date' : lang === 'es' ? 'Fecha' : 'Date'} *
                     </label>
                     <input
                       type="date"
@@ -4538,7 +4766,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                   <div className="grid grid-cols-2 gap-2">
                     <div>
                       <label className="text-[10px] uppercase tracking-wider font-bold text-gray-400 block mb-1">
-                        {lang === 'fr' ? 'Début' : 'Start'} *
+                        {lang === 'fr' ? 'Début' : lang === 'es' ? 'Inicio' : 'Start'} *
                       </label>
                       <input
                         type="time"
@@ -4549,7 +4777,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                           const [hours, minutes] = startTime.split(':').map(Number);
                           const date = new Date();
                           date.setHours(hours);
-                          date.setMinutes(minutes + 55);
+                          date.setMinutes(minutes + (newEvent.eventType === 'appointment' ? 55 : 30));
                           const endTime = `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
                           setNewEvent(prev => ({ ...prev, startTime, endTime }));
                         }}
@@ -4558,7 +4786,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                     </div>
                     <div>
                       <label className="text-[10px] uppercase tracking-wider font-bold text-gray-400 block mb-1">
-                        {lang === 'fr' ? 'Fin' : 'End'} *
+                        {lang === 'fr' ? 'Fin' : lang === 'es' ? 'Fin' : 'End'} *
                       </label>
                       <input
                         type="time"
@@ -4573,7 +4801,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
 
                 <div>
                   <label className="text-[10px] uppercase tracking-wider font-bold text-gray-400 block mb-1">
-                    {lang === 'fr' ? 'Notes / Remarques' : 'Notes / Remarks'}
+                    {lang === 'fr' ? 'Notes / Remarques' : lang === 'es' ? 'Notas / Observaciones' : 'Notes / Remarks'}
                   </label>
                   <textarea
                     value={newEvent.description}
@@ -4590,14 +4818,18 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                     onClick={() => setIsAddEventOpen(false)}
                     className="flex-1 py-3 bg-secondary text-gray-600 rounded-2xl text-xs font-bold uppercase tracking-wider hover:bg-black/5 transition-all"
                   >
-                    {lang === 'fr' ? 'Annuler' : 'Cancel'}
+                    {lang === 'fr' ? 'Annuler' : lang === 'es' ? 'Cancelar' : 'Cancel'}
                   </button>
                   <button
                     type="submit"
                     className="flex-1 py-3 bg-primary hover:bg-primary/95 text-white rounded-2xl text-xs font-bold uppercase tracking-wider transition-all shadow-md flex items-center justify-center gap-1.5"
                   >
                     <CalendarIcon size={14} />
-                    <span>{lang === 'fr' ? 'Créer le rendez-vous' : 'Create appointment'}</span>
+                    <span>
+                      {newEvent.eventType === 'appointment'
+                        ? (lang === 'fr' ? 'Créer le rendez-vous' : lang === 'es' ? 'Crear cita' : 'Create appointment')
+                        : (lang === 'fr' ? 'Enregistrer le créneau' : lang === 'es' ? 'Guardar horario' : 'Save slot')}
+                    </span>
                   </button>
                 </div>
               </form>
@@ -4624,81 +4856,126 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="relative w-full max-w-md bg-white rounded-3xl shadow-2xl p-8 z-10 border border-black/5"
+              className="relative w-full max-w-lg bg-white rounded-3xl shadow-2xl p-6 sm:p-8 z-10 border border-black/5 max-h-[90vh] overflow-y-auto"
             >
-              <div className="flex items-center justify-between mb-6">
+              <div className="flex items-center justify-between mb-5">
                 <div>
                   <h3 className="text-xl font-serif font-bold text-primary">
-                    {lang === 'fr' ? 'Modifier le Rendez-vous' : lang === 'es' ? 'Modificar Cita' : 'Edit Appointment'}
+                    {editingEvent.eventType === 'appointment'
+                      ? (lang === 'fr' ? 'Modifier le Rendez-vous' : lang === 'es' ? 'Modificar Cita' : 'Edit Appointment')
+                      : (lang === 'fr' ? 'Modifier le Créneau' : lang === 'es' ? 'Modificar Horario' : 'Edit Slot')}
                   </h3>
                   <p className="text-xs text-gray-500 mt-0.5">
-                    {lang === 'fr' ? 'Mise à jour dans votre agenda' : 'Update in your calendar'}
+                    {lang === 'fr' ? 'Mise à jour dans votre agenda' : lang === 'es' ? 'Actualizar en su agenda' : 'Update in your calendar'}
                   </p>
                 </div>
                 <button
                   type="button"
                   onClick={() => handleDeleteEvent(editingEvent.id)}
                   className="p-2 text-rose-500 hover:bg-rose-50 rounded-xl transition-all"
-                  title={lang === 'fr' ? 'Supprimer ce rendez-vous' : 'Delete appointment'}
+                  title={lang === 'fr' ? 'Supprimer cet événement' : lang === 'es' ? 'Eliminar este evento' : 'Delete event'}
                 >
                   <Trash2 size={18} />
                 </button>
               </div>
-              
-              {/* Direct Link to Clinical Notes */}
-              <div className="mb-4 bg-emerald-50 border border-emerald-200/80 rounded-2xl p-3.5 flex items-center justify-between gap-3">
-                <div>
-                  <p className="text-xs font-bold text-emerald-900 flex items-center gap-1.5">
-                    <FileCheck size={15} className="text-emerald-700" />
-                    {lang === 'fr' ? 'Dossier Patient & Prise de notes' : 'Patient File & Clinical Notes'}
-                  </p>
-                  <p className="text-[10px] text-emerald-700 mt-0.5">
-                    {lang === 'fr' ? 'Ouvrir la fiche clinique pour ce rendez-vous' : 'Open clinical file for this appointment'}
-                  </p>
+
+              {/* Event Type Switcher in Edit Modal */}
+              <div className="mb-5">
+                <label className="text-[10px] uppercase tracking-wider font-bold text-gray-400 block mb-2">
+                  {lang === 'fr' ? 'Type de créneau' : lang === 'es' ? 'Tipo de horario' : 'Slot Type'}
+                </label>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                  {[
+                    { type: 'appointment' as EventType, label: lang === 'fr' ? 'RDV Patient' : lang === 'es' ? 'Cita Paciente' : 'Patient Appt', icon: CalendarIcon, color: 'border-emerald-500 bg-emerald-50 text-emerald-900' },
+                    { type: 'blocked' as EventType, label: lang === 'fr' ? 'Bloqué / Indispo' : lang === 'es' ? 'Bloqueado / No disp.' : 'Blocked', icon: Lock, color: 'border-amber-500 bg-amber-50 text-amber-900' },
+                    { type: 'personal' as EventType, label: lang === 'fr' ? 'Pause / Perso' : lang === 'es' ? 'Pausa / Personal' : 'Break / Personal', icon: Coffee, color: 'border-violet-500 bg-violet-50 text-violet-900' },
+                    { type: 'admin' as EventType, label: lang === 'fr' ? 'Administratif' : lang === 'es' ? 'Administrativo' : 'Admin', icon: Briefcase, color: 'border-slate-500 bg-slate-50 text-slate-900' },
+                    { type: 'other' as EventType, label: lang === 'fr' ? 'Autre motif' : lang === 'es' ? 'Otro motivo' : 'Other', icon: Bookmark, color: 'border-orange-500 bg-orange-50 text-orange-900' },
+                  ].map(item => {
+                    const isSelected = (editingEvent.eventType || 'appointment') === item.type;
+                    const ItemIcon = item.icon;
+                    return (
+                      <button
+                        key={item.type}
+                        type="button"
+                        onClick={() => {
+                          setEditingEvent(prev => prev ? ({
+                            ...prev,
+                            eventType: item.type,
+                          }) : null);
+                        }}
+                        className={`flex items-center gap-1.5 p-2 rounded-xl text-xs font-bold transition-all border text-left ${
+                          isSelected ? `${item.color} shadow-xs` : 'bg-secondary/60 border-transparent text-gray-600 hover:bg-secondary'
+                        }`}
+                      >
+                        <ItemIcon size={14} className="shrink-0" />
+                        <span className="truncate">{item.label}</span>
+                      </button>
+                    );
+                  })}
                 </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (editingEvent) {
-                      setIsEditEventOpen(false);
-                      handleGoToNotes(editingEvent);
-                    }
-                  }}
-                  className="px-3.5 py-2 bg-primary hover:bg-primary/95 text-white rounded-xl text-xs font-bold transition-all shadow-xs shrink-0 flex items-center gap-1"
-                >
-                  <span>{lang === 'fr' ? 'Prendre des notes' : 'Take Notes'}</span>
-                  <ArrowRight size={13} />
-                </button>
               </div>
               
-              <form onSubmit={handleUpdateEvent} className="space-y-4">
-                <div>
-                  <label className="text-[10px] uppercase tracking-wider font-bold text-gray-400 block mb-1">
-                    {lang === 'fr' ? 'Patient associé' : lang === 'es' ? 'Paciente asociado' : 'Associated Patient'}
-                  </label>
-                  <select
-                    value={editingEvent.clientId || ''}
-                    onChange={(e) => {
-                      const selectedId = e.target.value;
-                      const foundClient = clients.find(c => c.id === selectedId);
-                      setEditingEvent(prev => prev ? ({
-                        ...prev,
-                        clientId: selectedId,
-                        clientName: foundClient ? foundClient.name : prev.clientName,
-                      }) : null);
+              {/* Direct Link to Clinical Notes (for appointments) */}
+              {(!editingEvent.eventType || editingEvent.eventType === 'appointment') && (
+                <div className="mb-4 bg-emerald-50 border border-emerald-200/80 rounded-2xl p-3.5 flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-xs font-bold text-emerald-900 flex items-center gap-1.5">
+                      <FileCheck size={15} className="text-emerald-700" />
+                      {lang === 'fr' ? 'Dossier Patient & Prise de notes' : lang === 'es' ? 'Historial del Paciente & Notas' : 'Patient File & Clinical Notes'}
+                    </p>
+                    <p className="text-[10px] text-emerald-700 mt-0.5">
+                      {lang === 'fr' ? 'Ouvrir la fiche clinique pour ce rendez-vous' : lang === 'es' ? 'Abrir ficha clínica para esta cita' : 'Open clinical file for this appointment'}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (editingEvent) {
+                        setIsEditEventOpen(false);
+                        handleGoToNotes(editingEvent);
+                      }
                     }}
-                    className="w-full p-2.5 bg-secondary rounded-xl border border-black/5 text-xs focus:outline-none focus:ring-1 focus:ring-primary focus:bg-white transition-all font-medium"
+                    className="px-3.5 py-2 bg-primary hover:bg-primary/95 text-white rounded-xl text-xs font-bold transition-all shadow-xs shrink-0 flex items-center gap-1"
                   >
-                    <option value="">-- {lang === 'fr' ? 'Aucun ou patient non répertorié' : lang === 'es' ? 'Ninguno o no registrado' : 'None or unlisted'} --</option>
-                    {clients.map(c => (
-                      <option key={c.id} value={c.id}>{c.name} ({c.phone || c.email || 'N/A'})</option>
-                    ))}
-                  </select>
+                    <span>{lang === 'fr' ? 'Prendre des notes' : lang === 'es' ? 'Tomar notas' : 'Take Notes'}</span>
+                    <ArrowRight size={13} />
+                  </button>
                 </div>
+              )}
+              
+              <form onSubmit={handleUpdateEvent} className="space-y-4">
+                {(!editingEvent.eventType || editingEvent.eventType === 'appointment') && (
+                  <div>
+                    <label className="text-[10px] uppercase tracking-wider font-bold text-gray-400 block mb-1">
+                      {lang === 'fr' ? 'Patient associé' : lang === 'es' ? 'Paciente asociado' : 'Associated Patient'}
+                    </label>
+                    <select
+                      value={editingEvent.clientId || ''}
+                      onChange={(e) => {
+                        const selectedId = e.target.value;
+                        const foundClient = clients.find(c => c.id === selectedId);
+                        setEditingEvent(prev => prev ? ({
+                          ...prev,
+                          clientId: selectedId,
+                          clientName: foundClient ? foundClient.name : prev.clientName,
+                        }) : null);
+                      }}
+                      className="w-full p-2.5 bg-secondary rounded-xl border border-black/5 text-xs focus:outline-none focus:ring-1 focus:ring-primary focus:bg-white transition-all font-medium"
+                    >
+                      <option value="">-- {lang === 'fr' ? 'Aucun ou patient non répertorié' : lang === 'es' ? 'Ninguno o no registrado' : 'None or unlisted'} --</option>
+                      {clients.map(c => (
+                        <option key={c.id} value={c.id}>{c.name} ({c.phone || c.email || 'N/A'})</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
 
                 <div>
                   <label className="text-[10px] uppercase tracking-wider font-bold text-gray-400 block mb-1">
-                    {lang === 'fr' ? 'Intitulé de la consultation' : 'Appointment Title'} *
+                    {editingEvent.eventType === 'appointment'
+                      ? (lang === 'fr' ? 'Intitulé de la consultation' : lang === 'es' ? 'Título de la consulta' : 'Appointment Title')
+                      : (lang === 'fr' ? 'Titre ou Motif du créneau' : lang === 'es' ? 'Título o Motivo del horario' : 'Slot Title / Reason')} *
                   </label>
                   <input
                     type="text"
@@ -4712,7 +4989,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="text-[10px] uppercase tracking-wider font-bold text-gray-400 block mb-1">
-                      {lang === 'fr' ? 'Date' : 'Date'} *
+                      {lang === 'fr' ? 'Date' : lang === 'es' ? 'Fecha' : 'Date'} *
                     </label>
                     <input
                       type="date"
@@ -4725,7 +5002,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                   <div className="grid grid-cols-2 gap-2">
                     <div>
                       <label className="text-[10px] uppercase tracking-wider font-bold text-gray-400 block mb-1">
-                        {lang === 'fr' ? 'Début' : 'Start'} *
+                        {lang === 'fr' ? 'Début' : lang === 'es' ? 'Inicio' : 'Start'} *
                       </label>
                       <input
                         type="time"
@@ -4737,7 +5014,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                     </div>
                     <div>
                       <label className="text-[10px] uppercase tracking-wider font-bold text-gray-400 block mb-1">
-                        {lang === 'fr' ? 'Fin' : 'End'} *
+                        {lang === 'fr' ? 'Fin' : lang === 'es' ? 'Fin' : 'End'} *
                       </label>
                       <input
                         type="time"
@@ -4752,7 +5029,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
 
                 <div>
                   <label className="text-[10px] uppercase tracking-wider font-bold text-gray-400 block mb-1">
-                    {lang === 'fr' ? 'Notes / Remarques' : 'Notes / Remarks'}
+                    {lang === 'fr' ? 'Notes / Remarques' : lang === 'es' ? 'Notas / Observaciones' : 'Notes / Remarks'}
                   </label>
                   <textarea
                     value={editingEvent.description}
@@ -4771,13 +5048,13 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                     }}
                     className="flex-1 py-3 bg-secondary text-gray-600 rounded-2xl text-xs font-bold uppercase tracking-wider hover:bg-black/5 transition-all"
                   >
-                    {lang === 'fr' ? 'Fermer' : 'Close'}
+                    {lang === 'fr' ? 'Fermer' : lang === 'es' ? 'Cerrar' : 'Close'}
                   </button>
                   <button
                     type="submit"
                     className="flex-1 py-3 bg-primary text-white rounded-2xl text-xs font-bold uppercase tracking-wider hover:bg-primary/95 transition-all shadow-md"
                   >
-                    {lang === 'fr' ? 'Enregistrer' : 'Save'}
+                    {lang === 'fr' ? 'Enregistrer' : lang === 'es' ? 'Guardar' : 'Save'}
                   </button>
                 </div>
               </form>
