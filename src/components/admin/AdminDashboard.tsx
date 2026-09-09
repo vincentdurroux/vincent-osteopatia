@@ -1554,9 +1554,12 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                 }
               }).sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
 
+              const todayAppointmentsCount = todayEvents.filter(ev => !ev.eventType || ev.eventType === 'appointment').length;
+
               const upcomingEvents = events.filter(ev => {
                 try {
-                  return new Date(ev.start).getTime() >= now.getTime();
+                  const isAppt = !ev.eventType || ev.eventType === 'appointment';
+                  return isAppt && new Date(ev.start).getTime() >= now.getTime();
                 } catch {
                   return false;
                 }
@@ -1605,7 +1608,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                     <div className="space-y-3 pt-2">
                       <p className="text-[11px] font-bold uppercase tracking-wider text-emerald-800 flex items-center gap-1.5">
                         <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                        {lang === 'fr' ? "Consultations prévues aujourd'hui" : "Appointments scheduled today"} ({todayEvents.length})
+                        {lang === 'fr' ? "Consultations prévues aujourd'hui" : "Appointments scheduled today"} ({todayAppointmentsCount})
                       </p>
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                         {todayEvents.map(event => {
@@ -3155,11 +3158,14 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                         {cell.day}
                                       </span>
                                       <div className="flex items-center gap-1">
-                                        {dayEvents.length > 0 && (
-                                          <span className="text-[10px] font-bold text-gray-400">
-                                            {dayEvents.length} {dayEvents.length === 1 ? 'rdv' : 'rdvs'}
-                                          </span>
-                                        )}
+                                        {(() => {
+                                          const dayApptsCount = dayEvents.filter(ev => !ev.eventType || ev.eventType === 'appointment').length;
+                                          return dayApptsCount > 0 ? (
+                                            <span className="text-[10px] font-bold text-gray-400">
+                                              {dayApptsCount} {dayApptsCount === 1 ? 'rdv' : 'rdvs'}
+                                            </span>
+                                          ) : null;
+                                        })()}
                                         <span 
                                           onClick={(e) => {
                                             e.stopPropagation();
@@ -3255,11 +3261,14 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                       >
                                         {dayItem.dayNumber}
                                       </button>
-                                      {dayEvents.length > 0 && (
-                                        <span className="text-[10px] font-bold text-emerald-700 bg-emerald-100/80 px-1.5 py-0.2 rounded-full">
-                                          {dayEvents.length}
-                                        </span>
-                                      )}
+                                      {(() => {
+                                        const dayApptsCount = dayEvents.filter(ev => !ev.eventType || ev.eventType === 'appointment').length;
+                                        return dayApptsCount > 0 ? (
+                                          <span className="text-[10px] font-bold text-emerald-700 bg-emerald-100/80 px-1.5 py-0.2 rounded-full">
+                                            {dayApptsCount}
+                                          </span>
+                                        ) : null;
+                                      })()}
                                     </div>
                                   </div>
 
@@ -3407,7 +3416,10 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                     )}
                                   </div>
                                   <p className="text-xs text-gray-500 mt-0.5">
-                                    {dayEvents.length} {dayEvents.length <= 1 ? (lang === 'fr' ? 'consultation prévue' : 'appointment scheduled') : (lang === 'fr' ? 'consultations prévues' : 'appointments scheduled')}
+                                    {(() => {
+                                      const dayApptsCount = dayEvents.filter(ev => !ev.eventType || ev.eventType === 'appointment').length;
+                                      return `${dayApptsCount} ${dayApptsCount <= 1 ? (lang === 'fr' ? 'consultation prévue' : 'appointment scheduled') : (lang === 'fr' ? 'consultations prévues' : 'appointments scheduled')}`;
+                                    })()}
                                   </p>
                                 </div>
 
@@ -4358,8 +4370,10 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                     </h3>
                     <p className="text-xs text-gray-500 mt-0.5">
                       {(() => {
-                        const dayEvents = events.filter(ev => {
+                        const dayAppts = events.filter(ev => {
                           try {
+                            const isAppt = !ev.eventType || ev.eventType === 'appointment';
+                            if (!isAppt) return false;
                             const evDate = new Date(ev.start);
                             const y = evDate.getFullYear();
                             const m = String(evDate.getMonth() + 1).padStart(2, '0');
@@ -4369,14 +4383,14 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                             return false;
                           }
                         });
-                        if (dayEvents.length === 0) {
-                          return lang === 'fr' ? 'Aucun rendez-vous ce jour' : lang === 'es' ? 'Sin citas este día' : 'No appointments on this day';
+                        if (dayAppts.length === 0) {
+                          return lang === 'fr' ? 'Aucune consultation ce jour' : lang === 'es' ? 'Sin citas este día' : 'No appointments on this day';
                         }
                         return lang === 'fr' 
-                          ? `${dayEvents.length} consultation${dayEvents.length > 1 ? 's' : ''} programmée${dayEvents.length > 1 ? 's' : ''}` 
+                          ? `${dayAppts.length} consultation${dayAppts.length > 1 ? 's' : ''} programmée${dayAppts.length > 1 ? 's' : ''}` 
                           : lang === 'es' 
-                          ? `${dayEvents.length} cita${dayEvents.length > 1 ? 's' : ''}` 
-                          : `${dayEvents.length} appointment${dayEvents.length > 1 ? 's' : ''}`;
+                          ? `${dayAppts.length} cita${dayAppts.length > 1 ? 's' : ''}` 
+                          : `${dayAppts.length} appointment${dayAppts.length > 1 ? 's' : ''}`;
                       })()}
                     </p>
                   </div>
