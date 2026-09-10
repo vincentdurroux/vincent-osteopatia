@@ -704,8 +704,8 @@ const PasscodeModal = ({ isOpen, onClose, onSuccess }: { isOpen: boolean; onClos
               <div className="w-12 h-12 bg-primary/10 text-primary rounded-full flex items-center justify-center mx-auto mb-4">
                 <Shield size={24} />
               </div>
-              <h3 className="text-xl font-serif font-semibold">{t.passcodeModal?.title || 'Accès Praticien'}</h3>
-              <p className="text-xs text-gray-500 mt-2">{t.passcodeModal?.subtitle || "Saisissez votre code d'accès de sécurité"}</p>
+              <h3 className="text-xl font-serif font-semibold">{t.passcodeModal?.title || 'Private access'}</h3>
+              <p className="text-xs text-gray-500 mt-2">{t.passcodeModal?.subtitle || "Enter your security access code"}</p>
             </div>
 
             {/* PIN Dots indicator */}
@@ -730,7 +730,7 @@ const PasscodeModal = ({ isOpen, onClose, onSuccess }: { isOpen: boolean; onClos
                 animate={{ opacity: 1, y: 0 }}
                 className="text-red-500 text-xs font-bold uppercase tracking-wider mb-6"
               >
-                {t.passcodeModal?.error || "Code d'accès incorrect"}
+                {t.passcodeModal?.error || "Incorrect access code"}
               </motion.p>
             )}
 

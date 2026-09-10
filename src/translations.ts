@@ -102,9 +102,9 @@ export const translations = {
       call: 'Appel Direct',
     },
     passcodeModal: {
-      title: "Accès Praticien",
-      subtitle: "Saisissez votre code d'accès de sécurité",
-      error: "Code d'accès incorrect",
+      title: "Private access",
+      subtitle: "Enter your security access code",
+      error: "Incorrect access code",
     },
     admin: {
       title: "Gestion",
@@ -415,7 +415,7 @@ export const translations = {
       call: 'Direct Call',
     },
     passcodeModal: {
-      title: "Practitioner Access",
+      title: "Private access",
       subtitle: "Enter your security access code",
       error: "Incorrect access code",
     },
@@ -728,9 +728,9 @@ export const translations = {
       call: 'Llamada Directa',
     },
     passcodeModal: {
-      title: "Acceso Profesional",
-      subtitle: "Introduzca su código de acceso de seguridad",
-      error: "Código de acceso incorrecto",
+      title: "Private access",
+      subtitle: "Enter your security access code",
+      error: "Incorrect access code",
     },
     admin: {
       title: "Gestión",
