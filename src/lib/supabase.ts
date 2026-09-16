@@ -604,6 +604,74 @@ async function executeResilientInsert(
 }
 
 /**
+ * Executes an upsert operation with automated self-healing retry.
+ */
+async function executeResilientUpsert(
+  table: string,
+  candidatePayloads: Record<string, any>[]
+): Promise<{ data: any | null; error: any | null; success: boolean }> {
+  if (!isSupabaseConfigured || !supabase) {
+    return { data: null, error: new Error('Supabase client not initialized'), success: false };
+  }
+
+  let lastError: any = null;
+
+  for (const initialPayload of candidatePayloads) {
+    let currentPayload = { ...initialPayload };
+    let attempts = 0;
+    const maxAttempts = Object.keys(currentPayload).length + 2;
+
+    while (attempts < maxAttempts) {
+      attempts++;
+      try {
+        const res = await supabase.from(table).upsert(currentPayload, { onConflict: 'id' }).select().single();
+        if (!res.error && res.data) {
+          lastSupabaseStatus = {
+            lastAction: `Upsert ${table}`,
+            success: true,
+            timestamp: new Date().toISOString(),
+          };
+          return { data: res.data, error: null, success: true };
+        }
+
+        if (res.error) {
+          lastError = res.error;
+          const msg = res.error.message || '';
+
+          const missingCol = extractMissingColumn(msg);
+          if (missingCol && missingCol in currentPayload) {
+            console.warn(`[Supabase Auto-Heal] Column "${missingCol}" does not exist in "${table}". Stripping and retrying.`);
+            delete currentPayload[missingCol];
+            continue;
+          }
+
+          if (msg.includes('row-level security') || res.error.code === 'PGRST116' || res.error.code === '42501') {
+            const plainRes = await supabase.from(table).upsert(currentPayload, { onConflict: 'id' });
+            if (!plainRes.error) {
+              return { data: currentPayload, error: null, success: true };
+            }
+          }
+
+          break;
+        }
+      } catch (err: any) {
+        lastError = err;
+        break;
+      }
+    }
+  }
+
+  lastSupabaseStatus = {
+    lastAction: `Upsert ${table}`,
+    success: false,
+    error: lastError?.message || 'Database error',
+    timestamp: new Date().toISOString(),
+  };
+
+  return { data: null, error: lastError, success: false };
+}
+
+/**
  * Executes an update operation with automated self-healing retry.
  */
 async function executeResilientUpdate(
@@ -1258,6 +1326,7 @@ export const api = {
           email: normalizedClient.email || '',
           phone: normalizedClient.phone || '',
           address: normalizedClient.address || '',
+          created_at: normalizedClient.createdAt || new Date().toISOString(),
         };
         if (normalizedClient.dni !== undefined) snakePayload.dni = normalizedClient.dni;
         if (normalizedClient.birthDate) snakePayload.birth_date = normalizedClient.birthDate;
@@ -1267,31 +1336,32 @@ export const api = {
         if (normalizedClient.defaultDiscount !== undefined) snakePayload.default_discount = normalizedClient.defaultDiscount;
         if (normalizedClient.bonoSessionsRemaining !== undefined) snakePayload.bono_sessions_remaining = normalizedClient.bonoSessionsRemaining;
 
-        const { error: upsertErr } = await supabase.from('clients').upsert(snakePayload);
-        if (upsertErr) {
-          const camelPayload: Record<string, any> = {
-            id: normalizedClient.id,
-            name: normalizedClient.name,
-            firstName: normalizedClient.firstName,
-            lastName: normalizedClient.lastName,
-            fullName: normalizedClient.name,
-            clientName: normalizedClient.name,
-            email: normalizedClient.email || '',
-            phone: normalizedClient.phone || '',
-            address: normalizedClient.address || '',
-          };
-          if (normalizedClient.dni !== undefined) camelPayload.dni = normalizedClient.dni;
-          if (normalizedClient.birthDate) camelPayload.birthDate = normalizedClient.birthDate;
-          if (normalizedClient.lastSessionAt) camelPayload.lastSessionAt = normalizedClient.lastSessionAt;
-          if (normalizedClient.hasBono !== undefined) camelPayload.hasBono = normalizedClient.hasBono;
-          if (normalizedClient.bonoType !== undefined) camelPayload.bonoType = normalizedClient.bonoType;
-          if (normalizedClient.defaultDiscount !== undefined) camelPayload.defaultDiscount = normalizedClient.defaultDiscount;
-          if (normalizedClient.bonoSessionsRemaining !== undefined) camelPayload.bonoSessionsRemaining = normalizedClient.bonoSessionsRemaining;
+        const camelPayload: Record<string, any> = {
+          id: normalizedClient.id,
+          name: normalizedClient.name,
+          firstName: normalizedClient.firstName,
+          lastName: normalizedClient.lastName,
+          fullName: normalizedClient.name,
+          clientName: normalizedClient.name,
+          email: normalizedClient.email || '',
+          phone: normalizedClient.phone || '',
+          address: normalizedClient.address || '',
+          createdAt: normalizedClient.createdAt || new Date().toISOString(),
+        };
+        if (normalizedClient.dni !== undefined) camelPayload.dni = normalizedClient.dni;
+        if (normalizedClient.birthDate) camelPayload.birthDate = normalizedClient.birthDate;
+        if (normalizedClient.lastSessionAt) camelPayload.lastSessionAt = normalizedClient.lastSessionAt;
+        if (normalizedClient.hasBono !== undefined) camelPayload.hasBono = normalizedClient.hasBono;
+        if (normalizedClient.bonoType !== undefined) camelPayload.bonoType = normalizedClient.bonoType;
+        if (normalizedClient.defaultDiscount !== undefined) camelPayload.defaultDiscount = normalizedClient.defaultDiscount;
+        if (normalizedClient.bonoSessionsRemaining !== undefined) camelPayload.bonoSessionsRemaining = normalizedClient.bonoSessionsRemaining;
 
-          await supabase.from('clients').upsert(camelPayload);
+        const res = await executeResilientUpsert('clients', [snakePayload, camelPayload]);
+        if (!res.success) {
+          console.error('Supabase updateClient failed:', res.error);
         }
       } catch (err) {
-        console.warn('Supabase updateClient exception:', err);
+        console.error('Supabase updateClient exception:', err);
       }
     }
 
