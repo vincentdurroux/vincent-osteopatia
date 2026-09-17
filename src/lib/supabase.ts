@@ -604,74 +604,6 @@ async function executeResilientInsert(
 }
 
 /**
- * Executes an upsert operation with automated self-healing retry.
- */
-async function executeResilientUpsert(
-  table: string,
-  candidatePayloads: Record<string, any>[]
-): Promise<{ data: any | null; error: any | null; success: boolean }> {
-  if (!isSupabaseConfigured || !supabase) {
-    return { data: null, error: new Error('Supabase client not initialized'), success: false };
-  }
-
-  let lastError: any = null;
-
-  for (const initialPayload of candidatePayloads) {
-    let currentPayload = { ...initialPayload };
-    let attempts = 0;
-    const maxAttempts = Object.keys(currentPayload).length + 2;
-
-    while (attempts < maxAttempts) {
-      attempts++;
-      try {
-        const res = await supabase.from(table).upsert(currentPayload, { onConflict: 'id' }).select().single();
-        if (!res.error && res.data) {
-          lastSupabaseStatus = {
-            lastAction: `Upsert ${table}`,
-            success: true,
-            timestamp: new Date().toISOString(),
-          };
-          return { data: res.data, error: null, success: true };
-        }
-
-        if (res.error) {
-          lastError = res.error;
-          const msg = res.error.message || '';
-
-          const missingCol = extractMissingColumn(msg);
-          if (missingCol && missingCol in currentPayload) {
-            console.warn(`[Supabase Auto-Heal] Column "${missingCol}" does not exist in "${table}". Stripping and retrying.`);
-            delete currentPayload[missingCol];
-            continue;
-          }
-
-          if (msg.includes('row-level security') || res.error.code === 'PGRST116' || res.error.code === '42501') {
-            const plainRes = await supabase.from(table).upsert(currentPayload, { onConflict: 'id' });
-            if (!plainRes.error) {
-              return { data: currentPayload, error: null, success: true };
-            }
-          }
-
-          break;
-        }
-      } catch (err: any) {
-        lastError = err;
-        break;
-      }
-    }
-  }
-
-  lastSupabaseStatus = {
-    lastAction: `Upsert ${table}`,
-    success: false,
-    error: lastError?.message || 'Database error',
-    timestamp: new Date().toISOString(),
-  };
-
-  return { data: null, error: lastError, success: false };
-}
-
-/**
  * Executes an update operation with automated self-healing retry.
  */
 async function executeResilientUpdate(
@@ -1266,9 +1198,30 @@ export const api = {
         saveLocal('events', updatedEvents);
       }
 
-      // 3. Supabase Cloud Sync for Calendar Events
+      // 2. Local Invoices Sync - Disabled to preserve historical name at the time of issuance for accounting integrity
+      /*
+      const localInvoices = loadLocal('invoices', mockInvoices);
+      let invoicesModified = false;
+      const updatedInvoices = localInvoices.map(inv => {
+        if (inv.clientId === normalizedClient.id || (oldName && inv.clientName === oldName)) {
+          invoicesModified = true;
+          return {
+            ...inv,
+            clientId: normalizedClient.id,
+            clientName: fullName,
+          };
+        }
+        return inv;
+      });
+      if (invoicesModified) {
+        saveLocal('invoices', updatedInvoices);
+      }
+      */
+
+      // 3. Supabase Cloud Sync for Calendar Events (Invoices are excluded to preserve historical records)
       if (isSupabaseConfigured && supabase) {
         try {
+          // Update calendar_events & events by clientId
           if (normalizedClient.id) {
             await supabase
               .from('calendar_events')
@@ -1281,6 +1234,7 @@ export const api = {
               .or(`client_id.eq.${normalizedClient.id},clientId.eq.${normalizedClient.id}`);
           }
 
+          // Update calendar_events & events by oldName if available
           if (oldName && oldName !== fullName) {
             await supabase
               .from('calendar_events')
@@ -1301,21 +1255,9 @@ export const api = {
     // Perform cascade sync
     await syncRelatedEventsAndInvoices();
 
-    // Always update local storage immediately
-    const current = loadLocal('clients', mockClients);
-    const index = current.findIndex(c => c.id === normalizedClient.id);
-    if (index !== -1) {
-      current[index] = normalizedClient;
-    } else {
-      current.push(normalizedClient);
-    }
-    saveLocal('clients', current);
-
-    // Sync to Supabase in background
     if (isSupabaseConfigured && supabase) {
       try {
         const snakePayload: Record<string, any> = {
-          id: normalizedClient.id,
           name: normalizedClient.name,
           first_name: normalizedClient.firstName,
           last_name: normalizedClient.lastName,
@@ -1326,7 +1268,6 @@ export const api = {
           email: normalizedClient.email || '',
           phone: normalizedClient.phone || '',
           address: normalizedClient.address || '',
-          created_at: normalizedClient.createdAt || new Date().toISOString(),
         };
         if (normalizedClient.dni !== undefined) snakePayload.dni = normalizedClient.dni;
         if (normalizedClient.birthDate) snakePayload.birth_date = normalizedClient.birthDate;
@@ -1337,7 +1278,6 @@ export const api = {
         if (normalizedClient.bonoSessionsRemaining !== undefined) snakePayload.bono_sessions_remaining = normalizedClient.bonoSessionsRemaining;
 
         const camelPayload: Record<string, any> = {
-          id: normalizedClient.id,
           name: normalizedClient.name,
           firstName: normalizedClient.firstName,
           lastName: normalizedClient.lastName,
@@ -1346,7 +1286,6 @@ export const api = {
           email: normalizedClient.email || '',
           phone: normalizedClient.phone || '',
           address: normalizedClient.address || '',
-          createdAt: normalizedClient.createdAt || new Date().toISOString(),
         };
         if (normalizedClient.dni !== undefined) camelPayload.dni = normalizedClient.dni;
         if (normalizedClient.birthDate) camelPayload.birthDate = normalizedClient.birthDate;
@@ -1356,15 +1295,34 @@ export const api = {
         if (normalizedClient.defaultDiscount !== undefined) camelPayload.defaultDiscount = normalizedClient.defaultDiscount;
         if (normalizedClient.bonoSessionsRemaining !== undefined) camelPayload.bonoSessionsRemaining = normalizedClient.bonoSessionsRemaining;
 
-        const res = await executeResilientUpsert('clients', [snakePayload, camelPayload]);
-        if (!res.success) {
-          console.error('Supabase updateClient failed:', res.error);
+        const result = await executeResilientUpdate('clients', normalizedClient.id, [snakePayload, camelPayload]);
+
+        if (result.success && result.data) {
+          const mapped = mapClientFromDB(result.data);
+          const finalClient: Client = {
+            ...normalizedClient,
+            ...mapped,
+            name: (mapped.name && mapped.name !== 'Patient sans nom') ? mapped.name : normalizedClient.name,
+            firstName: mapped.firstName || normalizedClient.firstName,
+            lastName: mapped.lastName || normalizedClient.lastName,
+          };
+          const current = loadLocal('clients', mockClients);
+          const index = current.findIndex(c => c.id === finalClient.id);
+          if (index !== -1) current[index] = finalClient;
+          saveLocal('clients', current);
+          return finalClient;
         }
       } catch (err) {
-        console.error('Supabase updateClient exception:', err);
+        console.warn('Supabase updateClient exception:', err);
       }
     }
 
+    const current = loadLocal('clients', mockClients);
+    const index = current.findIndex(c => c.id === normalizedClient.id);
+    if (index !== -1) {
+      current[index] = normalizedClient;
+      saveLocal('clients', current);
+    }
     return normalizedClient;
   },
 

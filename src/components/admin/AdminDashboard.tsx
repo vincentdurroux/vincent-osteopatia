@@ -4140,19 +4140,16 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
       {/* MODAL: ADD CLIENT */}
       <AnimatePresence>
         {isAddClientOpen && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setIsAddClientOpen(false)}
-              className="absolute inset-0 bg-black/40 backdrop-blur-sm"
-            />
+          <div 
+            className="fixed inset-0 z-[100] flex items-start justify-center p-4 bg-black/40 backdrop-blur-sm overflow-y-auto"
+            onClick={() => setIsAddClientOpen(false)}
+          >
             <motion.div
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="relative w-full max-w-md bg-white rounded-3xl shadow-2xl p-8 z-10 border border-black/5"
+              className="relative w-full max-w-md bg-white rounded-3xl shadow-2xl p-8 z-10 border border-black/5 my-auto"
+              onClick={(e) => e.stopPropagation()}
             >
               <h3 className="text-xl font-serif font-bold text-primary mb-6">
                 {lang === 'fr' ? 'Nouveau Patient' : lang === 'es' ? 'Nuevo Paciente' : 'New Patient'}
@@ -4337,19 +4334,16 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
       {/* MODAL: DAY SPECIFIC APPOINTMENTS */}
       <AnimatePresence>
         {selectedDayModalDate && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setSelectedDayModalDate(null)}
-              className="absolute inset-0 bg-black/50 backdrop-blur-sm"
-            />
+          <div 
+            className="fixed inset-0 z-[100] flex items-start justify-center p-4 bg-black/50 backdrop-blur-sm overflow-y-auto"
+            onClick={() => setSelectedDayModalDate(null)}
+          >
             <motion.div
               initial={{ opacity: 0, scale: 0.95, y: 10 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95, y: 10 }}
-              className="relative w-full max-w-xl bg-white rounded-3xl shadow-2xl p-6 sm:p-8 z-10 border border-black/5 flex flex-col max-h-[85vh]"
+              className="relative w-full max-w-xl bg-white rounded-3xl shadow-2xl p-6 sm:p-8 z-10 border border-black/5 flex flex-col my-auto"
+              onClick={(e) => e.stopPropagation()}
             >
               {/* Header */}
               <div className="flex items-start justify-between pb-4 border-b border-black/5">
@@ -4564,19 +4558,16 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
       {/* MODAL: BLOCK / PLAN EVENT (GOOGLE CALENDAR) */}
       <AnimatePresence>
         {isAddEventOpen && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setIsAddEventOpen(false)}
-              className="absolute inset-0 bg-black/40 backdrop-blur-sm"
-            />
+          <div 
+            className="fixed inset-0 z-[100] flex items-start justify-center p-4 bg-black/40 backdrop-blur-sm overflow-y-auto"
+            onClick={() => setIsAddEventOpen(false)}
+          >
             <motion.div
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="relative w-full max-w-lg bg-white rounded-3xl shadow-2xl p-6 sm:p-8 z-10 border border-black/5 max-h-[90vh] overflow-y-auto"
+              className="relative w-full max-w-lg bg-white rounded-3xl shadow-2xl p-6 sm:p-8 z-10 border border-black/5 my-auto"
+              onClick={(e) => e.stopPropagation()}
             >
               <div className="flex items-center justify-between mb-5">
                 <div>
@@ -4862,22 +4853,19 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
       {/* MODAL: EDIT EVENT */}
       <AnimatePresence>
         {isEditEventOpen && editingEvent && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => {
-                setIsEditEventOpen(false);
-                setEditingEvent(null);
-              }}
-              className="absolute inset-0 bg-black/40 backdrop-blur-sm"
-            />
+          <div 
+            className="fixed inset-0 z-[100] flex items-start justify-center p-4 bg-black/40 backdrop-blur-sm overflow-y-auto"
+            onClick={() => {
+              setIsEditEventOpen(false);
+              setEditingEvent(null);
+            }}
+          >
             <motion.div
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="relative w-full max-w-lg bg-white rounded-3xl shadow-2xl p-6 sm:p-8 z-10 border border-black/5 max-h-[90vh] overflow-y-auto"
+              className="relative w-full max-w-lg bg-white rounded-3xl shadow-2xl p-6 sm:p-8 z-10 border border-black/5 my-auto"
+              onClick={(e) => e.stopPropagation()}
             >
               <div className="flex items-center justify-between mb-5">
                 <div>
