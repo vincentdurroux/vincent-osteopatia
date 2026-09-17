@@ -375,6 +375,7 @@ export function mapClientFromDB(c: any): Client {
     bonoType: c.bonoType || c.bono_type || '',
     defaultDiscount: c.defaultDiscount !== undefined ? Number(c.defaultDiscount) : (c.default_discount !== undefined ? Number(c.default_discount) : undefined),
     bonoSessionsRemaining: c.bonoSessionsRemaining !== undefined ? Number(c.bonoSessionsRemaining) : (c.bono_sessions_remaining !== undefined ? Number(c.bono_sessions_remaining) : undefined),
+    profileNote: c.profileNote || c.profile_note || c.remarque || c.note || '',
   };
 }
 
@@ -1074,6 +1075,7 @@ export const api = {
         if (newClient.bonoType) snakePayload.bono_type = newClient.bonoType;
         if (newClient.defaultDiscount !== undefined) snakePayload.default_discount = newClient.defaultDiscount;
         if (newClient.bonoSessionsRemaining !== undefined) snakePayload.bono_sessions_remaining = newClient.bonoSessionsRemaining;
+        if (newClient.profileNote !== undefined) snakePayload.profile_note = newClient.profileNote;
 
         // Candidate 2: camelCase payload
         const camelPayload: Record<string, any> = {
@@ -1096,6 +1098,7 @@ export const api = {
         if (newClient.bonoType) camelPayload.bonoType = newClient.bonoType;
         if (newClient.defaultDiscount !== undefined) camelPayload.defaultDiscount = newClient.defaultDiscount;
         if (newClient.bonoSessionsRemaining !== undefined) camelPayload.bonoSessionsRemaining = newClient.bonoSessionsRemaining;
+        if (newClient.profileNote !== undefined) camelPayload.profileNote = newClient.profileNote;
 
         // Candidate 3: Minimal essential payload with guaranteed name
         const minimalPayload: Record<string, any> = {
@@ -1276,6 +1279,7 @@ export const api = {
         if (normalizedClient.bonoType !== undefined) snakePayload.bono_type = normalizedClient.bonoType;
         if (normalizedClient.defaultDiscount !== undefined) snakePayload.default_discount = normalizedClient.defaultDiscount;
         if (normalizedClient.bonoSessionsRemaining !== undefined) snakePayload.bono_sessions_remaining = normalizedClient.bonoSessionsRemaining;
+        if (normalizedClient.profileNote !== undefined) snakePayload.profile_note = normalizedClient.profileNote;
 
         const camelPayload: Record<string, any> = {
           name: normalizedClient.name,
@@ -1294,6 +1298,7 @@ export const api = {
         if (normalizedClient.bonoType !== undefined) camelPayload.bonoType = normalizedClient.bonoType;
         if (normalizedClient.defaultDiscount !== undefined) camelPayload.defaultDiscount = normalizedClient.defaultDiscount;
         if (normalizedClient.bonoSessionsRemaining !== undefined) camelPayload.bonoSessionsRemaining = normalizedClient.bonoSessionsRemaining;
+        if (normalizedClient.profileNote !== undefined) camelPayload.profileNote = normalizedClient.profileNote;
 
         const result = await executeResilientUpdate('clients', normalizedClient.id, [snakePayload, camelPayload]);
 

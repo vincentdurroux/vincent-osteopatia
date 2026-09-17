@@ -14,6 +14,7 @@ export interface Client {
   bonoType?: string;
   defaultDiscount?: number;
   bonoSessionsRemaining?: number;
+  profileNote?: string;
 }
 
 export interface ClientNote {

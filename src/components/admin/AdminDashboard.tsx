@@ -6,7 +6,7 @@ import {
   CreditCard, Shield, Clock, MapPin, Phone, Mail, FileCheck, Printer,
   ChevronRight, Pencil, ChevronLeft, LayoutGrid, List, ArrowRight,
   Copy, CheckCircle2, XCircle, AlertTriangle, Database, Server, UserPlus, User,
-  Tag, BadgePercent, Percent, Sparkles, IdCard, X, Columns3, Lock, Coffee, Briefcase, Bookmark
+  Tag, BadgePercent, Percent, Sparkles, IdCard, X, Columns3, Lock, Coffee, Briefcase, Bookmark, Pin, StickyNote
 } from 'lucide-react';
 import { Client, ClientNote, Invoice, CalendarEvent, EventType } from '../../types';
 import { api, isSupabaseConfigured, SUPABASE_SQL_SETUP, capitalizeFirstName } from '../../lib/supabase';
@@ -207,6 +207,10 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
   // Edit states
   const [isEditClientOpen, setIsEditClientOpen] = useState(false);
   const [editingClient, setEditingClient] = useState<Client | null>(null);
+
+  // Profile quick note state (petite note / remarque sur le profil patient)
+  const [isEditingProfileNote, setIsEditingProfileNote] = useState(false);
+  const [profileNoteInput, setProfileNoteInput] = useState('');
 
   const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
   const [editingNoteAnamnese, setEditingNoteAnamnese] = useState('');
@@ -447,29 +451,37 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
     });
   };
 
-  // Load notes when client changes
+  // Load notes and profile note when client changes
   useEffect(() => {
     if (selectedClient) {
       api.getClientNotes(selectedClient.id).then(setClientNotes);
+      setProfileNoteInput(selectedClient.profileNote || '');
+      setIsEditingProfileNote(false);
     } else {
       setClientNotes([]);
+      setProfileNoteInput('');
+      setIsEditingProfileNote(false);
     }
-  }, [selectedClient]);
+  }, [selectedClient?.id]);
 
   // Create client Note
   const handleAddNote = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedClient || (!newNote.anamnese && !newNote.treatment)) return;
+    if (!selectedClient || (!newNote.anamnese.trim() && !newNote.treatment.trim() && !newNote.motif?.trim())) return;
     
     try {
-      const combinedContent = `Anamnèse :\n${newNote.anamnese}\n\nTraitement :\n${newNote.treatment}`;
+      const parts: string[] = [];
+      if (newNote.anamnese.trim()) parts.push(newNote.anamnese.trim());
+      if (newNote.treatment.trim()) parts.push(newNote.treatment.trim());
+      const combinedContent = parts.join('\n\n') || newNote.motif?.trim() || '';
+
       const created = await api.createClientNote({
         clientId: selectedClient.id,
-        anamnese: newNote.anamnese,
-        treatment: newNote.treatment,
+        anamnese: newNote.anamnese.trim(),
+        treatment: newNote.treatment.trim(),
         content: combinedContent,
         category: newNote.category,
-        motif: newNote.motif,
+        motif: newNote.motif?.trim() || undefined,
         date: new Date(newNote.date).toISOString(),
       });
       setClientNotes(prev => [created, ...prev]);
@@ -839,21 +851,69 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
     }
   };
 
+  // Save or Delete Profile Quick Note
+  const handleSaveProfileNote = async () => {
+    if (!selectedClient) return;
+    try {
+      const updatedClient: Client = {
+        ...selectedClient,
+        profileNote: profileNoteInput.trim(),
+      };
+      const saved = await api.updateClient(updatedClient);
+      setSelectedClient(saved);
+      setClients(prev => prev.map(c => c.id === saved.id ? saved : c));
+      setIsEditingProfileNote(false);
+    } catch (err) {
+      console.error('Failed to save profile note:', err);
+    }
+  };
+
+  const handleDeleteProfileNote = async () => {
+    if (!selectedClient) return;
+    setConfirmDialog({
+      isOpen: true,
+      title: lang === 'fr' ? 'Supprimer la note du profil' : lang === 'es' ? 'Eliminar nota de perfil' : 'Delete profile note',
+      message: lang === 'fr' ? 'Êtes-vous sûr de vouloir supprimer définitivement cette note du profil patient ?' : lang === 'es' ? '¿Está seguro de que desea eliminar esta nota del perfil del paciente?' : 'Are you sure you want to delete this note from the patient profile?',
+      confirmText: lang === 'fr' ? 'Supprimer' : lang === 'es' ? 'Eliminar' : 'Delete',
+      cancelText: lang === 'fr' ? 'Annuler' : lang === 'es' ? 'Cancelar' : 'Cancel',
+      isDangerous: true,
+      onConfirm: async () => {
+        try {
+          const updatedClient: Client = {
+            ...selectedClient,
+            profileNote: '',
+          };
+          const saved = await api.updateClient(updatedClient);
+          setSelectedClient(saved);
+          setClients(prev => prev.map(c => c.id === saved.id ? saved : c));
+          setProfileNoteInput('');
+          setIsEditingProfileNote(false);
+        } catch (err) {
+          console.error('Failed to delete profile note:', err);
+        }
+      }
+    });
+  };
+
   // Update Client Note Handler
   const handleUpdateNote = async (noteId: string) => {
-    if (!editingNoteAnamnese && !editingNoteTreatment) return;
+    if (!editingNoteAnamnese.trim() && !editingNoteTreatment.trim() && !editingNoteMotif.trim()) return;
     try {
       const noteToUpdate = clientNotes.find(n => n.id === noteId);
       if (!noteToUpdate) return;
 
-      const combinedContent = `Anamnèse :\n${editingNoteAnamnese}\n\nTraitement :\n${editingNoteTreatment}`;
+      const parts: string[] = [];
+      if (editingNoteAnamnese.trim()) parts.push(editingNoteAnamnese.trim());
+      if (editingNoteTreatment.trim()) parts.push(editingNoteTreatment.trim());
+      const combinedContent = parts.join('\n\n') || editingNoteMotif.trim() || '';
+
       const updated = await api.updateClientNote({
         ...noteToUpdate,
-        anamnese: editingNoteAnamnese,
-        treatment: editingNoteTreatment,
+        anamnese: editingNoteAnamnese.trim(),
+        treatment: editingNoteTreatment.trim(),
         content: combinedContent,
         category: editingNoteCategory,
-        motif: editingNoteMotif,
+        motif: editingNoteMotif.trim() || undefined,
         date: new Date(editingNoteDate).toISOString(),
       });
 
@@ -1960,7 +2020,15 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                           <User size={18} />
                         </div>
                         <div className="overflow-hidden">
-                          <p className="text-xs font-bold truncate">{c.name}</p>
+                          <p className="text-xs font-bold truncate flex items-center gap-1.5">
+                            <span className="truncate">{c.name}</span>
+                            {c.profileNote && (
+                              <span className="inline-flex items-center gap-0.5 text-amber-800 bg-amber-100/90 px-1.5 py-0.2 rounded-full text-[9px] font-semibold shrink-0" title={c.profileNote}>
+                                <Pin size={9} className="fill-amber-700/40" />
+                                <span>Note</span>
+                              </span>
+                            )}
+                          </p>
                           <div className="flex items-center gap-1.5 text-[10px] text-gray-500 truncate">
                             {c.dni && (
                               <span className="font-semibold text-primary/90 bg-primary/10 px-1.5 py-0.2 rounded text-[9px] font-mono shrink-0">
@@ -2042,7 +2110,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                           </div>
                           
                           {/* Bono / Discount status */}
-                          {selectedClient.hasBono ? (
+                          {selectedClient.hasBono && (
                             <div className="flex flex-wrap items-center gap-2 mt-2">
                               <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-emerald-50 text-emerald-800 border border-emerald-200/70">
                                 <BadgePercent size={13} className="text-emerald-600" />
@@ -2069,26 +2137,6 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                 <Pencil size={11} /> {lang === 'fr' ? 'Gérer le Bono' : lang === 'es' ? 'Gestionar Bono' : 'Manage Bono'}
                               </button>
                             </div>
-                          ) : (
-                            <div className="mt-2">
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setEditingClient({
-                                    ...selectedClient,
-                                    hasBono: true,
-                                    bonoType: 'Bono 5 séances',
-                                    defaultDiscount: 10,
-                                    bonoSessionsRemaining: 5,
-                                  });
-                                  setIsEditClientOpen(true);
-                                }}
-                                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold text-gray-500 hover:text-primary bg-black/5 hover:bg-primary/10 transition-all"
-                              >
-                                <Plus size={11} />
-                                <span>{lang === 'fr' ? 'Attribuer un Bono / Remise' : lang === 'es' ? 'Asignar Bono / Descuento' : 'Assign Bono / Discount'}</span>
-                              </button>
-                            </div>
                           )}
                         </div>
                       </div>
@@ -2108,15 +2156,128 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                         )}
                       </div>
                     </div>
+
+                    {/* Patient Quick Profile Note Card (Note / Remarque fixe du profil) */}
+                    <div className="mt-3 pt-3 border-t border-black/5">
+                      <div className="bg-amber-50/90 border border-amber-200/90 rounded-2xl p-3.5 shadow-xs transition-all">
+                        <div className="flex items-center justify-between gap-2 mb-1">
+                          <div className="flex items-center gap-1.5 text-amber-900 font-bold text-xs uppercase tracking-wider">
+                            <Pin size={13} className="text-amber-700 fill-amber-700/30" />
+                            <span>{lang === 'fr' ? 'Remarque / Note profil' : lang === 'es' ? 'Nota de perfil' : 'Profile note'}</span>
+                          </div>
+                          {selectedClient.profileNote && !isEditingProfileNote && (
+                            <div className="flex items-center gap-1">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setProfileNoteInput(selectedClient.profileNote || '');
+                                  setIsEditingProfileNote(true);
+                                }}
+                                className="p-1 px-2 text-amber-900 hover:text-primary hover:bg-amber-200/60 rounded-lg transition-all text-xs font-semibold flex items-center gap-1 cursor-pointer"
+                                title={lang === 'fr' ? 'Modifier la remarque du profil' : 'Edit profile note'}
+                              >
+                                <Pencil size={12} />
+                                <span>{lang === 'fr' ? 'Modifier' : 'Edit'}</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={handleDeleteProfileNote}
+                                className="p-1 px-2 text-rose-700 hover:text-rose-800 hover:bg-rose-100/80 rounded-lg transition-all text-xs font-semibold flex items-center gap-1 cursor-pointer"
+                                title={lang === 'fr' ? 'Supprimer la remarque du profil' : 'Delete profile note'}
+                              >
+                                <Trash2 size={12} />
+                                <span>{lang === 'fr' ? 'Supprimer' : 'Delete'}</span>
+                              </button>
+                            </div>
+                          )}
+                        </div>
+
+                        {isEditingProfileNote ? (
+                          <div className="space-y-2 mt-2">
+                            <textarea
+                              value={profileNoteInput}
+                              onChange={(e) => setProfileNoteInput(e.target.value)}
+                              rows={2}
+                              placeholder={lang === 'fr' ? 'Saisissez une remarque ou note d\'information pour ce patient (ex: vient toujours le matin, allergie au baume, contact WhatsApp...)...' : 'Enter a profile note...'}
+                              className="w-full p-2.5 bg-white rounded-xl border border-amber-300 text-xs text-gray-800 focus:outline-none focus:ring-1 focus:ring-amber-500 resize-none shadow-inner"
+                              autoFocus
+                            />
+                            <div className="flex items-center justify-end gap-2">
+                              <button
+                                type="button"
+                                onClick={() => setIsEditingProfileNote(false)}
+                                className="px-3 py-1 bg-white hover:bg-amber-100 text-amber-900 rounded-xl text-xs font-bold transition-all border border-amber-200 cursor-pointer"
+                              >
+                                {lang === 'fr' ? 'Annuler' : 'Cancel'}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={handleSaveProfileNote}
+                                className="px-3.5 py-1 bg-amber-700 hover:bg-amber-800 text-white rounded-xl text-xs font-bold transition-all shadow-xs flex items-center gap-1 cursor-pointer"
+                              >
+                                <Check size={13} />
+                                <span>{lang === 'fr' ? 'Enregistrer' : 'Save'}</span>
+                              </button>
+                            </div>
+                          </div>
+                        ) : selectedClient.profileNote ? (
+                          <p className="text-xs text-amber-950 font-medium leading-relaxed whitespace-pre-wrap pl-0.5 pt-0.5">
+                            {selectedClient.profileNote}
+                          </p>
+                        ) : (
+                          <div className="flex items-center justify-between gap-2 pt-0.5">
+                            <p className="text-xs text-amber-800/80 italic">
+                              {lang === 'fr' ? 'Aucune remarque ou note profil enregistrée.' : 'No profile note.'}
+                            </p>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setProfileNoteInput('');
+                                setIsEditingProfileNote(true);
+                              }}
+                              className="px-2.5 py-1 bg-white hover:bg-amber-100 text-amber-900 rounded-xl text-xs font-bold transition-all border border-amber-300/80 shadow-2xs flex items-center gap-1 cursor-pointer shrink-0"
+                            >
+                              <Plus size={12} />
+                              <span>{lang === 'fr' ? 'Ajouter une remarque' : 'Add note'}</span>
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Patient Notes Summary Banner & Quick Add */}
+                    <div className="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-black/5">
+                      <div className="flex items-center gap-2">
+                        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-primary/10 text-primary border border-primary/20">
+                          <FileText size={13} />
+                          <span>{clientNotes.length} {lang === 'fr' ? (clientNotes.length > 1 ? 'notes au dossier' : 'note au dossier') : lang === 'es' ? 'notas en expediente' : 'notes on file'}</span>
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const noteFormElem = document.getElementById('new-note-form');
+                          if (noteFormElem) {
+                            noteFormElem.scrollIntoView({ behavior: 'smooth' });
+                            const firstField = noteFormElem.querySelector('input, textarea') as HTMLInputElement | HTMLTextAreaElement | null;
+                            if (firstField) firstField.focus();
+                          }
+                        }}
+                        className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-bold bg-primary text-white hover:bg-primary/90 transition-all shadow-xs"
+                      >
+                        <Plus size={13} />
+                        <span>{lang === 'fr' ? 'Ajouter une note' : lang === 'es' ? 'Añadir una nota' : 'Add a note'}</span>
+                      </button>
+                    </div>
                   </div>
 
                   {/* Consultation Notes Section */}
                   <div className="grid grid-cols-1 md:grid-cols-5 gap-6 items-stretch">
                     
                     {/* Add Clinical Note Form Column */}
-                    <div className="bg-white p-6 rounded-3xl border border-black/5 shadow-sm md:col-span-2">
+                    <div id="new-note-form" className="bg-white p-6 rounded-3xl border border-black/5 shadow-sm md:col-span-2">
                       <h4 className="text-sm font-bold uppercase tracking-wider text-primary mb-4 flex items-center gap-2">
-                        <FileCheck size={16} /> {lang === 'fr' ? "Nouvelle Consultation" : lang === 'es' ? "Nueva Consulta" : "New Consultation"}
+                        <FileCheck size={16} /> {lang === 'fr' ? "Nouvelle Consultation / Note" : lang === 'es' ? "Nueva Consulta / Nota" : "New Consultation / Note"}
                       </h4>
 
                       <form onSubmit={handleAddNote} className="space-y-4">
@@ -2153,39 +2314,53 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
 
                         <div>
                           <label className="text-[10px] uppercase tracking-wider font-bold text-gray-400 block mb-1">
-                            {lang === 'fr' ? "Anamnèse & Symptômes" : lang === 'es' ? "Anamnesis y Síntomas" : "Anamnesis & Symptoms"}
+                            {lang === 'fr' ? "Motif / Titre (optionnel)" : lang === 'es' ? "Motivo / Título (opcional)" : "Reason / Title (optional)"}
+                          </label>
+                          <input
+                            type="text"
+                            value={newNote.motif}
+                            onChange={(e) => setNewNote(prev => ({ ...prev, motif: e.target.value }))}
+                            placeholder={lang === 'fr' ? "ex: Lombalgie, Note de suivi, Bilan..." : lang === 'es' ? "ej: Cervicalgia, Nota de seguimiento..." : "e.g., Back pain, Follow-up note..."}
+                            className="w-full p-2.5 bg-[#f4f4ec] rounded-xl border border-black/5 text-xs focus:outline-none focus:ring-1 focus:ring-primary focus:bg-white transition-all"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="text-[10px] uppercase tracking-wider font-bold text-gray-400 block mb-1">
+                            {lang === 'fr' ? "Anamnèse & Symptômes / Observation" : lang === 'es' ? "Anamnesis y Síntomas / Observación" : "Anamnesis & Symptoms / Note"}
                           </label>
                           <textarea
                             value={newNote.anamnese}
                             onChange={(e) => setNewNote(prev => ({ ...prev, anamnese: e.target.value }))}
                             rows={4}
-                            placeholder={lang === 'fr' ? "ex: Douleur lombaire basse gauche depuis 3 jours, anamnèse..." : lang === 'es' ? "ej: Dolor lumbar bajo izquierdo desde hace 3 días, anamnesis..." : "e.g., Left lower back pain for 3 days, anamnesis..."}
+                            placeholder={lang === 'fr' ? "Saisissez les symptômes, observations ou notes sur le patient..." : lang === 'es' ? "Escriba los síntomas, observaciones o notas..." : "Enter symptoms, observations or notes..."}
                             className="w-full p-3 bg-[#f4f4ec] rounded-2xl border border-black/5 text-xs focus:outline-none focus:ring-1 focus:ring-primary focus:bg-white transition-all resize-none leading-relaxed"
                           ></textarea>
                         </div>
 
                         <div>
                           <label className="text-[10px] uppercase tracking-wider font-bold text-gray-400 block mb-1">
-                            {lang === 'fr' ? "Traitement & Recommandations" : lang === 'es' ? "Tratamiento y Recomendaciones" : "Treatment & Recommendations"}
+                            {lang === 'fr' ? "Traitement & Recommandations (optionnel)" : lang === 'es' ? "Tratamiento y Recomendaciones (opcional)" : "Treatment & Recommendations (optional)"}
                           </label>
                           <textarea
                             value={newNote.treatment}
                             onChange={(e) => setNewNote(prev => ({ ...prev, treatment: e.target.value }))}
-                            rows={4}
-                            placeholder={lang === 'fr' ? "ex: Libération sacrée, mobilisations, étirements..." : lang === 'es' ? "ej: Liberación sacra, movilizaciones, estiramientos..." : "e.g., Sacral release, mobilizations, stretches..."}
+                            rows={3}
+                            placeholder={lang === 'fr' ? "ex: Libération sacrée, mobilisations, étirements..." : lang === 'es' ? "ej: Liberación sacra, movilizaciones..." : "e.g., Sacral release, mobilizations..."}
                             className="w-full p-3 bg-[#f4f4ec] rounded-2xl border border-black/5 text-xs focus:outline-none focus:ring-1 focus:ring-primary focus:bg-white transition-all resize-none leading-relaxed"
                           ></textarea>
                           <span className="text-[9px] text-gray-400 block mt-1">
-                            {lang === 'fr' ? "Dossier sauvegardé automatiquement en mode sécurisé." : lang === 'es' ? "Expediente guardado automáticamente en modo seguro." : "Record saved automatically in secure mode."}
+                            {lang === 'fr' ? "Note enregistrée de manière sécurisée sur le profil patient." : lang === 'es' ? "Nota guardada de manera segura en el perfil del paciente." : "Note securely saved to patient profile."}
                           </span>
                         </div>
 
                         <button
                           type="submit"
-                          disabled={!newNote.anamnese && !newNote.treatment}
-                          className="w-full py-3 bg-primary text-white rounded-2xl text-xs font-bold uppercase tracking-wider hover:bg-primary/95 transition-all shadow-md shadow-primary/10 disabled:opacity-50"
+                          disabled={!newNote.anamnese.trim() && !newNote.treatment.trim() && !newNote.motif.trim()}
+                          className="w-full py-3 bg-primary text-white rounded-2xl text-xs font-bold uppercase tracking-wider hover:bg-primary/95 transition-all shadow-md shadow-primary/10 disabled:opacity-50 flex items-center justify-center gap-2 cursor-pointer"
                         >
-                          {lang === 'fr' ? "Enregistrer la note" : lang === 'es' ? "Guardar la nota" : "Save note"}
+                          <Plus size={14} />
+                          <span>{lang === 'fr' ? "Enregistrer la note" : lang === 'es' ? "Guardar la nota" : "Save note"}</span>
                         </button>
                       </form>
                     </div>
@@ -5695,6 +5870,19 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                     value={editingClient.address || ''}
                     onChange={(e) => setEditingClient(prev => prev ? ({ ...prev, address: e.target.value }) : null)}
                     className="w-full p-2.5 bg-secondary rounded-xl border border-black/5 text-xs focus:outline-none focus:ring-1 focus:ring-primary focus:bg-white transition-all"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[10px] uppercase tracking-wider font-bold text-gray-400 block mb-1">
+                    {lang === 'fr' ? 'Remarque / Note d\'information du profil' : lang === 'es' ? 'Nota rápida del perfil' : 'Profile note'}
+                  </label>
+                  <textarea
+                    rows={2}
+                    placeholder={lang === 'fr' ? 'Ex: Préférences horaires, allergie, passe-temps, contact WhatsApp...' : 'e.g., Preferences, reminders...'}
+                    value={editingClient.profileNote || ''}
+                    onChange={(e) => setEditingClient(prev => prev ? ({ ...prev, profileNote: e.target.value }) : null)}
+                    className="w-full p-2.5 bg-secondary rounded-xl border border-black/5 text-xs focus:outline-none focus:ring-1 focus:ring-primary focus:bg-white transition-all resize-none"
                   />
                 </div>
 
