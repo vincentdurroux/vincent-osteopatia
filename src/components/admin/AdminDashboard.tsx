@@ -615,46 +615,8 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
         noteId: newInvoice.eventId || undefined,
       });
 
-      // Update client Bono status
-      if (newInvoiceBillingPlan === 'bono3' || newInvoiceBillingPlan === 'bono5') {
-        const totalSessions = newInvoiceBillingPlan === 'bono3' ? 3 : 5;
-        const remaining = newInvoiceIncludeToday ? totalSessions - 1 : totalSessions;
-        const bonoTitle = newInvoiceBillingPlan === 'bono3' ? 'Bono 3 séances' : 'Bono 5 séances';
-        const updatedClient = {
-          ...client,
-          hasBono: true,
-          bonoType: bonoTitle,
-          defaultDiscount: newInvoiceBillingPlan === 'bono3' ? 20 : 50,
-          bonoSessionsRemaining: remaining,
-        };
-        await api.updateClient(updatedClient);
-        setClients(prev => prev.map(c => c.id === updatedClient.id ? updatedClient : c));
-        if (selectedClient?.id === client.id) {
-          setSelectedClient(updatedClient);
-        }
-      } else if (newInvoiceBillingPlan === 'deduct_bono' && client.hasBono && typeof client.bonoSessionsRemaining === 'number' && client.bonoSessionsRemaining > 0) {
-        const updatedClient = {
-          ...client,
-          bonoSessionsRemaining: Math.max(0, client.bonoSessionsRemaining - 1),
-        };
-        await api.updateClient(updatedClient);
-        setClients(prev => prev.map(c => c.id === updatedClient.id ? updatedClient : c));
-        if (selectedClient?.id === client.id) {
-          setSelectedClient(updatedClient);
-        }
-      } else if (newInvoice.discountType === 'bono' && client.hasBono && typeof client.bonoSessionsRemaining === 'number' && client.bonoSessionsRemaining > 0) {
-        const updatedClient = {
-          ...client,
-          bonoSessionsRemaining: Math.max(0, client.bonoSessionsRemaining - 1),
-        };
-        await api.updateClient(updatedClient);
-        setClients(prev => prev.map(c => c.id === updatedClient.id ? updatedClient : c));
-        if (selectedClient?.id === client.id) {
-          setSelectedClient(updatedClient);
-        }
-      }
-
-      setInvoices(prev => [created, ...prev]);
+      // Update state immediately to guarantee invoice persists in UI
+      setInvoices(prev => [created, ...prev.filter(i => i.id !== created.id)]);
       setIsAddInvoiceOpen(false);
       setNewInvoiceBillingPlan('single');
       setNewInvoiceIncludeToday(true);
@@ -672,6 +634,49 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
         date: new Date().toISOString().split('T')[0],
         eventId: '',
       });
+
+      // Update client Bono status safely without risking invoice creation
+      try {
+        if (newInvoiceBillingPlan === 'bono3' || newInvoiceBillingPlan === 'bono5') {
+          const totalSessions = newInvoiceBillingPlan === 'bono3' ? 3 : 5;
+          const remaining = newInvoiceIncludeToday ? totalSessions - 1 : totalSessions;
+          const bonoTitle = newInvoiceBillingPlan === 'bono3' ? 'Bono 3 séances' : 'Bono 5 séances';
+          const updatedClient = {
+            ...client,
+            hasBono: true,
+            bonoType: bonoTitle,
+            defaultDiscount: newInvoiceBillingPlan === 'bono3' ? 20 : 50,
+            bonoSessionsRemaining: remaining,
+          };
+          await api.updateClient(updatedClient);
+          setClients(prev => prev.map(c => c.id === updatedClient.id ? updatedClient : c));
+          if (selectedClient?.id === client.id) {
+            setSelectedClient(updatedClient);
+          }
+        } else if (newInvoiceBillingPlan === 'deduct_bono' && client.hasBono && typeof client.bonoSessionsRemaining === 'number' && client.bonoSessionsRemaining > 0) {
+          const updatedClient = {
+            ...client,
+            bonoSessionsRemaining: Math.max(0, client.bonoSessionsRemaining - 1),
+          };
+          await api.updateClient(updatedClient);
+          setClients(prev => prev.map(c => c.id === updatedClient.id ? updatedClient : c));
+          if (selectedClient?.id === client.id) {
+            setSelectedClient(updatedClient);
+          }
+        } else if (newInvoice.discountType === 'bono' && client.hasBono && typeof client.bonoSessionsRemaining === 'number' && client.bonoSessionsRemaining > 0) {
+          const updatedClient = {
+            ...client,
+            bonoSessionsRemaining: Math.max(0, client.bonoSessionsRemaining - 1),
+          };
+          await api.updateClient(updatedClient);
+          setClients(prev => prev.map(c => c.id === updatedClient.id ? updatedClient : c));
+          if (selectedClient?.id === client.id) {
+            setSelectedClient(updatedClient);
+          }
+        }
+      } catch (bonoErr) {
+        console.warn('Could not update client bono session count alongside invoice:', bonoErr);
+      }
     } catch (err) {
       console.error('Failed to create invoice:', err);
     }
@@ -731,41 +736,46 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
         noteId: note.id,
       });
 
-      // Update client Bono status
-      if (inlineBillingPlan === 'bono3' || inlineBillingPlan === 'bono5') {
-        const totalSessions = inlineBillingPlan === 'bono3' ? 3 : 5;
-        const remaining = inlineIncludeToday ? totalSessions - 1 : totalSessions;
-        const bonoTitle = inlineBillingPlan === 'bono3' ? 'Bono 3 séances' : 'Bono 5 séances';
-        const updatedClient = {
-          ...selectedClient,
-          hasBono: true,
-          bonoType: bonoTitle,
-          defaultDiscount: inlineBillingPlan === 'bono3' ? 20 : 50,
-          bonoSessionsRemaining: remaining,
-        };
-        await api.updateClient(updatedClient);
-        setClients(prev => prev.map(c => c.id === updatedClient.id ? updatedClient : c));
-        setSelectedClient(updatedClient);
-      } else if (inlineBillingPlan === 'deduct_bono' && selectedClient.hasBono && typeof selectedClient.bonoSessionsRemaining === 'number' && selectedClient.bonoSessionsRemaining > 0) {
-        const updatedClient = {
-          ...selectedClient,
-          bonoSessionsRemaining: Math.max(0, selectedClient.bonoSessionsRemaining - 1),
-        };
-        await api.updateClient(updatedClient);
-        setClients(prev => prev.map(c => c.id === updatedClient.id ? updatedClient : c));
-        setSelectedClient(updatedClient);
-      } else if (inlineInvoiceDiscountType === 'bono' && selectedClient.hasBono && typeof selectedClient.bonoSessionsRemaining === 'number' && selectedClient.bonoSessionsRemaining > 0) {
-        const updatedClient = {
-          ...selectedClient,
-          bonoSessionsRemaining: Math.max(0, selectedClient.bonoSessionsRemaining - 1),
-        };
-        await api.updateClient(updatedClient);
-        setClients(prev => prev.map(c => c.id === updatedClient.id ? updatedClient : c));
-        setSelectedClient(updatedClient);
-      }
-
-      setInvoices(prev => [created, ...prev]);
+      // Update state immediately to guarantee invoice persists in UI
+      setInvoices(prev => [created, ...prev.filter(i => i.id !== created.id)]);
       setCreatingInvoiceForNoteId(null);
+
+      // Update client Bono status safely
+      try {
+        if (inlineBillingPlan === 'bono3' || inlineBillingPlan === 'bono5') {
+          const totalSessions = inlineBillingPlan === 'bono3' ? 3 : 5;
+          const remaining = inlineIncludeToday ? totalSessions - 1 : totalSessions;
+          const bonoTitle = inlineBillingPlan === 'bono3' ? 'Bono 3 séances' : 'Bono 5 séances';
+          const updatedClient = {
+            ...selectedClient,
+            hasBono: true,
+            bonoType: bonoTitle,
+            defaultDiscount: inlineBillingPlan === 'bono3' ? 20 : 50,
+            bonoSessionsRemaining: remaining,
+          };
+          await api.updateClient(updatedClient);
+          setClients(prev => prev.map(c => c.id === updatedClient.id ? updatedClient : c));
+          setSelectedClient(updatedClient);
+        } else if (inlineBillingPlan === 'deduct_bono' && selectedClient.hasBono && typeof selectedClient.bonoSessionsRemaining === 'number' && selectedClient.bonoSessionsRemaining > 0) {
+          const updatedClient = {
+            ...selectedClient,
+            bonoSessionsRemaining: Math.max(0, selectedClient.bonoSessionsRemaining - 1),
+          };
+          await api.updateClient(updatedClient);
+          setClients(prev => prev.map(c => c.id === updatedClient.id ? updatedClient : c));
+          setSelectedClient(updatedClient);
+        } else if (inlineInvoiceDiscountType === 'bono' && selectedClient.hasBono && typeof selectedClient.bonoSessionsRemaining === 'number' && selectedClient.bonoSessionsRemaining > 0) {
+          const updatedClient = {
+            ...selectedClient,
+            bonoSessionsRemaining: Math.max(0, selectedClient.bonoSessionsRemaining - 1),
+          };
+          await api.updateClient(updatedClient);
+          setClients(prev => prev.map(c => c.id === updatedClient.id ? updatedClient : c));
+          setSelectedClient(updatedClient);
+        }
+      } catch (bonoErr) {
+        console.warn('Could not update client bono session count alongside inline invoice:', bonoErr);
+      }
     } catch (err) {
       console.error('Failed to create inline invoice:', err);
     }
@@ -907,6 +917,15 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
       if (editingNoteTreatment.trim()) parts.push(editingNoteTreatment.trim());
       const combinedContent = parts.join('\n\n') || editingNoteMotif.trim() || '';
 
+      let noteDate = noteToUpdate.date;
+      if (editingNoteDate) {
+        try {
+          noteDate = new Date(editingNoteDate).toISOString();
+        } catch {
+          noteDate = noteToUpdate.date;
+        }
+      }
+
       const updated = await api.updateClientNote({
         ...noteToUpdate,
         anamnese: editingNoteAnamnese.trim(),
@@ -914,7 +933,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
         content: combinedContent,
         category: editingNoteCategory,
         motif: editingNoteMotif.trim() || undefined,
-        date: new Date(editingNoteDate).toISOString(),
+        date: noteDate,
       });
 
       setClientNotes(prev => prev.map(n => n.id === noteId ? updated : n));
@@ -2374,9 +2393,9 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                       {clientNotes.map(note => {
                         const isEditing = editingNoteId === note.id;
                         return (
-                          <div key={note.id} className="bg-white p-5 rounded-3xl border border-black/5 shadow-sm space-y-3 relative group">
+                          <div key={note.id} className="bg-white p-5 rounded-3xl border border-black/5 shadow-sm space-y-3 relative group transition-all">
                             {isEditing ? (
-                              <div className="space-y-3">
+                              <div className="space-y-3 bg-[#fafaf7] p-4 rounded-2xl border border-primary/20 shadow-inner">
                                 <div className="flex items-center justify-between gap-4">
                                   <div className="flex-1">
                                     <label className="text-[9px] uppercase tracking-wider font-bold text-gray-400 block mb-1">
@@ -2385,7 +2404,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                     <select
                                       value={editingNoteCategory}
                                       onChange={(e) => setEditingNoteCategory(e.target.value as ClientNote['category'])}
-                                      className="p-1.5 bg-[#f4f4ec] rounded-lg border border-black/5 text-[11px] focus:outline-none focus:ring-1 focus:ring-primary focus:bg-white transition-all w-full sm:w-auto"
+                                      className="p-1.5 bg-white rounded-lg border border-black/10 text-[11px] focus:outline-none focus:ring-1 focus:ring-primary transition-all w-full sm:w-auto font-medium"
                                     >
                                       <option value="treatment">{lang === 'fr' ? "Traitement / Ostéopathie" : lang === 'es' ? "Tratamiento / Osteopatía" : "Treatment / Osteopathy"}</option>
                                       <option value="evaluation">{lang === 'fr' ? "Anamnèse / Évaluation" : lang === 'es' ? "Anamnesis / Evaluación" : "Anamnesis / Evaluation"}</option>
@@ -2393,21 +2412,36 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                       <option value="general">{lang === 'fr' ? "Note générale" : lang === 'es' ? "Nota general" : "General note"}</option>
                                     </select>
                                   </div>
-                                  <span className="text-[10px] text-gray-400">
+                                  <span className="text-[10px] text-gray-400 font-mono">
                                     {new Date(note.date).toLocaleDateString(lang === 'fr' ? 'fr-FR' : lang === 'es' ? 'es-ES' : 'en-US', { day: 'numeric', month: 'short', year: 'numeric' })}
                                   </span>
                                 </div>
 
-                                <div className="w-full max-w-xs">
-                                  <label className="text-[9px] uppercase tracking-wider font-bold text-gray-400 block mb-1">
-                                    {lang === 'fr' ? "Date" : lang === 'es' ? "Fecha" : "Date"}
-                                  </label>
-                                  <input
-                                    type="date"
-                                    value={editingNoteDate}
-                                    onChange={(e) => setEditingNoteDate(e.target.value)}
-                                    className="w-full p-1.5 bg-[#f4f4ec] rounded-lg border border-black/5 text-[11px] focus:outline-none focus:ring-1 focus:ring-primary focus:bg-white transition-all"
-                                  />
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                  <div>
+                                    <label className="text-[9px] uppercase tracking-wider font-bold text-gray-400 block mb-1">
+                                      {lang === 'fr' ? "Date" : lang === 'es' ? "Fecha" : "Date"}
+                                    </label>
+                                    <input
+                                      type="date"
+                                      value={editingNoteDate}
+                                      onChange={(e) => setEditingNoteDate(e.target.value)}
+                                      className="w-full p-2 bg-white rounded-xl border border-black/10 text-xs focus:outline-none focus:ring-1 focus:ring-primary transition-all"
+                                    />
+                                  </div>
+
+                                  <div>
+                                    <label className="text-[9px] uppercase tracking-wider font-bold text-gray-400 block mb-1">
+                                      {lang === 'fr' ? "Motif / Titre (optionnel)" : lang === 'es' ? "Motivo / Título (opcional)" : "Reason / Title (optional)"}
+                                    </label>
+                                    <input
+                                      type="text"
+                                      value={editingNoteMotif}
+                                      onChange={(e) => setEditingNoteMotif(e.target.value)}
+                                      placeholder={lang === 'fr' ? "ex: Lombalgie aiguë, Suivi posture..." : "e.g., Back pain..."}
+                                      className="w-full p-2 bg-white rounded-xl border border-black/10 text-xs focus:outline-none focus:ring-1 focus:ring-primary transition-all"
+                                    />
+                                  </div>
                                 </div>
 
                                 <div className="space-y-2">
@@ -2418,8 +2452,9 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                     <textarea
                                       value={editingNoteAnamnese}
                                       onChange={(e) => setEditingNoteAnamnese(e.target.value)}
-                                      rows={6}
-                                      className="w-full p-2.5 bg-[#f4f4ec] rounded-xl border border-black/5 text-xs focus:outline-none focus:ring-1 focus:ring-primary focus:bg-white transition-all resize-none leading-relaxed"
+                                      rows={5}
+                                      placeholder={lang === 'fr' ? "Observations, symptômes, motifs de consultation..." : "Observations, symptoms..."}
+                                      className="w-full p-2.5 bg-white rounded-xl border border-black/10 text-xs focus:outline-none focus:ring-1 focus:ring-primary transition-all resize-none leading-relaxed"
                                     />
                                   </div>
 
@@ -2430,46 +2465,48 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                     <textarea
                                       value={editingNoteTreatment}
                                       onChange={(e) => setEditingNoteTreatment(e.target.value)}
-                                      rows={6}
-                                      className="w-full p-2.5 bg-[#f4f4ec] rounded-xl border border-black/5 text-xs focus:outline-none focus:ring-1 focus:ring-primary focus:bg-white transition-all resize-none leading-relaxed"
+                                      rows={5}
+                                      placeholder={lang === 'fr' ? "Techniques ostéopathiques réalisées, conseils, exercices..." : "Techniques, advice..."}
+                                      className="w-full p-2.5 bg-white rounded-xl border border-black/10 text-xs focus:outline-none focus:ring-1 focus:ring-primary transition-all resize-none leading-relaxed"
                                     />
                                   </div>
                                 </div>
 
-                                <div className="flex items-center justify-between gap-2 pt-2 border-t border-black/5">
+                                <div className="flex items-center justify-between gap-2 pt-3 border-t border-black/10">
                                   <button
                                     type="button"
                                     onClick={() => handleDeleteNote(note.id)}
-                                    className="flex items-center gap-1.5 px-2.5 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-xl text-[10px] font-bold uppercase tracking-wider transition-all"
-                                    title={lang === 'fr' ? "Supprimer la note" : lang === 'es' ? "Eliminar nota" : "Delete note"}
+                                    className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-xl text-xs font-bold transition-all cursor-pointer border border-rose-200"
+                                    title={lang === 'fr' ? "Supprimer cette note" : lang === 'es' ? "Eliminar nota" : "Delete note"}
                                     aria-label={lang === 'fr' ? "Supprimer la note" : lang === 'es' ? "Eliminar nota" : "Delete note"}
                                   >
-                                    <Trash2 size={12} />
+                                    <Trash2 size={13} />
                                     <span>{lang === 'fr' ? "Supprimer" : lang === 'es' ? "Eliminar" : "Delete"}</span>
                                   </button>
                                   <div className="flex items-center gap-2">
                                     <button
                                       type="button"
                                       onClick={() => setEditingNoteId(null)}
-                                      className="px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-600 rounded-xl text-[10px] font-bold uppercase tracking-wider transition-all"
+                                      className="px-3.5 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-600 rounded-xl text-xs font-bold transition-all cursor-pointer"
                                     >
                                       {lang === 'fr' ? "Annuler" : lang === 'es' ? "Cancelar" : "Cancel"}
                                     </button>
                                     <button
                                       type="button"
                                       onClick={() => handleUpdateNote(note.id)}
-                                      disabled={!editingNoteAnamnese && !editingNoteTreatment}
-                                      className="px-3 py-1.5 bg-primary hover:bg-primary/95 text-white rounded-xl text-[10px] font-bold uppercase tracking-wider transition-all disabled:opacity-50"
+                                      disabled={!editingNoteAnamnese.trim() && !editingNoteTreatment.trim() && !editingNoteMotif.trim()}
+                                      className="px-4 py-1.5 bg-primary hover:bg-primary/95 text-white rounded-xl text-xs font-bold transition-all disabled:opacity-50 cursor-pointer shadow-xs flex items-center gap-1.5"
                                     >
-                                      {lang === 'fr' ? "Enregistrer" : lang === 'es' ? "Guardar" : "Save"}
+                                      <Check size={13} />
+                                      <span>{lang === 'fr' ? "Enregistrer" : lang === 'es' ? "Guardar" : "Save"}</span>
                                     </button>
                                   </div>
                                 </div>
                               </div>
                             ) : (
                               <>
-                                <div className="flex items-center justify-between">
-                                  <div className="flex items-center gap-2">
+                                <div className="flex items-center justify-between gap-3">
+                                  <div className="flex items-center gap-2 flex-wrap">
                                     <span className={`text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full ${
                                       note.category === 'treatment' ? 'bg-emerald-50 text-emerald-700' :
                                       note.category === 'evaluation' ? 'bg-indigo-50 text-indigo-700' :
@@ -2479,13 +2516,13 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                        note.category === 'evaluation' ? (lang === 'fr' ? 'Évaluation' : lang === 'es' ? 'Evaluación' : 'Evaluation') :
                                        note.category === 'follow-up' ? (lang === 'fr' ? 'Suivi' : lang === 'es' ? 'Seguimiento' : 'Follow-up') : (lang === 'fr' ? 'Général' : lang === 'es' ? 'General' : 'General')}
                                     </span>
-                                    <span className="text-[10px] text-gray-400">
+                                    <span className="text-[10px] text-gray-500 font-medium">
                                       {new Date(note.date).toLocaleDateString(lang === 'fr' ? 'fr-FR' : lang === 'es' ? 'es-ES' : 'en-US', { day: 'numeric', month: 'short', year: 'numeric' })}
                                     </span>
                                   </div>
 
-                                  {/* Edit & Delete Buttons - Visible on mobile/iPhone and hover on desktop */}
-                                  <div className="flex items-center gap-1.5 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
+                                  {/* Edit & Delete Buttons - ALWAYS clearly visible on all devices */}
+                                  <div className="flex items-center gap-1.5 shrink-0">
                                     <button
                                       type="button"
                                       onClick={() => {
@@ -2494,25 +2531,40 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                         setEditingNoteTreatment(note.treatment || '');
                                         setEditingNoteCategory(note.category);
                                         setEditingNoteMotif(note.motif || '');
-                                        setEditingNoteDate(new Date(note.date).toISOString().split('T')[0]);
+                                        try {
+                                          setEditingNoteDate(new Date(note.date).toISOString().split('T')[0]);
+                                        } catch {
+                                          setEditingNoteDate(new Date().toISOString().split('T')[0]);
+                                        }
                                       }}
-                                      className="p-2 sm:p-1.5 text-gray-500 hover:text-primary hover:bg-black/5 rounded-lg transition-all min-w-[34px] min-h-[34px] flex items-center justify-center bg-black/[0.04] sm:bg-transparent"
-                                      title={lang === 'fr' ? "Modifier la note" : lang === 'es' ? "Editar nota" : "Edit note"}
+                                      className="inline-flex items-center gap-1 px-2.5 py-1 text-gray-600 hover:text-primary hover:bg-primary/5 rounded-xl border border-black/10 bg-white text-xs font-semibold transition-all cursor-pointer shadow-2xs"
+                                      title={lang === 'fr' ? "Modifier cette note" : lang === 'es' ? "Editar nota" : "Edit note"}
                                       aria-label={lang === 'fr' ? "Modifier la note" : lang === 'es' ? "Editar nota" : "Edit note"}
                                     >
-                                      <Pencil size={15} />
+                                      <Pencil size={12} className="text-gray-500" />
+                                      <span>{lang === 'fr' ? "Modifier" : lang === 'es' ? "Editar" : "Edit"}</span>
                                     </button>
                                     <button
                                       type="button"
                                       onClick={() => handleDeleteNote(note.id)}
-                                      className="p-2 sm:p-1.5 text-rose-600 hover:text-rose-700 hover:bg-rose-100 rounded-lg transition-all min-w-[34px] min-h-[34px] flex items-center justify-center bg-rose-50 sm:bg-transparent"
-                                      title={lang === 'fr' ? "Supprimer la note" : lang === 'es' ? "Eliminar nota" : "Delete note"}
+                                      className="inline-flex items-center gap-1 px-2.5 py-1 text-rose-600 hover:text-rose-700 hover:bg-rose-50 rounded-xl border border-rose-200 bg-rose-50/50 text-xs font-semibold transition-all cursor-pointer shadow-2xs"
+                                      title={lang === 'fr' ? "Supprimer cette note" : lang === 'es' ? "Eliminar nota" : "Delete note"}
                                       aria-label={lang === 'fr' ? "Supprimer la note" : lang === 'es' ? "Eliminar nota" : "Delete note"}
                                     >
-                                      <Trash2 size={15} />
+                                      <Trash2 size={12} className="text-rose-500" />
+                                      <span>{lang === 'fr' ? "Supprimer" : lang === 'es' ? "Eliminar" : "Delete"}</span>
                                     </button>
                                   </div>
                                 </div>
+
+                                {note.motif && (
+                                  <div className="pt-0.5">
+                                    <h5 className="text-xs font-bold text-gray-900 flex items-center gap-1.5">
+                                      <span className="w-1.5 h-1.5 rounded-full bg-primary inline-block"></span>
+                                      <span>{note.motif}</span>
+                                    </h5>
+                                  </div>
+                                )}
 
                                 {note.anamnese || note.treatment ? (
                                   <div className="space-y-3 pt-1">

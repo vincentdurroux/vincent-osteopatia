@@ -474,19 +474,42 @@ export function mapEventFromDB(e: any): CalendarEvent {
  * Examples:
  * - 'column "dni" of relation "clients" does not exist'
  * - "Could not find the 'dni' column of 'clients' in the schema cache"
+ * - "Could not find the column 'payment_date' of 'invoices' in the schema cache"
  * - 'column "birth_date" does not exist'
+ * - 'column invoices.payment_date does not exist'
  */
 function extractMissingColumn(errorMsg: string): string | null {
   if (!errorMsg) return null;
   const match1 = errorMsg.match(/column ["']?([a-zA-Z0-9_]+)["']? of relation/i);
   if (match1 && match1[1]) return match1[1];
 
-  const match2 = errorMsg.match(/Could not find the ['"]([a-zA-Z0-9_]+)['"] column/i);
+  const match2 = errorMsg.match(/Could not find the (?:column )?['"‘]([a-zA-Z0-9_]+)['"’]/i);
   if (match2 && match2[1]) return match2[1];
+
+  const match2b = errorMsg.match(/Could not find the ['"‘]([a-zA-Z0-9_]+)['"’] column/i);
+  if (match2b && match2b[1]) return match2b[1];
 
   const match3 = errorMsg.match(/column ["']?([a-zA-Z0-9_]+)["']? does not exist/i);
   if (match3 && match3[1]) return match3[1];
 
+  const match4 = errorMsg.match(/column [a-zA-Z0-9_]+\.([a-zA-Z0-9_]+) does not exist/i);
+  if (match4 && match4[1]) return match4[1];
+
+  const match5 = errorMsg.match(/schema cache lookup failed for column ["']?([a-zA-Z0-9_]+)["']?/i);
+  if (match5 && match5[1]) return match5[1];
+
+  return null;
+}
+
+/**
+ * Finds the corresponding key in payload regardless of snake_case or camelCase.
+ */
+function findMatchingKey(payload: Record<string, any>, col: string): string | null {
+  if (col in payload) return col;
+  const colClean = col.toLowerCase().replace(/_/g, '');
+  for (const k of Object.keys(payload)) {
+    if (k.toLowerCase().replace(/_/g, '') === colClean) return k;
+  }
   return null;
 }
 
@@ -508,37 +531,41 @@ async function executeResilientInsert(
   for (const initialPayload of candidatePayloads) {
     let currentPayload = { ...initialPayload };
     let attempts = 0;
-    const maxAttempts = Object.keys(currentPayload).length + 2;
+    const maxAttempts = Object.keys(currentPayload).length + 4;
 
     while (attempts < maxAttempts) {
       attempts++;
       try {
-        // Try insert with .select().single()
-        const res = await supabase.from(table).insert(currentPayload).select().single();
-        if (!res.error && res.data) {
+        // Try insert with .select() (array returned, never throws PGRST116)
+        const res = await supabase.from(table).insert(currentPayload).select();
+        if (!res.error) {
+          const rowData = (res.data && res.data.length > 0) ? res.data[0] : currentPayload;
           lastSupabaseStatus = {
             lastAction: `Insert ${table}`,
             success: true,
             timestamp: new Date().toISOString(),
           };
-          return { data: res.data, error: null, success: true };
+          return { data: rowData, error: null, success: true };
         }
 
-        // If .select() failed (e.g. RLS SELECT restriction), try a plain insert
+        // If insert failed, inspect error details and auto-heal
         if (res.error) {
           lastError = res.error;
-          const msg = res.error.message || '';
+          const fullMsg = [res.error.message, res.error.details, res.error.hint].filter(Boolean).join(' ');
 
           // 1. Missing column error -> strip column & retry
-          const missingCol = extractMissingColumn(msg);
-          if (missingCol && missingCol in currentPayload) {
-            console.warn(`[Supabase Auto-Heal] Column "${missingCol}" does not exist in "${table}". Stripping and retrying.`);
-            delete currentPayload[missingCol];
-            continue;
+          const missingCol = extractMissingColumn(fullMsg);
+          if (missingCol) {
+            const keyToDelete = findMatchingKey(currentPayload, missingCol);
+            if (keyToDelete && keyToDelete in currentPayload) {
+              console.warn(`[Supabase Auto-Heal] Column "${keyToDelete}" does not exist in "${table}". Stripping and retrying.`);
+              delete currentPayload[keyToDelete];
+              continue;
+            }
           }
 
           // 2. Try plain insert without .select() if it was an RLS policy issue with select
-          if (msg.includes('row-level security') || res.error.code === 'PGRST116' || res.error.code === '42501') {
+          if (fullMsg.includes('row-level security') || res.error.code === 'PGRST116' || res.error.code === '42501') {
             const plainRes = await supabase.from(table).insert(currentPayload);
             if (!plainRes.error) {
               lastSupabaseStatus = {
@@ -551,36 +578,65 @@ async function executeResilientInsert(
           }
 
           // 3. UUID or syntax error -> strip offending ID/FK columns and retry
-          if (msg.includes('invalid input syntax for type uuid') || msg.includes('22P02')) {
+          if (fullMsg.includes('invalid input syntax for type uuid') || fullMsg.includes('22P02')) {
+            let strippedAny = false;
             if (currentPayload.client_id && typeof currentPayload.client_id === 'string' && !currentPayload.client_id.includes('-')) {
               console.warn(`[Supabase Auto-Heal] client_id "${currentPayload.client_id}" is not a valid UUID. Stripping.`);
               delete currentPayload.client_id;
-              continue;
+              strippedAny = true;
             }
             if (currentPayload.clientId && typeof currentPayload.clientId === 'string' && !currentPayload.clientId.includes('-')) {
               console.warn(`[Supabase Auto-Heal] clientId "${currentPayload.clientId}" is not a valid UUID. Stripping.`);
               delete currentPayload.clientId;
-              continue;
+              strippedAny = true;
+            }
+            if (currentPayload.note_id && typeof currentPayload.note_id === 'string' && !currentPayload.note_id.includes('-')) {
+              delete currentPayload.note_id;
+              strippedAny = true;
+            }
+            if (currentPayload.noteId && typeof currentPayload.noteId === 'string' && !currentPayload.noteId.includes('-')) {
+              delete currentPayload.noteId;
+              strippedAny = true;
             }
             if ('id' in currentPayload && typeof currentPayload.id === 'string' && !currentPayload.id.includes('-')) {
               console.warn(`[Supabase Auto-Heal] id "${currentPayload.id}" is not a valid UUID. Regenerating UUID.`);
               currentPayload.id = crypto.randomUUID();
-              continue;
+              strippedAny = true;
             }
+            if (strippedAny) continue;
           }
 
           // 4. Foreign key violation -> strip foreign key column & retry
-          if (msg.includes('foreign key constraint') || res.error.code === '23503') {
-            if ('client_id' in currentPayload) { delete currentPayload.client_id; continue; }
-            if ('clientId' in currentPayload) { delete currentPayload.clientId; continue; }
+          if (fullMsg.includes('foreign key constraint') || res.error.code === '23503') {
+            let strippedFk = false;
+            if ('client_id' in currentPayload) { delete currentPayload.client_id; strippedFk = true; }
+            if ('clientId' in currentPayload) { delete currentPayload.clientId; strippedFk = true; }
+            if ('note_id' in currentPayload) { delete currentPayload.note_id; strippedFk = true; }
+            if ('noteId' in currentPayload) { delete currentPayload.noteId; strippedFk = true; }
+            if (strippedFk) continue;
           }
 
           // 5. ID type mismatch (e.g. integer primary key) -> try without id if generated
-          if (msg.includes('invalid input syntax for type integer') || msg.includes('invalid input syntax for type bigint')) {
+          if (fullMsg.includes('invalid input syntax for type integer') || fullMsg.includes('invalid input syntax for type bigint')) {
             if ('id' in currentPayload) {
               console.warn(`[Supabase Auto-Heal] Table "${table}" uses integer IDs. Stripping string UUID and retrying.`);
               delete currentPayload.id;
               continue;
+            }
+          }
+
+          // 6. Duplicate key / primary key violation -> update instead!
+          if (fullMsg.includes('duplicate key') || res.error.code === '23505') {
+            try {
+              const targetId = currentPayload.id || initialPayload.id;
+              if (targetId) {
+                const updRes = await supabase.from(table).update(currentPayload).eq('id', targetId).select();
+                if (!updRes.error && updRes.data) {
+                  return { data: updRes.data[0] || currentPayload, error: null, success: true };
+                }
+              }
+            } catch {
+              // ignore
             }
           }
 
@@ -621,37 +677,60 @@ async function executeResilientUpdate(
   for (const initialPayload of candidatePayloads) {
     let currentPayload = { ...initialPayload };
     let attempts = 0;
-    const maxAttempts = Object.keys(currentPayload).length + 2;
+    const maxAttempts = Object.keys(currentPayload).length + 4;
 
     while (attempts < maxAttempts) {
       attempts++;
       try {
-        const res = await supabase.from(table).update(currentPayload).eq('id', id).select().single();
-        if (!res.error && res.data) {
+        const res = await supabase.from(table).update(currentPayload).eq('id', id).select();
+        if (!res.error) {
+          const rowData = (res.data && res.data.length > 0) ? res.data[0] : { id, ...currentPayload };
           lastSupabaseStatus = {
             lastAction: `Update ${table}`,
             success: true,
             timestamp: new Date().toISOString(),
           };
-          return { data: res.data, error: null, success: true };
+          return { data: rowData, error: null, success: true };
         }
 
         if (res.error) {
           lastError = res.error;
-          const msg = res.error.message || '';
+          const fullMsg = [res.error.message, res.error.details, res.error.hint].filter(Boolean).join(' ');
 
-          const missingCol = extractMissingColumn(msg);
-          if (missingCol && missingCol in currentPayload) {
-            console.warn(`[Supabase Auto-Heal] Column "${missingCol}" does not exist in "${table}". Stripping and retrying.`);
-            delete currentPayload[missingCol];
-            continue;
+          const missingCol = extractMissingColumn(fullMsg);
+          if (missingCol) {
+            const keyToDelete = findMatchingKey(currentPayload, missingCol);
+            if (keyToDelete && keyToDelete in currentPayload) {
+              console.warn(`[Supabase Auto-Heal] Column "${keyToDelete}" does not exist in "${table}". Stripping and retrying update.`);
+              delete currentPayload[keyToDelete];
+              continue;
+            }
           }
 
-          // Plain update without select
-          if (msg.includes('row-level security') || res.error.code === 'PGRST116' || res.error.code === '42501') {
+          // Plain update without select (RLS)
+          if (fullMsg.includes('row-level security') || res.error.code === 'PGRST116' || res.error.code === '42501') {
             const plainRes = await supabase.from(table).update(currentPayload).eq('id', id);
             if (!plainRes.error) {
               return { data: { id, ...currentPayload }, error: null, success: true };
+            }
+          }
+
+          // Foreign key constraint violation on update
+          if (fullMsg.includes('foreign key constraint') || res.error.code === '23503') {
+            let stripped = false;
+            if ('client_id' in currentPayload) { delete currentPayload.client_id; stripped = true; }
+            if ('clientId' in currentPayload) { delete currentPayload.clientId; stripped = true; }
+            if ('note_id' in currentPayload) { delete currentPayload.note_id; stripped = true; }
+            if ('noteId' in currentPayload) { delete currentPayload.noteId; stripped = true; }
+            if (stripped) continue;
+          }
+
+          // Fallback matching by invoice_number if id update failed
+          if (currentPayload.invoice_number || currentPayload.invoiceNumber) {
+            const invNum = currentPayload.invoice_number || currentPayload.invoiceNumber;
+            const resByNum = await supabase.from(table).update(currentPayload).eq('invoice_number', invNum).select();
+            if (!resByNum.error && resByNum.data && resByNum.data.length > 0) {
+              return { data: resByNum.data[0], error: null, success: true };
             }
           }
 
@@ -662,6 +741,17 @@ async function executeResilientUpdate(
         break;
       }
     }
+  }
+
+  // If update did not find the row (e.g. was never inserted remotely), attempt resilient insert
+  try {
+    const insertPayload = candidatePayloads[0];
+    const insertRes = await executeResilientInsert(table, [{ id, ...insertPayload }]);
+    if (insertRes.success && insertRes.data) {
+      return insertRes;
+    }
+  } catch {
+    // ignore
   }
 
   lastSupabaseStatus = {
@@ -698,7 +788,8 @@ CREATE TABLE IF NOT EXISTS public.clients (
     has_bono BOOLEAN DEFAULT FALSE,
     bono_type TEXT,
     default_discount NUMERIC DEFAULT 0,
-    bono_sessions_remaining NUMERIC DEFAULT 0
+    bono_sessions_remaining NUMERIC DEFAULT 0,
+    profile_note TEXT
 );
 
 DO $$
@@ -725,6 +816,8 @@ BEGIN
     BEGIN ALTER TABLE public.clients ADD COLUMN "defaultDiscount" NUMERIC DEFAULT 0; EXCEPTION WHEN duplicate_column THEN END;
     BEGIN ALTER TABLE public.clients ADD COLUMN bono_sessions_remaining NUMERIC DEFAULT 0; EXCEPTION WHEN duplicate_column THEN END;
     BEGIN ALTER TABLE public.clients ADD COLUMN "bonoSessionsRemaining" NUMERIC DEFAULT 0; EXCEPTION WHEN duplicate_column THEN END;
+    BEGIN ALTER TABLE public.clients ADD COLUMN profile_note TEXT; EXCEPTION WHEN duplicate_column THEN END;
+    BEGIN ALTER TABLE public.clients ADD COLUMN "profileNote" TEXT; EXCEPTION WHEN duplicate_column THEN END;
 END $$;
 
 -- 2. TABLE DES NOTES CLINIQUES & DOSSIERS PATIENTS
@@ -759,6 +852,7 @@ CREATE TABLE IF NOT EXISTS public.invoices (
     client_id TEXT,
     client_name TEXT,
     date TEXT,
+    payment_date TEXT,
     amount NUMERIC,
     original_amount NUMERIC,
     discount_amount NUMERIC,
@@ -781,6 +875,8 @@ BEGIN
     BEGIN ALTER TABLE public.invoices ADD COLUMN client_name TEXT; EXCEPTION WHEN duplicate_column THEN END;
     BEGIN ALTER TABLE public.invoices ADD COLUMN "clientName" TEXT; EXCEPTION WHEN duplicate_column THEN END;
     BEGIN ALTER TABLE public.invoices ADD COLUMN date TEXT; EXCEPTION WHEN duplicate_column THEN END;
+    BEGIN ALTER TABLE public.invoices ADD COLUMN payment_date TEXT; EXCEPTION WHEN duplicate_column THEN END;
+    BEGIN ALTER TABLE public.invoices ADD COLUMN "paymentDate" TEXT; EXCEPTION WHEN duplicate_column THEN END;
     BEGIN ALTER TABLE public.invoices ADD COLUMN amount NUMERIC; EXCEPTION WHEN duplicate_column THEN END;
     BEGIN ALTER TABLE public.invoices ADD COLUMN original_amount NUMERIC; EXCEPTION WHEN duplicate_column THEN END;
     BEGIN ALTER TABLE public.invoices ADD COLUMN "originalAmount" NUMERIC; EXCEPTION WHEN duplicate_column THEN END;
@@ -1510,9 +1606,38 @@ export const api = {
         const { data, error } = await supabase.from('invoices').select('*').order('date', { ascending: false });
         if (!error && data) {
           const remoteInvoices = data.map(mapInvoiceFromDB);
-          // If Supabase is active, it is the single source of truth. No unsynced merge to avoid undead items.
-          saveLocal('invoices', remoteInvoices);
-          return remoteInvoices;
+          
+          // Smart merge: retain local invoices that haven't been wiped or are waiting for server sync
+          const merged = [...remoteInvoices];
+          const remoteIds = new Set(remoteInvoices.map(r => r.id));
+          const remoteNums = new Set(remoteInvoices.map(r => r.invoiceNumber).filter(Boolean));
+
+          for (const loc of localInvoices) {
+            if (!remoteIds.has(loc.id) && (!loc.invoiceNumber || !remoteNums.has(loc.invoiceNumber))) {
+              merged.push(loc);
+              // Background sync so it gets persisted in Supabase
+              executeResilientInsert('invoices', [{
+                id: loc.id,
+                invoice_number: loc.invoiceNumber,
+                client_id: loc.clientId,
+                client_name: loc.clientName,
+                date: loc.date,
+                amount: loc.amount,
+                status: loc.status || 'paid',
+                payment_method: loc.paymentMethod || 'card',
+                description: loc.description,
+                language: loc.language || 'fr',
+                ...(loc.paymentDate ? { payment_date: loc.paymentDate } : {}),
+                ...(loc.originalAmount !== undefined ? { original_amount: loc.originalAmount } : {}),
+                ...(loc.discountAmount !== undefined ? { discount_amount: loc.discountAmount } : {}),
+                ...(loc.discountType ? { discount_type: loc.discountType } : {}),
+                ...(loc.discountLabel ? { discount_label: loc.discountLabel } : {}),
+              }]).catch(() => {});
+            }
+          }
+
+          saveLocal('invoices', merged);
+          return merged.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
         }
         if (error) {
           console.warn('Supabase invoices fetch failed, using local storage:', error.message);
@@ -1534,6 +1659,12 @@ export const api = {
       id: invoice.id || crypto.randomUUID(),
       invoiceNumber,
     };
+
+    // Save locally immediately to guarantee persistence
+    const idx = currentInvoices.findIndex(i => i.id === newInvoice.id);
+    if (idx !== -1) currentInvoices[idx] = newInvoice;
+    else currentInvoices.unshift(newInvoice);
+    saveLocal('invoices', currentInvoices);
 
     if (isSupabaseConfigured && supabase) {
       try {
@@ -1579,10 +1710,11 @@ export const api = {
 
         if (result.success && result.data) {
           const mapped = mapInvoiceFromDB(result.data);
-          const idx = currentInvoices.findIndex(i => i.id === mapped.id);
-          if (idx !== -1) currentInvoices[idx] = mapped;
-          else currentInvoices.push(mapped);
-          saveLocal('invoices', currentInvoices);
+          const fresh = loadLocal('invoices', mockInvoices);
+          const fIdx = fresh.findIndex(i => i.id === mapped.id || (mapped.invoiceNumber && i.invoiceNumber === mapped.invoiceNumber));
+          if (fIdx !== -1) fresh[fIdx] = mapped;
+          else fresh.unshift(mapped);
+          saveLocal('invoices', fresh);
           return mapped;
         }
       } catch (err) {
@@ -1590,14 +1722,21 @@ export const api = {
       }
     }
 
-    const idx = currentInvoices.findIndex(i => i.id === newInvoice.id);
-    if (idx !== -1) currentInvoices[idx] = newInvoice;
-    else currentInvoices.push(newInvoice);
-    saveLocal('invoices', currentInvoices);
     return newInvoice;
   },
 
   async updateInvoice(invoice: Invoice): Promise<Invoice> {
+    // Save locally immediately to guarantee persistence
+    const current = loadLocal('invoices', mockInvoices);
+    const index = current.findIndex(c => c.id === invoice.id);
+    if (index !== -1) {
+      current[index] = invoice;
+      saveLocal('invoices', current);
+    } else {
+      current.unshift(invoice);
+      saveLocal('invoices', current);
+    }
+
     if (isSupabaseConfigured && supabase) {
       try {
         const snakePayload: Record<string, any> = {
@@ -1637,10 +1776,10 @@ export const api = {
         const result = await executeResilientUpdate('invoices', invoice.id, [snakePayload, camelPayload]);
         if (result.success && result.data) {
           const mapped = mapInvoiceFromDB(result.data);
-          const current = loadLocal('invoices', mockInvoices);
-          const index = current.findIndex(i => i.id === invoice.id);
-          if (index !== -1) current[index] = mapped;
-          saveLocal('invoices', current);
+          const fresh = loadLocal('invoices', mockInvoices);
+          const fIdx = fresh.findIndex(i => i.id === invoice.id);
+          if (fIdx !== -1) fresh[fIdx] = mapped;
+          saveLocal('invoices', fresh);
           return mapped;
         }
       } catch (err) {
@@ -1648,12 +1787,6 @@ export const api = {
       }
     }
 
-    const current = loadLocal('invoices', mockInvoices);
-    const index = current.findIndex(c => c.id === invoice.id);
-    if (index !== -1) {
-      current[index] = invoice;
-      saveLocal('invoices', current);
-    }
     return invoice;
   },
 
