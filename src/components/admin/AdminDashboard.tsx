@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Users, Calendar, FileText, TrendingUp, Plus, Search, Trash2, 
@@ -6,10 +6,11 @@ import {
   CreditCard, Shield, Clock, MapPin, Phone, Mail, FileCheck, Printer,
   ChevronRight, Pencil, ChevronLeft, LayoutGrid, List, ArrowRight,
   Copy, CheckCircle2, XCircle, AlertTriangle, Database, Server, UserPlus, User,
-  Tag, BadgePercent, Percent, Sparkles, IdCard, X, Columns3, Lock, Coffee, Briefcase, Bookmark, Pin, StickyNote
+  Tag, BadgePercent, Percent, Sparkles, IdCard, X, Columns3, Lock, Coffee, Briefcase, Bookmark, Pin, StickyNote,
+  ArrowUpDown, ArrowUp, ArrowDown
 } from 'lucide-react';
 import { Client, ClientNote, Invoice, CalendarEvent, EventType } from '../../types';
-import { api, isSupabaseConfigured, SUPABASE_SQL_SETUP, capitalizeFirstName } from '../../lib/supabase';
+import { api, isSupabaseConfigured, SUPABASE_SQL_SETUP, capitalizeFirstName, sortInvoicesByDate } from '../../lib/supabase';
 import SpineLogo from '../SpineLogo';
 import { useTranslation } from '../../App';
 import { Language, translations } from '../../translations';
@@ -234,6 +235,13 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
   const [isEditInvoiceOpen, setIsEditInvoiceOpen] = useState(false);
   const [editingInvoice, setEditingInvoice] = useState<Invoice | null>(null);
 
+  // Billing table default date sorting & filtering state
+  const [invoiceSortField, setInvoiceSortField] = useState<'date' | 'invoiceNumber' | 'clientName' | 'amount' | 'status'>('date');
+  const [invoiceSortAsc, setInvoiceSortAsc] = useState<boolean>(false); // default: false = date descending (most recent first)
+  const [invoiceSearchQuery, setInvoiceSearchQuery] = useState<string>('');
+  const [invoiceStatusFilter, setInvoiceStatusFilter] = useState<'all' | 'paid' | 'pending'>('all');
+  const [invoiceMethodFilter, setInvoiceMethodFilter] = useState<'all' | 'card' | 'cash' | 'transfer'>('all');
+
   // Accounting recap states
   const [recapPeriodType, setRecapPeriodType] = useState<'monthly' | 'annual' | 'custom'>('monthly');
   const [recapYear, setRecapYear] = useState<number>(new Date().getFullYear());
@@ -363,7 +371,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
           clientName: name,
         };
       });
-      setInvoices(enrichedInvoices);
+      setInvoices(sortInvoicesByDate(enrichedInvoices, false));
       setEvents(enrichedEvents);
     } catch (err) {
       console.error('Error loading admin data:', err);
@@ -381,6 +389,58 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
       setReceiptLang(selectedInvoiceForPrint.language || lang);
     }
   }, [selectedInvoiceForPrint, lang]);
+
+  // Memoized sorted and filtered invoices for the billing log
+  // Default sort is strictly by date descending (newest first)
+  const displayedInvoices = useMemo(() => {
+    let list = invoices.filter(inv => {
+      if (invoiceSearchQuery.trim()) {
+        const q = invoiceSearchQuery.toLowerCase().trim();
+        const matchesNum = inv.invoiceNumber?.toLowerCase().includes(q);
+        const matchesClient = inv.clientName?.toLowerCase().includes(q);
+        const matchesDesc = inv.description?.toLowerCase().includes(q);
+        if (!matchesNum && !matchesClient && !matchesDesc) return false;
+      }
+      if (invoiceStatusFilter !== 'all' && inv.status !== invoiceStatusFilter) {
+        return false;
+      }
+      if (invoiceMethodFilter !== 'all' && inv.paymentMethod !== invoiceMethodFilter) {
+        return false;
+      }
+      return true;
+    });
+
+    return list.sort((a, b) => {
+      let comp = 0;
+      if (invoiceSortField === 'date') {
+        const timeA = a.date ? new Date(a.date).getTime() : 0;
+        const timeB = b.date ? new Date(b.date).getTime() : 0;
+        comp = timeA - timeB;
+      } else if (invoiceSortField === 'invoiceNumber') {
+        const numA = parseInt(String(a.invoiceNumber || '').match(/\d+$/)?.[0] || '0', 10);
+        const numB = parseInt(String(b.invoiceNumber || '').match(/\d+$/)?.[0] || '0', 10);
+        comp = numA - numB;
+      } else if (invoiceSortField === 'clientName') {
+        comp = (a.clientName || '').localeCompare(b.clientName || '');
+      } else if (invoiceSortField === 'amount') {
+        comp = (a.amount || 0) - (b.amount || 0);
+      } else if (invoiceSortField === 'status') {
+        comp = (a.status || '').localeCompare(b.status || '');
+      }
+
+      if (comp !== 0) {
+        return invoiceSortAsc ? comp : -comp;
+      }
+
+      // Tie breaker: date descending then invoice number descending
+      const timeA = a.date ? new Date(a.date).getTime() : 0;
+      const timeB = b.date ? new Date(b.date).getTime() : 0;
+      if (timeA !== timeB) return timeB - timeA;
+      const numA = parseInt(String(a.invoiceNumber || '').match(/\d+$/)?.[0] || '0', 10);
+      const numB = parseInt(String(b.invoiceNumber || '').match(/\d+$/)?.[0] || '0', 10);
+      return numB - numA;
+    });
+  }, [invoices, invoiceSortField, invoiceSortAsc, invoiceSearchQuery, invoiceStatusFilter, invoiceMethodFilter]);
 
   // Create new Client
   const handleAddClient = async (e: React.FormEvent) => {
@@ -626,7 +686,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
       });
 
       // Update state immediately to guarantee invoice persists in UI
-      setInvoices(prev => [created, ...prev.filter(i => i.id !== created.id)]);
+      setInvoices(prev => sortInvoicesByDate([created, ...prev.filter(i => i.id !== created.id)], false));
       setIsAddInvoiceOpen(false);
       setNewInvoiceBillingPlan('single');
       setNewInvoiceIncludeToday(true);
@@ -741,7 +801,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
       });
 
       // Update state immediately to guarantee invoice persists in UI
-      setInvoices(prev => [created, ...prev.filter(i => i.id !== created.id)]);
+      setInvoices(prev => sortInvoicesByDate([created, ...prev.filter(i => i.id !== created.id)], false));
       setCreatingInvoiceForNoteId(null);
 
       // Update client Bono status safely
@@ -961,7 +1021,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
         clientName,
       });
 
-      setInvoices(prev => prev.map(i => i.id === updated.id ? updated : i));
+      setInvoices(prev => sortInvoicesByDate(prev.map(i => i.id === updated.id ? updated : i), false));
       setIsEditInvoiceOpen(false);
       setEditingInvoice(null);
     } catch (err) {
@@ -980,7 +1040,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
           status: newStatus,
           paymentDate: newStatus === 'paid' ? (invoice.paymentDate || new Date().toISOString().split('T')[0]) : undefined,
         });
-        setInvoices(prev => prev.map(i => i.id === updated.id ? updated : i));
+        setInvoices(prev => sortInvoicesByDate(prev.map(i => i.id === updated.id ? updated : i), false));
         if (selectedInvoiceForPrint?.id === updated.id) {
           setSelectedInvoiceForPrint(updated);
         }
@@ -2602,7 +2662,13 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                               const associatedInvoice = invoices.find(inv => {
                                 if (inv.noteId === note.id) return true;
                                 if (!selectedClient) return false;
-                                if (inv.clientId !== selectedClient.id) return false;
+                                const isSameClient = inv.clientId === selectedClient.id || (
+                                  inv.clientName && selectedClient.name && (
+                                    inv.clientName.toLowerCase() === selectedClient.name.toLowerCase() ||
+                                    (selectedClient.lastName && inv.clientName.toLowerCase().includes(selectedClient.lastName.toLowerCase()))
+                                  )
+                                );
+                                if (!isSameClient) return false;
                                 try {
                                   const invDateStr = new Date(inv.date).toISOString().split('T')[0];
                                   const noteDateStr = new Date(note.date).toISOString().split('T')[0];
@@ -4227,29 +4293,233 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
 
               {/* Invoice Table Column */}
               <div className="bg-white p-6 rounded-3xl border border-black/5 shadow-sm lg:col-span-2 overflow-x-auto">
-                <h4 className="text-xs font-bold uppercase tracking-wider text-primary mb-4 flex items-center gap-2">
-                  <FileText size={14} /> {lang === 'fr' ? "Journal des factures émises" : lang === 'es' ? "Diario de facturas emitidas" : "Log of issued invoices"}
-                </h4>
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-primary flex items-center gap-2">
+                      <FileText size={14} /> {lang === 'fr' ? "Journal des factures émises" : lang === 'es' ? "Diario de facturas emitidas" : "Log of issued invoices"}
+                    </h4>
+                    <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-primary/10 text-primary">
+                      {displayedInvoices.length} {lang === 'fr' ? 'facture(s)' : lang === 'es' ? 'factura(s)' : 'invoice(s)'}
+                    </span>
+                  </div>
+
+                  {/* Active default sort indicator */}
+                  <div className="flex items-center gap-2 text-[10px] text-gray-500">
+                    <span className="inline-flex items-center gap-1.5 font-medium bg-[#f4f4ec] px-3 py-1.5 rounded-xl border border-black/5">
+                      <Clock size={12} className="text-primary" />
+                      <span className="font-semibold text-gray-700">
+                        {invoiceSortField === 'date' ? (
+                          invoiceSortAsc
+                            ? (lang === 'fr' ? 'Classement : Date (anciennes d\'abord)' : lang === 'es' ? 'Fecha ascendente' : 'Date (oldest first)')
+                            : (lang === 'fr' ? 'Classement : Date (plus récentes d\'abord)' : lang === 'es' ? 'Fecha (más recientes primero)' : 'Date (newest first)')
+                        ) : invoiceSortField === 'invoiceNumber' ? (
+                          lang === 'fr' ? `Classement : N° ${invoiceSortAsc ? 'croissant' : 'décroissant'}` : `Sort: Num ${invoiceSortAsc ? 'asc' : 'desc'}`
+                        ) : invoiceSortField === 'clientName' ? (
+                          lang === 'fr' ? `Classement : Patient (${invoiceSortAsc ? 'A-Z' : 'Z-A'})` : `Sort: Patient (${invoiceSortAsc ? 'A-Z' : 'Z-A'})`
+                        ) : invoiceSortField === 'amount' ? (
+                          lang === 'fr' ? `Classement : Montant (${invoiceSortAsc ? 'croissant' : 'décroissant'})` : `Sort: Amount`
+                        ) : (
+                          lang === 'fr' ? `Classement : Statut` : `Sort: Status`
+                        )}
+                      </span>
+                    </span>
+                    {(invoiceSortField !== 'date' || invoiceSortAsc !== false || invoiceSearchQuery || invoiceStatusFilter !== 'all') && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setInvoiceSortField('date');
+                          setInvoiceSortAsc(false);
+                          setInvoiceSearchQuery('');
+                          setInvoiceStatusFilter('all');
+                          setInvoiceMethodFilter('all');
+                        }}
+                        className="text-[10px] font-bold text-primary hover:underline px-2 py-1 bg-primary/5 rounded-lg"
+                      >
+                        {lang === 'fr' ? 'Réinitialiser' : lang === 'es' ? 'Restablecer' : 'Reset'}
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Filter and search bar */}
+                <div className="flex flex-col sm:flex-row gap-2 mb-4">
+                  <div className="relative flex-1">
+                    <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                    <input
+                      type="text"
+                      value={invoiceSearchQuery}
+                      onChange={(e) => setInvoiceSearchQuery(e.target.value)}
+                      placeholder={lang === 'fr' ? "Rechercher par nom de patient ou numéro..." : lang === 'es' ? "Buscar por paciente o número..." : "Search by patient or number..."}
+                      className="w-full pl-8 pr-7 py-2 text-xs bg-[#f4f4ec] rounded-xl border border-black/5 focus:outline-none focus:ring-1 focus:ring-primary focus:bg-white transition-all"
+                    />
+                    {invoiceSearchQuery && (
+                      <button
+                        type="button"
+                        onClick={() => setInvoiceSearchQuery('')}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                      >
+                        <X size={12} />
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Status pills */}
+                  <div className="flex items-center gap-1 bg-[#f4f4ec] p-1 rounded-xl border border-black/5 self-start">
+                    <button
+                      type="button"
+                      onClick={() => setInvoiceStatusFilter('all')}
+                      className={`px-3 py-1 text-[10px] font-bold rounded-lg transition-all ${
+                        invoiceStatusFilter === 'all'
+                          ? 'bg-primary text-white shadow-sm'
+                          : 'text-gray-500 hover:bg-black/5'
+                      }`}
+                    >
+                      {lang === 'fr' ? 'Toutes' : lang === 'es' ? 'Todas' : 'All'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setInvoiceStatusFilter('paid')}
+                      className={`px-3 py-1 text-[10px] font-bold rounded-lg transition-all ${
+                        invoiceStatusFilter === 'paid'
+                          ? 'bg-emerald-700 text-white shadow-sm'
+                          : 'text-gray-500 hover:bg-black/5'
+                      }`}
+                    >
+                      {lang === 'fr' ? 'Payées' : lang === 'es' ? 'Cobradas' : 'Paid'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setInvoiceStatusFilter('pending')}
+                      className={`px-3 py-1 text-[10px] font-bold rounded-lg transition-all ${
+                        invoiceStatusFilter === 'pending'
+                          ? 'bg-amber-700 text-white shadow-sm'
+                          : 'text-gray-500 hover:bg-black/5'
+                      }`}
+                    >
+                      {lang === 'fr' ? 'En attente' : lang === 'es' ? 'Pendientes' : 'Pending'}
+                    </button>
+                  </div>
+                </div>
 
                 <table className="w-full text-xs text-left border-collapse min-w-[500px]">
                   <thead>
-                    <tr className="border-b border-black/5 text-gray-400">
-                      <th className="py-3 font-semibold">{translations[lang].admin.billing.tableNum}</th>
-                      <th className="py-3 font-semibold">{translations[lang].admin.billing.tablePatient}</th>
-                      <th className="py-3 font-semibold">{translations[lang].admin.billing.tableDate}</th>
+                    <tr className="border-b border-black/5 text-gray-400 select-none">
+                      <th 
+                        onClick={() => {
+                          if (invoiceSortField === 'invoiceNumber') {
+                            setInvoiceSortAsc(!invoiceSortAsc);
+                          } else {
+                            setInvoiceSortField('invoiceNumber');
+                            setInvoiceSortAsc(false);
+                          }
+                        }}
+                        className="py-3 font-semibold cursor-pointer hover:text-primary transition-colors"
+                        title={lang === 'fr' ? 'Cliquer pour trier par numéro' : 'Click to sort by number'}
+                      >
+                        <div className="flex items-center gap-1">
+                          <span>{translations[lang].admin.billing.tableNum}</span>
+                          {invoiceSortField === 'invoiceNumber' ? (
+                            invoiceSortAsc ? <ArrowUp size={11} className="text-primary font-bold" /> : <ArrowDown size={11} className="text-primary font-bold" />
+                          ) : (
+                            <ArrowUpDown size={10} className="opacity-40" />
+                          )}
+                        </div>
+                      </th>
+                      <th 
+                        onClick={() => {
+                          if (invoiceSortField === 'clientName') {
+                            setInvoiceSortAsc(!invoiceSortAsc);
+                          } else {
+                            setInvoiceSortField('clientName');
+                            setInvoiceSortAsc(true);
+                          }
+                        }}
+                        className="py-3 font-semibold cursor-pointer hover:text-primary transition-colors"
+                        title={lang === 'fr' ? 'Cliquer pour trier par patient' : 'Click to sort by patient'}
+                      >
+                        <div className="flex items-center gap-1">
+                          <span>{translations[lang].admin.billing.tablePatient}</span>
+                          {invoiceSortField === 'clientName' ? (
+                            invoiceSortAsc ? <ArrowUp size={11} className="text-primary font-bold" /> : <ArrowDown size={11} className="text-primary font-bold" />
+                          ) : (
+                            <ArrowUpDown size={10} className="opacity-40" />
+                          )}
+                        </div>
+                      </th>
+                      <th 
+                        onClick={() => {
+                          if (invoiceSortField === 'date') {
+                            setInvoiceSortAsc(!invoiceSortAsc);
+                          } else {
+                            setInvoiceSortField('date');
+                            setInvoiceSortAsc(false);
+                          }
+                        }}
+                        className="py-3 font-bold cursor-pointer text-primary hover:opacity-80 transition-colors"
+                        title={lang === 'fr' ? 'Classement par date (Par défaut: plus récentes d\'abord)' : 'Sort by date (Default: newest first)'}
+                      >
+                        <div className="flex items-center gap-1 font-bold">
+                          <span>{translations[lang].admin.billing.tableDate}</span>
+                          {invoiceSortField === 'date' ? (
+                            invoiceSortAsc ? <ArrowUp size={12} className="text-primary font-bold" /> : <ArrowDown size={12} className="text-primary font-bold" />
+                          ) : (
+                            <ArrowUpDown size={10} className="opacity-40" />
+                          )}
+                        </div>
+                      </th>
                       <th className="py-3 font-semibold">{translations[lang].admin.billing.tableMethod}</th>
-                      <th className="py-3 font-semibold text-center">{lang === 'fr' ? 'Statut' : lang === 'es' ? 'Estado' : 'Status'}</th>
-                      <th className="py-3 font-semibold text-right">{translations[lang].admin.billing.tableAmount}</th>
+                      <th 
+                        onClick={() => {
+                          if (invoiceSortField === 'status') {
+                            setInvoiceSortAsc(!invoiceSortAsc);
+                          } else {
+                            setInvoiceSortField('status');
+                            setInvoiceSortAsc(false);
+                          }
+                        }}
+                        className="py-3 font-semibold text-center cursor-pointer hover:text-primary transition-colors"
+                        title={lang === 'fr' ? 'Cliquer pour trier par statut' : 'Click to sort by status'}
+                      >
+                        <div className="inline-flex items-center justify-center gap-1">
+                          <span>{lang === 'fr' ? 'Statut' : lang === 'es' ? 'Estado' : 'Status'}</span>
+                          {invoiceSortField === 'status' ? (
+                            invoiceSortAsc ? <ArrowUp size={11} className="text-primary font-bold" /> : <ArrowDown size={11} className="text-primary font-bold" />
+                          ) : (
+                            <ArrowUpDown size={10} className="opacity-40" />
+                          )}
+                        </div>
+                      </th>
+                      <th 
+                        onClick={() => {
+                          if (invoiceSortField === 'amount') {
+                            setInvoiceSortAsc(!invoiceSortAsc);
+                          } else {
+                            setInvoiceSortField('amount');
+                            setInvoiceSortAsc(false);
+                          }
+                        }}
+                        className="py-3 font-semibold text-right cursor-pointer hover:text-primary transition-colors"
+                        title={lang === 'fr' ? 'Cliquer pour trier par montant' : 'Click to sort by amount'}
+                      >
+                        <div className="flex items-center justify-end gap-1">
+                          <span>{translations[lang].admin.billing.tableAmount}</span>
+                          {invoiceSortField === 'amount' ? (
+                            invoiceSortAsc ? <ArrowUp size={11} className="text-primary font-bold" /> : <ArrowDown size={11} className="text-primary font-bold" />
+                          ) : (
+                            <ArrowUpDown size={10} className="opacity-40" />
+                          )}
+                        </div>
+                      </th>
                       <th className="py-3 font-semibold text-right">{translations[lang].admin.billing.tableActions}</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {invoices.map(inv => (
+                    {displayedInvoices.map(inv => (
                       <tr key={inv.id} className="border-b border-black/5 hover:bg-black/[0.01] transition-colors group">
                         <td className="py-4 font-bold text-primary">{inv.invoiceNumber}</td>
                         <td className="py-4 font-bold">{inv.clientName}</td>
                         <td className="py-4 text-gray-500 text-xs">
-                          <div>{new Date(inv.date).toLocaleDateString(lang === 'fr' ? 'fr-FR' : lang === 'es' ? 'es-ES' : 'en-US')}</div>
+                          <div className="font-medium text-gray-700">{new Date(inv.date).toLocaleDateString(lang === 'fr' ? 'fr-FR' : lang === 'es' ? 'es-ES' : 'en-US')}</div>
                           {inv.status === 'paid' && inv.paymentDate && inv.paymentDate !== inv.date && (
                             <div className="text-[10px] text-emerald-700 font-semibold mt-0.5">
                               {lang === 'fr' ? 'Règlement : ' : lang === 'es' ? 'Pago: ' : 'Paid: '}
@@ -4343,10 +4613,12 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                         </td>
                       </tr>
                     ))}
-                    {invoices.length === 0 && (
+                    {displayedInvoices.length === 0 && (
                       <tr>
-                        <td colSpan={6} className="text-center py-12 text-gray-400">
-                          {translations[lang].admin.billing.noInvoices}
+                        <td colSpan={7} className="text-center py-12 text-gray-400">
+                          {invoices.length === 0
+                            ? translations[lang].admin.billing.noInvoices
+                            : (lang === 'fr' ? 'Aucune facture ne correspond à ces critères.' : 'No invoices match these criteria.')}
                         </td>
                       </tr>
                     )}

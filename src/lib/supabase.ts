@@ -413,6 +413,23 @@ export function mapInvoiceFromDB(i: any): Invoice {
   };
 }
 
+/**
+ * Sorts invoices by date (descending by default: most recent first).
+ * If dates are equal, breaks ties with invoice number descending.
+ */
+export function sortInvoicesByDate(invoicesList: Invoice[], ascending: boolean = false): Invoice[] {
+  return [...invoicesList].sort((a, b) => {
+    const timeA = a.date ? new Date(a.date).getTime() : 0;
+    const timeB = b.date ? new Date(b.date).getTime() : 0;
+    if (timeA !== timeB) {
+      return ascending ? timeA - timeB : timeB - timeA;
+    }
+    const numA = parseInt(String(a.invoiceNumber || '').match(/\d+$/)?.[0] || '0', 10);
+    const numB = parseInt(String(b.invoiceNumber || '').match(/\d+$/)?.[0] || '0', 10);
+    return ascending ? numA - numB : numB - numA;
+  });
+}
+
 function prepareDescriptionWithMeta(description?: string, eventType?: EventType): string {
   const clean = (description || '').replace(/\[eventType:[a-z]+\]/gi, '').replace(/\[type:[a-z]+\]/gi, '').trim();
   if (eventType && eventType !== 'appointment') {
@@ -628,15 +645,33 @@ async function executeResilientInsert(
 
           // 6. Duplicate key / primary key violation
           if (fullMsg.includes('duplicate key') || res.error.code === '23505') {
-            // If invoice number collision: auto-bump to next available number
-            if (table === 'invoices' && (fullMsg.includes('invoiceNumber') || fullMsg.includes('invoice_number'))) {
+            // If invoice number collision: query actual max from DB to guarantee a non-colliding next invoice number
+            if (table === 'invoices' && (fullMsg.includes('invoiceNumber') || fullMsg.includes('invoice_number') || fullMsg.includes('invoices_invoiceNumber_key') || fullMsg.includes('invoices_invoice_number_key'))) {
+              let maxNum = 100;
+              try {
+                const { data: dbInvs } = await supabase.from('invoices').select('invoiceNumber, invoice_number');
+                for (const r of dbInvs || []) {
+                  const m = String(r.invoiceNumber || r.invoice_number || '').match(/\d+$/);
+                  if (m) {
+                    const val = parseInt(m[0], 10);
+                    if (val > maxNum) maxNum = val;
+                  }
+                }
+              } catch {}
               const rawNum = currentPayload.invoiceNumber || currentPayload.invoice_number || '';
               const match = String(rawNum).match(/\d+$/);
               const curVal = match ? parseInt(match[0], 10) : 100;
-              const nextVal = `FAC-${new Date().getFullYear()}-${curVal + 1}`;
+              const nextVal = `FAC-${new Date().getFullYear()}-${Math.max(maxNum + 1, curVal + 1)}`;
               console.warn(`[Supabase Auto-Heal] Invoice number collision on ${rawNum}. Retrying with ${nextVal}`);
               currentPayload.invoiceNumber = nextVal;
               currentPayload.invoice_number = nextVal;
+              continue;
+            }
+
+            // Primary key id collision
+            if (fullMsg.includes('_pkey') || fullMsg.includes('key (id)=')) {
+              currentPayload.id = crypto.randomUUID();
+              console.warn(`[Supabase Auto-Heal] Primary key collision on ${table}. Retrying with new UUID.`);
               continue;
             }
 
@@ -711,13 +746,28 @@ async function executeResilientUpdate(
       try {
         const res = await supabase.from(table).update(currentPayload).eq('id', id).select();
         if (!res.error) {
-          const rowData = (res.data && res.data.length > 0) ? res.data[0] : { id, ...currentPayload };
-          lastSupabaseStatus = {
-            lastAction: `Update ${table}`,
-            success: true,
-            timestamp: new Date().toISOString(),
-          };
-          return { data: rowData, error: null, success: true };
+          if (res.data && res.data.length > 0) {
+            lastSupabaseStatus = {
+              lastAction: `Update ${table}`,
+              success: true,
+              timestamp: new Date().toISOString(),
+            };
+            return { data: res.data[0], error: null, success: true };
+          }
+
+          // Zero rows updated by id -> try matching by invoiceNumber / invoice_number if table is invoices
+          if (table === 'invoices' && (currentPayload.invoiceNumber || currentPayload.invoice_number)) {
+            const invNum = currentPayload.invoiceNumber || currentPayload.invoice_number;
+            const resByNum = await supabase.from(table).update(currentPayload).or(`invoiceNumber.eq.${invNum},invoice_number.eq.${invNum}`).select();
+            if (!resByNum.error && resByNum.data && resByNum.data.length > 0) {
+              lastSupabaseStatus = {
+                lastAction: `Update ${table} by number`,
+                success: true,
+                timestamp: new Date().toISOString(),
+              };
+              return { data: resByNum.data[0], error: null, success: true };
+            }
+          }
         }
 
         if (res.error) {
@@ -1633,17 +1683,7 @@ export const api = {
     const year = new Date().getFullYear();
     let maxNum = 100;
 
-    // 1. Inspect local invoices
-    const localInvoices = loadLocal('invoices', mockInvoices);
-    for (const inv of localInvoices) {
-      const match = String(inv.invoiceNumber || '').match(/\d+$/);
-      if (match) {
-        const num = parseInt(match[0], 10);
-        if (num > maxNum) maxNum = num;
-      }
-    }
-
-    // 2. Inspect Supabase invoices to ensure no collision with existing remote records
+    // 1. Inspect Supabase invoices first to ensure no collision with existing remote records
     if (isSupabaseConfigured && supabase) {
       try {
         const { data } = await supabase.from('invoices').select('invoiceNumber, invoice_number');
@@ -1655,8 +1695,18 @@ export const api = {
             if (num > maxNum) maxNum = num;
           }
         }
-      } catch {
-        // non-fatal, fallback to local maxNum
+      } catch (err) {
+        console.warn('Error reading invoice numbers from Supabase:', err);
+      }
+    }
+
+    // 2. Inspect local invoices
+    const localInvoices = loadLocal('invoices', []);
+    for (const inv of localInvoices) {
+      const match = String(inv.invoiceNumber || '').match(/\d+$/);
+      if (match) {
+        const num = parseInt(match[0], 10);
+        if (num > maxNum) maxNum = num;
       }
     }
 
@@ -1685,27 +1735,23 @@ export const api = {
           });
           
           // Smart merge: retain local invoices that haven't synced yet or have distinct IDs
+          // Exclude seed mock invoices (i1, i2) if remote invoices exist, and exclude anything that collides with a remote invoice number
           const remoteIds = new Set(remoteInvoices.map(r => r.id));
           const remoteNums = new Set(remoteInvoices.map(r => r.invoiceNumber).filter(Boolean));
           const merged = [...remoteInvoices];
 
           for (const loc of localInvoices) {
+            // Never re-add mock sample invoices if remote invoices already exist
+            if ((loc.id === 'i1' || loc.id === 'i2') && remoteInvoices.length > 0) continue;
+            // Never re-add if invoice number is already in remote records
+            if (loc.invoiceNumber && remoteNums.has(loc.invoiceNumber)) continue;
             if (!remoteIds.has(loc.id)) {
-              // If invoice number collides with a remote record, check if it's the exact same item
-              if (loc.invoiceNumber && remoteNums.has(loc.invoiceNumber)) {
-                const isExactDuplicate = remoteInvoices.some(r => 
-                  r.invoiceNumber === loc.invoiceNumber && 
-                  (r.clientName === loc.clientName || r.clientId === loc.clientId) && 
-                  r.amount === loc.amount
-                );
-                if (isExactDuplicate) continue;
-              }
               merged.push(loc);
             }
           }
 
           saveLocal('invoices', merged);
-          return merged.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+          return sortInvoicesByDate(merged, false);
         }
         if (error) {
           console.warn('Supabase invoices fetch failed, using local storage:', error.message);
@@ -1714,20 +1760,21 @@ export const api = {
         console.warn('Supabase invoices fetch exception:', err);
       }
     }
-    return localInvoices.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    return sortInvoicesByDate(localInvoices, false);
   },
 
   async createInvoice(invoice: Omit<Invoice, 'id' | 'invoiceNumber'> & { id?: string; invoiceNumber?: string }): Promise<Invoice> {
     const nextInvoiceNum = invoice.invoiceNumber || await this.getNextInvoiceNumber();
+    const invoiceId = invoice.id || crypto.randomUUID();
 
     const newInvoice: Invoice = {
       ...invoice,
-      id: invoice.id || crypto.randomUUID(),
+      id: invoiceId,
       invoiceNumber: nextInvoiceNum,
     };
 
     // Save locally immediately to guarantee persistence
-    const currentInvoices = loadLocal('invoices', mockInvoices);
+    const currentInvoices = loadLocal('invoices', []);
     const idx = currentInvoices.findIndex(i => i.id === newInvoice.id);
     if (idx !== -1) currentInvoices[idx] = newInvoice;
     else currentInvoices.unshift(newInvoice);
@@ -1735,22 +1782,41 @@ export const api = {
 
     if (isSupabaseConfigured && supabase) {
       try {
+        // Resolve valid clientId for foreign key constraint in Supabase
+        const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+        let validClientId: string | null = null;
+        if (newInvoice.clientId && UUID_REGEX.test(newInvoice.clientId)) {
+          validClientId = newInvoice.clientId;
+        } else if (newInvoice.clientName) {
+          // Look up if client has a matching UUID in Supabase
+          try {
+            const { data: dbClients } = await supabase.from('clients').select('id, firstName, lastName');
+            if (dbClients) {
+              const cleanTarget = newInvoice.clientName.toLowerCase().replace(/[^a-z0-9]/g, '');
+              const matched = dbClients.find(c => {
+                const full = `${c.firstName || ''} ${c.lastName || ''}`.toLowerCase().replace(/[^a-z0-9]/g, '');
+                return full.includes(cleanTarget) || cleanTarget.includes(full);
+              });
+              if (matched) validClientId = matched.id;
+            }
+          } catch {}
+        }
+
         // Complete matching payload with BOTH camelCase and snake_case for full DB schema compatibility
-        // Note: paymentDate / payment_date are excluded because that column is not present in the DB schema
         const cleanPayload: Record<string, any> = {
           id: newInvoice.id,
           invoiceNumber: newInvoice.invoiceNumber,
           invoice_number: newInvoice.invoiceNumber,
-          clientId: newInvoice.clientId,
-          client_id: newInvoice.clientId,
+          clientId: validClientId,
+          client_id: validClientId,
           clientName: newInvoice.clientName,
           client_name: newInvoice.clientName,
           date: newInvoice.date,
-          amount: newInvoice.amount,
-          originalAmount: newInvoice.originalAmount ?? newInvoice.amount,
-          original_amount: newInvoice.originalAmount ?? newInvoice.amount,
-          discountAmount: newInvoice.discountAmount ?? 0,
-          discount_amount: newInvoice.discountAmount ?? 0,
+          amount: Number(newInvoice.amount) || 0,
+          originalAmount: Number(newInvoice.originalAmount ?? newInvoice.amount) || 0,
+          original_amount: Number(newInvoice.originalAmount ?? newInvoice.amount) || 0,
+          discountAmount: Number(newInvoice.discountAmount ?? 0),
+          discount_amount: Number(newInvoice.discountAmount ?? 0),
           discountType: newInvoice.discountType || null,
           discount_type: newInvoice.discountType || null,
           discountLabel: newInvoice.discountLabel || null,
@@ -1778,12 +1844,14 @@ export const api = {
             paymentDate: newInvoice.paymentDate || mapped.paymentDate,
             noteId: newInvoice.noteId || mapped.noteId,
           };
-          const fresh = loadLocal('invoices', mockInvoices);
+          const fresh = loadLocal('invoices', []);
           const fIdx = fresh.findIndex(i => i.id === finalInvoice.id || (finalInvoice.invoiceNumber && i.invoiceNumber === finalInvoice.invoiceNumber));
           if (fIdx !== -1) fresh[fIdx] = finalInvoice;
           else fresh.unshift(finalInvoice);
           saveLocal('invoices', fresh);
           return finalInvoice;
+        } else {
+          console.warn('[createInvoice] Supabase resilient insert error:', result.error);
         }
       } catch (err) {
         console.warn('Supabase createInvoice exception:', err);
@@ -1795,7 +1863,7 @@ export const api = {
 
   async updateInvoice(invoice: Invoice): Promise<Invoice> {
     // Save locally immediately to guarantee persistence
-    const current = loadLocal('invoices', mockInvoices);
+    const current = loadLocal('invoices', []);
     const index = current.findIndex(c => c.id === invoice.id);
     if (index !== -1) {
       current[index] = invoice;
@@ -1807,25 +1875,48 @@ export const api = {
 
     if (isSupabaseConfigured && supabase) {
       try {
+        const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+        let validClientId: string | null = null;
+        if (invoice.clientId && UUID_REGEX.test(invoice.clientId)) {
+          validClientId = invoice.clientId;
+        } else if (invoice.clientName) {
+          try {
+            const { data: dbClients } = await supabase.from('clients').select('id, firstName, lastName');
+            if (dbClients) {
+              const cleanTarget = invoice.clientName.toLowerCase().replace(/[^a-z0-9]/g, '');
+              const matched = dbClients.find(c => {
+                const full = `${c.firstName || ''} ${c.lastName || ''}`.toLowerCase().replace(/[^a-z0-9]/g, '');
+                return full.includes(cleanTarget) || cleanTarget.includes(full);
+              });
+              if (matched) validClientId = matched.id;
+            }
+          } catch {}
+        }
+
         const cleanPayload: Record<string, any> = {
           invoiceNumber: invoice.invoiceNumber,
           invoice_number: invoice.invoiceNumber,
-          clientId: invoice.clientId,
-          client_id: invoice.clientId,
+          clientId: validClientId,
+          client_id: validClientId,
           clientName: invoice.clientName,
           client_name: invoice.clientName,
           date: invoice.date,
-          amount: invoice.amount,
-          status: invoice.status,
-          paymentMethod: invoice.paymentMethod,
-          payment_method: invoice.paymentMethod,
-          description: invoice.description,
-          language: invoice.language,
-          ...(invoice.originalAmount !== undefined ? { originalAmount: invoice.originalAmount, original_amount: invoice.originalAmount } : {}),
-          ...(invoice.discountAmount !== undefined ? { discountAmount: invoice.discountAmount, discount_amount: invoice.discountAmount } : {}),
-          ...(invoice.discountType ? { discountType: invoice.discountType, discount_type: invoice.discountType } : {}),
-          ...(invoice.discountLabel ? { discountLabel: invoice.discountLabel, discount_label: invoice.discountLabel } : {}),
-          ...(invoice.noteId ? { noteId: invoice.noteId, note_id: invoice.noteId } : {}),
+          amount: Number(invoice.amount) || 0,
+          status: invoice.status || 'paid',
+          paymentMethod: invoice.paymentMethod || 'card',
+          payment_method: invoice.paymentMethod || 'card',
+          description: invoice.description || "Séance d'Ostéopathie",
+          language: invoice.language || 'fr',
+          originalAmount: Number(invoice.originalAmount ?? invoice.amount) || 0,
+          original_amount: Number(invoice.originalAmount ?? invoice.amount) || 0,
+          discountAmount: Number(invoice.discountAmount ?? 0),
+          discount_amount: Number(invoice.discountAmount ?? 0),
+          discountType: invoice.discountType || null,
+          discount_type: invoice.discountType || null,
+          discountLabel: invoice.discountLabel || null,
+          discount_label: invoice.discountLabel || null,
+          noteId: invoice.noteId || null,
+          note_id: invoice.noteId || null,
         };
 
         const result = await executeResilientUpdate('invoices', invoice.id, [cleanPayload]);
@@ -1839,11 +1930,13 @@ export const api = {
             paymentDate: invoice.paymentDate || mapped.paymentDate,
             noteId: invoice.noteId || mapped.noteId,
           };
-          const fresh = loadLocal('invoices', mockInvoices);
+          const fresh = loadLocal('invoices', []);
           const fIdx = fresh.findIndex(i => i.id === invoice.id);
           if (fIdx !== -1) fresh[fIdx] = finalInvoice;
           saveLocal('invoices', fresh);
           return finalInvoice;
+        } else {
+          console.warn('[updateInvoice] Supabase update warning:', result.error);
         }
       } catch (err) {
         console.warn('Supabase updateInvoice exception:', err);
@@ -1856,13 +1949,16 @@ export const api = {
   async deleteInvoice(id: string): Promise<boolean> {
     if (isSupabaseConfigured && supabase) {
       try {
-        await supabase.from('invoices').delete().eq('id', id);
+        const { error } = await supabase.from('invoices').delete().eq('id', id);
+        if (error) {
+          console.warn('Supabase delete invoice by id error:', error.message);
+        }
       } catch (err) {
         console.warn('Supabase delete invoice exception:', err);
       }
     }
 
-    const current = loadLocal('invoices', mockInvoices);
+    const current = loadLocal('invoices', []);
     const filtered = current.filter(i => i.id !== id);
     saveLocal('invoices', filtered);
     return true;
