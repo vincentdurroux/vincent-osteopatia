@@ -578,27 +578,28 @@ async function executeResilientInsert(
           }
 
           // 3. UUID or syntax error -> strip offending ID/FK columns and retry
+          const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
           if (fullMsg.includes('invalid input syntax for type uuid') || fullMsg.includes('22P02')) {
             let strippedAny = false;
-            if (currentPayload.client_id && typeof currentPayload.client_id === 'string' && !currentPayload.client_id.includes('-')) {
+            if (currentPayload.client_id && typeof currentPayload.client_id === 'string' && !UUID_REGEX.test(currentPayload.client_id)) {
               console.warn(`[Supabase Auto-Heal] client_id "${currentPayload.client_id}" is not a valid UUID. Stripping.`);
               delete currentPayload.client_id;
               strippedAny = true;
             }
-            if (currentPayload.clientId && typeof currentPayload.clientId === 'string' && !currentPayload.clientId.includes('-')) {
+            if (currentPayload.clientId && typeof currentPayload.clientId === 'string' && !UUID_REGEX.test(currentPayload.clientId)) {
               console.warn(`[Supabase Auto-Heal] clientId "${currentPayload.clientId}" is not a valid UUID. Stripping.`);
               delete currentPayload.clientId;
               strippedAny = true;
             }
-            if (currentPayload.note_id && typeof currentPayload.note_id === 'string' && !currentPayload.note_id.includes('-')) {
+            if (currentPayload.note_id && typeof currentPayload.note_id === 'string' && !UUID_REGEX.test(currentPayload.note_id)) {
               delete currentPayload.note_id;
               strippedAny = true;
             }
-            if (currentPayload.noteId && typeof currentPayload.noteId === 'string' && !currentPayload.noteId.includes('-')) {
+            if (currentPayload.noteId && typeof currentPayload.noteId === 'string' && !UUID_REGEX.test(currentPayload.noteId)) {
               delete currentPayload.noteId;
               strippedAny = true;
             }
-            if ('id' in currentPayload && typeof currentPayload.id === 'string' && !currentPayload.id.includes('-')) {
+            if ('id' in currentPayload && typeof currentPayload.id === 'string' && !UUID_REGEX.test(currentPayload.id)) {
               console.warn(`[Supabase Auto-Heal] id "${currentPayload.id}" is not a valid UUID. Regenerating UUID.`);
               currentPayload.id = crypto.randomUUID();
               strippedAny = true;
@@ -625,18 +626,44 @@ async function executeResilientInsert(
             }
           }
 
-          // 6. Duplicate key / primary key violation -> update instead!
+          // 6. Duplicate key / primary key violation
           if (fullMsg.includes('duplicate key') || res.error.code === '23505') {
+            // If invoice number collision: auto-bump to next available number
+            if (table === 'invoices' && (fullMsg.includes('invoiceNumber') || fullMsg.includes('invoice_number'))) {
+              const rawNum = currentPayload.invoiceNumber || currentPayload.invoice_number || '';
+              const match = String(rawNum).match(/\d+$/);
+              const curVal = match ? parseInt(match[0], 10) : 100;
+              const nextVal = `FAC-${new Date().getFullYear()}-${curVal + 1}`;
+              console.warn(`[Supabase Auto-Heal] Invoice number collision on ${rawNum}. Retrying with ${nextVal}`);
+              currentPayload.invoiceNumber = nextVal;
+              currentPayload.invoice_number = nextVal;
+              continue;
+            }
+
             try {
               const targetId = currentPayload.id || initialPayload.id;
               if (targetId) {
                 const updRes = await supabase.from(table).update(currentPayload).eq('id', targetId).select();
-                if (!updRes.error && updRes.data) {
+                if (!updRes.error && updRes.data && updRes.data.length > 0) {
                   return { data: updRes.data[0] || currentPayload, error: null, success: true };
                 }
               }
             } catch {
               // ignore
+            }
+          }
+
+          // 7. Not-null constraint violation -> check if alternate case exists in payload
+          if (fullMsg.includes('not-null constraint') || res.error.code === '23502') {
+            const notNullColMatch = fullMsg.match(/null value in column ["']?([a-zA-Z0-9_]+)["']?/i);
+            if (notNullColMatch && notNullColMatch[1]) {
+              const neededCol = notNullColMatch[1];
+              const matchingExistingKey = findMatchingKey(currentPayload, neededCol);
+              if (matchingExistingKey && matchingExistingKey !== neededCol) {
+                console.warn(`[Supabase Auto-Heal] Supplying ${neededCol} from ${matchingExistingKey} to satisfy not-null constraint.`);
+                currentPayload[neededCol] = currentPayload[matchingExistingKey];
+                continue;
+              }
             }
           }
 
@@ -1107,20 +1134,40 @@ export const api = {
           const remoteClients = data.map(row => {
             const mapped = mapClientFromDB(row);
             const local = localMap.get(mapped.id);
-            // If remote is missing name or is 'Patient sans nom', restore from local cache if known
-            if (local && (mapped.name === 'Patient sans nom' || !mapped.name) && local.name && local.name !== 'Patient sans nom') {
-              mapped.name = local.name;
-              mapped.firstName = mapped.firstName || local.firstName;
-              mapped.lastName = mapped.lastName || local.lastName;
+            if (local) {
+              // If remote is missing name or is 'Patient sans nom', restore from local cache if known
+              if ((mapped.name === 'Patient sans nom' || !mapped.name) && local.name && local.name !== 'Patient sans nom') {
+                mapped.name = local.name;
+                mapped.firstName = mapped.firstName || local.firstName;
+                mapped.lastName = mapped.lastName || local.lastName;
+              }
+              // If local has active Bono with remaining sessions, preserve it if remote has 0 or undefined
+              if (local.hasBono && typeof local.bonoSessionsRemaining === 'number' && local.bonoSessionsRemaining > 0) {
+                if (!mapped.hasBono || mapped.bonoSessionsRemaining === undefined || mapped.bonoSessionsRemaining === 0) {
+                  mapped.hasBono = true;
+                  mapped.bonoType = mapped.bonoType || local.bonoType || 'Bono';
+                  mapped.bonoSessionsRemaining = local.bonoSessionsRemaining;
+                }
+              }
+              // Preserve profile note if local has it and remote is blank
+              if (local.profileNote && !mapped.profileNote) {
+                mapped.profileNote = local.profileNote;
+              }
             }
             return mapped;
           });
           
-          // If Supabase is active, the server is the absolute single source of truth.
-          // Save remote data as read-only cache and return it directly (no local "unsynced" merge
-          // to prevent resurrecting deleted clients or duplicating them).
-          saveLocal('clients', remoteClients);
-          return remoteClients;
+          // Merge local clients that haven't synced to remote yet
+          const remoteIds = new Set(remoteClients.map(c => c.id));
+          const mergedClients = [...remoteClients];
+          for (const loc of localClients) {
+            if (!remoteIds.has(loc.id)) {
+              mergedClients.push(loc);
+            }
+          }
+
+          saveLocal('clients', mergedClients);
+          return mergedClients.sort((a, b) => a.name.localeCompare(b.name));
         }
         if (error) {
           console.warn('Supabase clients fetch failed, using local storage:', error.message);
@@ -1148,90 +1195,71 @@ export const api = {
 
     if (isSupabaseConfigured && supabase) {
       try {
-        // Candidate 1: Standard comprehensive snake_case payload
-        const snakePayload: Record<string, any> = {
+        // Clean matching payload for Supabase schema
+        const cleanPayload: Record<string, any> = {
+          id: newClient.id,
+          firstName: newClient.firstName,
+          lastName: newClient.lastName,
+          email: newClient.email || '',
+          phone: newClient.phone || '',
+          address: newClient.address || '',
+          has_bono: Boolean(newClient.hasBono),
+          bono_type: newClient.bonoType || null,
+          default_discount: newClient.defaultDiscount ?? 0,
+          defaultDiscount: newClient.defaultDiscount ?? 0,
+          bono_sessions_remaining: newClient.bonoSessionsRemaining ?? 0,
+          profile_note: newClient.profileNote || null,
+          created_at: newClient.createdAt,
+        };
+        if (newClient.dni) cleanPayload.dni = newClient.dni;
+        if (newClient.birthDate) {
+          cleanPayload.birthDate = newClient.birthDate;
+          cleanPayload.birth_date = newClient.birthDate;
+        }
+        if (newClient.lastSessionAt) {
+          cleanPayload.lastSessionAt = newClient.lastSessionAt;
+          cleanPayload.last_session_at = newClient.lastSessionAt;
+        }
+
+        const fallbackPayload: Record<string, any> = {
           id: newClient.id,
           name: newClient.name,
           first_name: newClient.firstName,
           last_name: newClient.lastName,
-          nom: newClient.lastName,
-          prenom: newClient.firstName,
-          full_name: newClient.name,
-          client_name: newClient.name,
-          patient_name: newClient.name,
           email: newClient.email || '',
           phone: newClient.phone || '',
           address: newClient.address || '',
-          created_at: newClient.createdAt,
-        };
-        if (newClient.dni) snakePayload.dni = newClient.dni;
-        if (newClient.birthDate) snakePayload.birth_date = newClient.birthDate;
-        if (newClient.lastSessionAt) snakePayload.last_session_at = newClient.lastSessionAt;
-        if (newClient.hasBono !== undefined) snakePayload.has_bono = newClient.hasBono;
-        if (newClient.bonoType) snakePayload.bono_type = newClient.bonoType;
-        if (newClient.defaultDiscount !== undefined) snakePayload.default_discount = newClient.defaultDiscount;
-        if (newClient.bonoSessionsRemaining !== undefined) snakePayload.bono_sessions_remaining = newClient.bonoSessionsRemaining;
-        if (newClient.profileNote !== undefined) snakePayload.profile_note = newClient.profileNote;
-
-        // Candidate 2: camelCase payload
-        const camelPayload: Record<string, any> = {
-          id: newClient.id,
-          name: newClient.name,
-          firstName: newClient.firstName,
-          lastName: newClient.lastName,
-          fullName: newClient.name,
-          clientName: newClient.name,
-          patientName: newClient.name,
-          email: newClient.email || '',
-          phone: newClient.phone || '',
-          address: newClient.address || '',
-          createdAt: newClient.createdAt,
-        };
-        if (newClient.dni) camelPayload.dni = newClient.dni;
-        if (newClient.birthDate) camelPayload.birthDate = newClient.birthDate;
-        if (newClient.lastSessionAt) camelPayload.lastSessionAt = newClient.lastSessionAt;
-        if (newClient.hasBono !== undefined) camelPayload.hasBono = newClient.hasBono;
-        if (newClient.bonoType) camelPayload.bonoType = newClient.bonoType;
-        if (newClient.defaultDiscount !== undefined) camelPayload.defaultDiscount = newClient.defaultDiscount;
-        if (newClient.bonoSessionsRemaining !== undefined) camelPayload.bonoSessionsRemaining = newClient.bonoSessionsRemaining;
-        if (newClient.profileNote !== undefined) camelPayload.profileNote = newClient.profileNote;
-
-        // Candidate 3: Minimal essential payload with guaranteed name
-        const minimalPayload: Record<string, any> = {
-          id: newClient.id,
-          name: newClient.name,
-          email: newClient.email || '',
-          phone: newClient.phone || '',
         };
 
-        const result = await executeResilientInsert('clients', [snakePayload, camelPayload, minimalPayload]);
+        const result = await executeResilientInsert('clients', [cleanPayload, fallbackPayload]);
 
         if (result.success && result.data) {
           const mapped = mapClientFromDB(result.data);
           const finalClient: Client = {
             ...newClient,
             ...mapped,
-            name: (mapped.name && mapped.name !== 'Patient sans nom') ? mapped.name : newClient.name,
-            firstName: mapped.firstName || newClient.firstName,
-            lastName: mapped.lastName || newClient.lastName,
+            name: fullName,
+            firstName: cleanFirstName,
+            lastName: cleanLastName,
+            hasBono: newClient.hasBono !== undefined ? newClient.hasBono : mapped.hasBono,
+            bonoType: newClient.bonoType || mapped.bonoType,
+            bonoSessionsRemaining: newClient.bonoSessionsRemaining !== undefined ? newClient.bonoSessionsRemaining : mapped.bonoSessionsRemaining,
+            profileNote: newClient.profileNote || mapped.profileNote,
           };
-          const current = loadLocal('clients', mockClients);
-          const existsIdx = current.findIndex(c => c.id === finalClient.id);
-          if (existsIdx !== -1) current[existsIdx] = finalClient;
-          else current.push(finalClient);
-          saveLocal('clients', current);
+          const fresh = loadLocal('clients', mockClients);
+          const fIdx = fresh.findIndex(c => c.id === finalClient.id);
+          if (fIdx !== -1) fresh[fIdx] = finalClient;
+          else fresh.unshift(finalClient);
+          saveLocal('clients', fresh);
           return finalClient;
         }
-      } catch (err: any) {
-        console.error('Exception during Supabase client insertion:', err);
+      } catch (err) {
+        console.warn('Supabase createClient exception:', err);
       }
     }
 
-    // Save locally as reliable fallback
     const current = loadLocal('clients', mockClients);
-    const existsIdx = current.findIndex(c => c.id === newClient.id);
-    if (existsIdx !== -1) current[existsIdx] = newClient;
-    else current.push(newClient);
+    current.unshift(newClient);
     saveLocal('clients', current);
     return newClient;
   },
@@ -1356,56 +1384,59 @@ export const api = {
 
     if (isSupabaseConfigured && supabase) {
       try {
-        const snakePayload: Record<string, any> = {
+        const cleanPayload: Record<string, any> = {
+          firstName: normalizedClient.firstName,
+          lastName: normalizedClient.lastName,
+          email: normalizedClient.email || '',
+          phone: normalizedClient.phone || '',
+          address: normalizedClient.address || '',
+          has_bono: Boolean(normalizedClient.hasBono),
+          bono_type: normalizedClient.bonoType || null,
+          default_discount: normalizedClient.defaultDiscount ?? 0,
+          defaultDiscount: normalizedClient.defaultDiscount ?? 0,
+          bono_sessions_remaining: normalizedClient.bonoSessionsRemaining ?? 0,
+          profile_note: normalizedClient.profileNote || null,
+        };
+        if (normalizedClient.dni !== undefined) cleanPayload.dni = normalizedClient.dni;
+        if (normalizedClient.birthDate) {
+          cleanPayload.birthDate = normalizedClient.birthDate;
+          cleanPayload.birth_date = normalizedClient.birthDate;
+        }
+        if (normalizedClient.lastSessionAt) {
+          cleanPayload.lastSessionAt = normalizedClient.lastSessionAt;
+          cleanPayload.last_session_at = normalizedClient.lastSessionAt;
+        }
+
+        const fallbackPayload: Record<string, any> = {
           name: normalizedClient.name,
           first_name: normalizedClient.firstName,
           last_name: normalizedClient.lastName,
-          nom: normalizedClient.lastName,
-          prenom: normalizedClient.firstName,
-          full_name: normalizedClient.name,
-          client_name: normalizedClient.name,
           email: normalizedClient.email || '',
           phone: normalizedClient.phone || '',
           address: normalizedClient.address || '',
+          has_bono: Boolean(normalizedClient.hasBono),
+          bono_type: normalizedClient.bonoType || null,
+          bono_sessions_remaining: normalizedClient.bonoSessionsRemaining ?? 0,
         };
-        if (normalizedClient.dni !== undefined) snakePayload.dni = normalizedClient.dni;
-        if (normalizedClient.birthDate) snakePayload.birth_date = normalizedClient.birthDate;
-        if (normalizedClient.lastSessionAt) snakePayload.last_session_at = normalizedClient.lastSessionAt;
-        if (normalizedClient.hasBono !== undefined) snakePayload.has_bono = normalizedClient.hasBono;
-        if (normalizedClient.bonoType !== undefined) snakePayload.bono_type = normalizedClient.bonoType;
-        if (normalizedClient.defaultDiscount !== undefined) snakePayload.default_discount = normalizedClient.defaultDiscount;
-        if (normalizedClient.bonoSessionsRemaining !== undefined) snakePayload.bono_sessions_remaining = normalizedClient.bonoSessionsRemaining;
-        if (normalizedClient.profileNote !== undefined) snakePayload.profile_note = normalizedClient.profileNote;
 
-        const camelPayload: Record<string, any> = {
-          name: normalizedClient.name,
-          firstName: normalizedClient.firstName,
-          lastName: normalizedClient.lastName,
-          fullName: normalizedClient.name,
-          clientName: normalizedClient.name,
-          email: normalizedClient.email || '',
-          phone: normalizedClient.phone || '',
-          address: normalizedClient.address || '',
-        };
-        if (normalizedClient.dni !== undefined) camelPayload.dni = normalizedClient.dni;
-        if (normalizedClient.birthDate) camelPayload.birthDate = normalizedClient.birthDate;
-        if (normalizedClient.lastSessionAt) camelPayload.lastSessionAt = normalizedClient.lastSessionAt;
-        if (normalizedClient.hasBono !== undefined) camelPayload.hasBono = normalizedClient.hasBono;
-        if (normalizedClient.bonoType !== undefined) camelPayload.bonoType = normalizedClient.bonoType;
-        if (normalizedClient.defaultDiscount !== undefined) camelPayload.defaultDiscount = normalizedClient.defaultDiscount;
-        if (normalizedClient.bonoSessionsRemaining !== undefined) camelPayload.bonoSessionsRemaining = normalizedClient.bonoSessionsRemaining;
-        if (normalizedClient.profileNote !== undefined) camelPayload.profileNote = normalizedClient.profileNote;
-
-        const result = await executeResilientUpdate('clients', normalizedClient.id, [snakePayload, camelPayload]);
+        const result = await executeResilientUpdate('clients', normalizedClient.id, [cleanPayload, fallbackPayload]);
 
         if (result.success && result.data) {
           const mapped = mapClientFromDB(result.data);
           const finalClient: Client = {
             ...normalizedClient,
             ...mapped,
-            name: (mapped.name && mapped.name !== 'Patient sans nom') ? mapped.name : normalizedClient.name,
-            firstName: mapped.firstName || normalizedClient.firstName,
-            lastName: mapped.lastName || normalizedClient.lastName,
+            name: fullName,
+            firstName: cleanFirstName,
+            lastName: cleanLastName,
+            hasBono: normalizedClient.hasBono !== undefined ? normalizedClient.hasBono : mapped.hasBono,
+            bonoType: normalizedClient.bonoType !== undefined ? normalizedClient.bonoType : mapped.bonoType,
+            bonoSessionsRemaining: normalizedClient.bonoSessionsRemaining !== undefined
+              ? normalizedClient.bonoSessionsRemaining
+              : mapped.bonoSessionsRemaining,
+            profileNote: normalizedClient.profileNote !== undefined
+              ? normalizedClient.profileNote
+              : mapped.profileNote,
           };
           const current = loadLocal('clients', mockClients);
           const index = current.findIndex(c => c.id === finalClient.id);
@@ -1598,41 +1629,78 @@ export const api = {
   // ==========================================
   // INVOICES & BILLING
   // ==========================================
+  async getNextInvoiceNumber(): Promise<string> {
+    const year = new Date().getFullYear();
+    let maxNum = 100;
+
+    // 1. Inspect local invoices
+    const localInvoices = loadLocal('invoices', mockInvoices);
+    for (const inv of localInvoices) {
+      const match = String(inv.invoiceNumber || '').match(/\d+$/);
+      if (match) {
+        const num = parseInt(match[0], 10);
+        if (num > maxNum) maxNum = num;
+      }
+    }
+
+    // 2. Inspect Supabase invoices to ensure no collision with existing remote records
+    if (isSupabaseConfigured && supabase) {
+      try {
+        const { data } = await supabase.from('invoices').select('invoiceNumber, invoice_number');
+        for (const row of data || []) {
+          const raw = row.invoiceNumber || row.invoice_number || '';
+          const match = String(raw).match(/\d+$/);
+          if (match) {
+            const num = parseInt(match[0], 10);
+            if (num > maxNum) maxNum = num;
+          }
+        }
+      } catch {
+        // non-fatal, fallback to local maxNum
+      }
+    }
+
+    return `FAC-${year}-${maxNum + 1}`;
+  },
+
   async getInvoices(): Promise<Invoice[]> {
     const localInvoices = loadLocal('invoices', mockInvoices);
+    const localMap = new Map(localInvoices.map(i => [i.id, i]));
+    const localNumMap = new Map(localInvoices.map(i => [i.invoiceNumber, i]));
 
     if (isSupabaseConfigured && supabase) {
       try {
         const { data, error } = await supabase.from('invoices').select('*').order('date', { ascending: false });
         if (!error && data) {
-          const remoteInvoices = data.map(mapInvoiceFromDB);
+          const remoteInvoices = data.map(row => {
+            const mapped = mapInvoiceFromDB(row);
+            const local = localMap.get(mapped.id) || (mapped.invoiceNumber ? localNumMap.get(mapped.invoiceNumber) : undefined);
+            if (local) {
+              if (!mapped.clientId && local.clientId) mapped.clientId = local.clientId;
+              if (!mapped.clientName && local.clientName) mapped.clientName = local.clientName;
+              if (!mapped.paymentDate && local.paymentDate) mapped.paymentDate = local.paymentDate;
+              if (!mapped.noteId && local.noteId) mapped.noteId = local.noteId;
+            }
+            return mapped;
+          });
           
-          // Smart merge: retain local invoices that haven't been wiped or are waiting for server sync
-          const merged = [...remoteInvoices];
+          // Smart merge: retain local invoices that haven't synced yet or have distinct IDs
           const remoteIds = new Set(remoteInvoices.map(r => r.id));
           const remoteNums = new Set(remoteInvoices.map(r => r.invoiceNumber).filter(Boolean));
+          const merged = [...remoteInvoices];
 
           for (const loc of localInvoices) {
-            if (!remoteIds.has(loc.id) && (!loc.invoiceNumber || !remoteNums.has(loc.invoiceNumber))) {
+            if (!remoteIds.has(loc.id)) {
+              // If invoice number collides with a remote record, check if it's the exact same item
+              if (loc.invoiceNumber && remoteNums.has(loc.invoiceNumber)) {
+                const isExactDuplicate = remoteInvoices.some(r => 
+                  r.invoiceNumber === loc.invoiceNumber && 
+                  (r.clientName === loc.clientName || r.clientId === loc.clientId) && 
+                  r.amount === loc.amount
+                );
+                if (isExactDuplicate) continue;
+              }
               merged.push(loc);
-              // Background sync so it gets persisted in Supabase
-              executeResilientInsert('invoices', [{
-                id: loc.id,
-                invoice_number: loc.invoiceNumber,
-                client_id: loc.clientId,
-                client_name: loc.clientName,
-                date: loc.date,
-                amount: loc.amount,
-                status: loc.status || 'paid',
-                payment_method: loc.paymentMethod || 'card',
-                description: loc.description,
-                language: loc.language || 'fr',
-                ...(loc.paymentDate ? { payment_date: loc.paymentDate } : {}),
-                ...(loc.originalAmount !== undefined ? { original_amount: loc.originalAmount } : {}),
-                ...(loc.discountAmount !== undefined ? { discount_amount: loc.discountAmount } : {}),
-                ...(loc.discountType ? { discount_type: loc.discountType } : {}),
-                ...(loc.discountLabel ? { discount_label: loc.discountLabel } : {}),
-              }]).catch(() => {});
             }
           }
 
@@ -1650,17 +1718,16 @@ export const api = {
   },
 
   async createInvoice(invoice: Omit<Invoice, 'id' | 'invoiceNumber'> & { id?: string; invoiceNumber?: string }): Promise<Invoice> {
-    const currentInvoices = loadLocal('invoices', mockInvoices);
-    const nextNum = 100 + currentInvoices.length + 1;
-    const invoiceNumber = invoice.invoiceNumber || `FAC-${new Date().getFullYear()}-${nextNum}`;
+    const nextInvoiceNum = invoice.invoiceNumber || await this.getNextInvoiceNumber();
 
     const newInvoice: Invoice = {
       ...invoice,
       id: invoice.id || crypto.randomUUID(),
-      invoiceNumber,
+      invoiceNumber: nextInvoiceNum,
     };
 
     // Save locally immediately to guarantee persistence
+    const currentInvoices = loadLocal('invoices', mockInvoices);
     const idx = currentInvoices.findIndex(i => i.id === newInvoice.id);
     if (idx !== -1) currentInvoices[idx] = newInvoice;
     else currentInvoices.unshift(newInvoice);
@@ -1668,54 +1735,55 @@ export const api = {
 
     if (isSupabaseConfigured && supabase) {
       try {
-        const snakePayload: Record<string, any> = {
+        // Complete matching payload with BOTH camelCase and snake_case for full DB schema compatibility
+        // Note: paymentDate / payment_date are excluded because that column is not present in the DB schema
+        const cleanPayload: Record<string, any> = {
           id: newInvoice.id,
+          invoiceNumber: newInvoice.invoiceNumber,
           invoice_number: newInvoice.invoiceNumber,
+          clientId: newInvoice.clientId,
           client_id: newInvoice.clientId,
+          clientName: newInvoice.clientName,
           client_name: newInvoice.clientName,
           date: newInvoice.date,
           amount: newInvoice.amount,
+          originalAmount: newInvoice.originalAmount ?? newInvoice.amount,
+          original_amount: newInvoice.originalAmount ?? newInvoice.amount,
+          discountAmount: newInvoice.discountAmount ?? 0,
+          discount_amount: newInvoice.discountAmount ?? 0,
+          discountType: newInvoice.discountType || null,
+          discount_type: newInvoice.discountType || null,
+          discountLabel: newInvoice.discountLabel || null,
+          discount_label: newInvoice.discountLabel || null,
           status: newInvoice.status || 'paid',
+          paymentMethod: newInvoice.paymentMethod || 'card',
           payment_method: newInvoice.paymentMethod || 'card',
           description: newInvoice.description || "Séance d'Ostéopathie",
           language: newInvoice.language || 'fr',
-          ...(newInvoice.paymentDate ? { payment_date: newInvoice.paymentDate } : {}),
-          ...(newInvoice.originalAmount !== undefined ? { original_amount: newInvoice.originalAmount } : {}),
-          ...(newInvoice.discountAmount !== undefined ? { discount_amount: newInvoice.discountAmount } : {}),
-          ...(newInvoice.discountType ? { discount_type: newInvoice.discountType } : {}),
-          ...(newInvoice.discountLabel ? { discount_label: newInvoice.discountLabel } : {}),
-          ...(newInvoice.noteId ? { note_id: newInvoice.noteId } : {}),
+          noteId: newInvoice.noteId || null,
+          note_id: newInvoice.noteId || null,
         };
 
-        const camelPayload: Record<string, any> = {
-          id: newInvoice.id,
-          invoiceNumber: newInvoice.invoiceNumber,
-          clientId: newInvoice.clientId,
-          clientName: newInvoice.clientName,
-          date: newInvoice.date,
-          amount: newInvoice.amount,
-          status: newInvoice.status || 'paid',
-          paymentMethod: newInvoice.paymentMethod || 'card',
-          description: newInvoice.description || "Séance d'Ostéopathie",
-          language: newInvoice.language || 'fr',
-          ...(newInvoice.paymentDate ? { paymentDate: newInvoice.paymentDate } : {}),
-          ...(newInvoice.originalAmount !== undefined ? { originalAmount: newInvoice.originalAmount } : {}),
-          ...(newInvoice.discountAmount !== undefined ? { discountAmount: newInvoice.discountAmount } : {}),
-          ...(newInvoice.discountType ? { discountType: newInvoice.discountType } : {}),
-          ...(newInvoice.discountLabel ? { discountLabel: newInvoice.discountLabel } : {}),
-          ...(newInvoice.noteId ? { noteId: newInvoice.noteId } : {}),
-        };
-
-        const result = await executeResilientInsert('invoices', [snakePayload, camelPayload]);
+        const result = await executeResilientInsert('invoices', [cleanPayload]);
 
         if (result.success && result.data) {
           const mapped = mapInvoiceFromDB(result.data);
+          const finalInvoice: Invoice = {
+            ...newInvoice,
+            ...mapped,
+            id: mapped.id || newInvoice.id,
+            invoiceNumber: mapped.invoiceNumber || newInvoice.invoiceNumber,
+            clientId: newInvoice.clientId || mapped.clientId,
+            clientName: newInvoice.clientName || mapped.clientName,
+            paymentDate: newInvoice.paymentDate || mapped.paymentDate,
+            noteId: newInvoice.noteId || mapped.noteId,
+          };
           const fresh = loadLocal('invoices', mockInvoices);
-          const fIdx = fresh.findIndex(i => i.id === mapped.id || (mapped.invoiceNumber && i.invoiceNumber === mapped.invoiceNumber));
-          if (fIdx !== -1) fresh[fIdx] = mapped;
-          else fresh.unshift(mapped);
+          const fIdx = fresh.findIndex(i => i.id === finalInvoice.id || (finalInvoice.invoiceNumber && i.invoiceNumber === finalInvoice.invoiceNumber));
+          if (fIdx !== -1) fresh[fIdx] = finalInvoice;
+          else fresh.unshift(finalInvoice);
           saveLocal('invoices', fresh);
-          return mapped;
+          return finalInvoice;
         }
       } catch (err) {
         console.warn('Supabase createInvoice exception:', err);
@@ -1739,48 +1807,43 @@ export const api = {
 
     if (isSupabaseConfigured && supabase) {
       try {
-        const snakePayload: Record<string, any> = {
+        const cleanPayload: Record<string, any> = {
+          invoiceNumber: invoice.invoiceNumber,
           invoice_number: invoice.invoiceNumber,
+          clientId: invoice.clientId,
           client_id: invoice.clientId,
+          clientName: invoice.clientName,
           client_name: invoice.clientName,
           date: invoice.date,
           amount: invoice.amount,
           status: invoice.status,
+          paymentMethod: invoice.paymentMethod,
           payment_method: invoice.paymentMethod,
           description: invoice.description,
           language: invoice.language,
-          ...(invoice.paymentDate !== undefined ? { payment_date: invoice.paymentDate } : {}),
-          ...(invoice.originalAmount !== undefined ? { original_amount: invoice.originalAmount } : {}),
-          ...(invoice.discountAmount !== undefined ? { discount_amount: invoice.discountAmount } : {}),
-          ...(invoice.discountType ? { discount_type: invoice.discountType } : {}),
-          ...(invoice.discountLabel ? { discount_label: invoice.discountLabel } : {}),
+          ...(invoice.originalAmount !== undefined ? { originalAmount: invoice.originalAmount, original_amount: invoice.originalAmount } : {}),
+          ...(invoice.discountAmount !== undefined ? { discountAmount: invoice.discountAmount, discount_amount: invoice.discountAmount } : {}),
+          ...(invoice.discountType ? { discountType: invoice.discountType, discount_type: invoice.discountType } : {}),
+          ...(invoice.discountLabel ? { discountLabel: invoice.discountLabel, discount_label: invoice.discountLabel } : {}),
+          ...(invoice.noteId ? { noteId: invoice.noteId, note_id: invoice.noteId } : {}),
         };
 
-        const camelPayload: Record<string, any> = {
-          invoiceNumber: invoice.invoiceNumber,
-          clientId: invoice.clientId,
-          clientName: invoice.clientName,
-          date: invoice.date,
-          amount: invoice.amount,
-          status: invoice.status,
-          paymentMethod: invoice.paymentMethod,
-          description: invoice.description,
-          language: invoice.language,
-          ...(invoice.paymentDate !== undefined ? { paymentDate: invoice.paymentDate } : {}),
-          ...(invoice.originalAmount !== undefined ? { originalAmount: invoice.originalAmount } : {}),
-          ...(invoice.discountAmount !== undefined ? { discountAmount: invoice.discountAmount } : {}),
-          ...(invoice.discountType ? { discountType: invoice.discountType } : {}),
-          ...(invoice.discountLabel ? { discountLabel: invoice.discountLabel } : {}),
-        };
-
-        const result = await executeResilientUpdate('invoices', invoice.id, [snakePayload, camelPayload]);
+        const result = await executeResilientUpdate('invoices', invoice.id, [cleanPayload]);
         if (result.success && result.data) {
           const mapped = mapInvoiceFromDB(result.data);
+          const finalInvoice: Invoice = {
+            ...invoice,
+            ...mapped,
+            clientId: invoice.clientId || mapped.clientId,
+            clientName: invoice.clientName || mapped.clientName,
+            paymentDate: invoice.paymentDate || mapped.paymentDate,
+            noteId: invoice.noteId || mapped.noteId,
+          };
           const fresh = loadLocal('invoices', mockInvoices);
           const fIdx = fresh.findIndex(i => i.id === invoice.id);
-          if (fIdx !== -1) fresh[fIdx] = mapped;
+          if (fIdx !== -1) fresh[fIdx] = finalInvoice;
           saveLocal('invoices', fresh);
-          return mapped;
+          return finalInvoice;
         }
       } catch (err) {
         console.warn('Supabase updateInvoice exception:', err);

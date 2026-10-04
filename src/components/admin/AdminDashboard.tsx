@@ -353,7 +353,17 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
       });
 
       setClients(allClients);
-      setInvoices(allInvoices);
+      const enrichedInvoices = allInvoices.map(inv => {
+        let name = inv.clientName;
+        if ((!name || name.trim() === '') && inv.clientId && clientMap.has(inv.clientId)) {
+          name = clientMap.get(inv.clientId)!;
+        }
+        return {
+          ...inv,
+          clientName: name,
+        };
+      });
+      setInvoices(enrichedInvoices);
       setEvents(enrichedEvents);
     } catch (err) {
       console.error('Error loading admin data:', err);
@@ -641,37 +651,31 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
           const totalSessions = newInvoiceBillingPlan === 'bono3' ? 3 : 5;
           const remaining = newInvoiceIncludeToday ? totalSessions - 1 : totalSessions;
           const bonoTitle = newInvoiceBillingPlan === 'bono3' ? 'Bono 3 séances' : 'Bono 5 séances';
-          const updatedClient = {
+          const updatedClient: Client = {
             ...client,
             hasBono: true,
             bonoType: bonoTitle,
             defaultDiscount: newInvoiceBillingPlan === 'bono3' ? 20 : 50,
             bonoSessionsRemaining: remaining,
           };
-          await api.updateClient(updatedClient);
-          setClients(prev => prev.map(c => c.id === updatedClient.id ? updatedClient : c));
+          const savedClient = await api.updateClient(updatedClient);
+          setClients(prev => prev.map(c => c.id === savedClient.id ? savedClient : c));
           if (selectedClient?.id === client.id) {
-            setSelectedClient(updatedClient);
+            setSelectedClient(savedClient);
           }
-        } else if (newInvoiceBillingPlan === 'deduct_bono' && client.hasBono && typeof client.bonoSessionsRemaining === 'number' && client.bonoSessionsRemaining > 0) {
-          const updatedClient = {
+        } else if ((newInvoiceBillingPlan === 'deduct_bono' || newInvoice.discountType === 'bono') && client.hasBono) {
+          const currentRem = typeof client.bonoSessionsRemaining === 'number' 
+            ? client.bonoSessionsRemaining 
+            : (client.bonoType?.includes('3') ? 3 : 5);
+          const newRemaining = Math.max(0, currentRem - 1);
+          const updatedClient: Client = {
             ...client,
-            bonoSessionsRemaining: Math.max(0, client.bonoSessionsRemaining - 1),
+            bonoSessionsRemaining: newRemaining,
           };
-          await api.updateClient(updatedClient);
-          setClients(prev => prev.map(c => c.id === updatedClient.id ? updatedClient : c));
+          const savedClient = await api.updateClient(updatedClient);
+          setClients(prev => prev.map(c => c.id === savedClient.id ? savedClient : c));
           if (selectedClient?.id === client.id) {
-            setSelectedClient(updatedClient);
-          }
-        } else if (newInvoice.discountType === 'bono' && client.hasBono && typeof client.bonoSessionsRemaining === 'number' && client.bonoSessionsRemaining > 0) {
-          const updatedClient = {
-            ...client,
-            bonoSessionsRemaining: Math.max(0, client.bonoSessionsRemaining - 1),
-          };
-          await api.updateClient(updatedClient);
-          setClients(prev => prev.map(c => c.id === updatedClient.id ? updatedClient : c));
-          if (selectedClient?.id === client.id) {
-            setSelectedClient(updatedClient);
+            setSelectedClient(savedClient);
           }
         }
       } catch (bonoErr) {
@@ -746,32 +750,28 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
           const totalSessions = inlineBillingPlan === 'bono3' ? 3 : 5;
           const remaining = inlineIncludeToday ? totalSessions - 1 : totalSessions;
           const bonoTitle = inlineBillingPlan === 'bono3' ? 'Bono 3 séances' : 'Bono 5 séances';
-          const updatedClient = {
+          const updatedClient: Client = {
             ...selectedClient,
             hasBono: true,
             bonoType: bonoTitle,
             defaultDiscount: inlineBillingPlan === 'bono3' ? 20 : 50,
             bonoSessionsRemaining: remaining,
           };
-          await api.updateClient(updatedClient);
-          setClients(prev => prev.map(c => c.id === updatedClient.id ? updatedClient : c));
-          setSelectedClient(updatedClient);
-        } else if (inlineBillingPlan === 'deduct_bono' && selectedClient.hasBono && typeof selectedClient.bonoSessionsRemaining === 'number' && selectedClient.bonoSessionsRemaining > 0) {
-          const updatedClient = {
+          const savedClient = await api.updateClient(updatedClient);
+          setClients(prev => prev.map(c => c.id === savedClient.id ? savedClient : c));
+          setSelectedClient(savedClient);
+        } else if ((inlineBillingPlan === 'deduct_bono' || inlineInvoiceDiscountType === 'bono') && selectedClient.hasBono) {
+          const currentRem = typeof selectedClient.bonoSessionsRemaining === 'number' 
+            ? selectedClient.bonoSessionsRemaining 
+            : (selectedClient.bonoType?.includes('3') ? 3 : 5);
+          const newRemaining = Math.max(0, currentRem - 1);
+          const updatedClient: Client = {
             ...selectedClient,
-            bonoSessionsRemaining: Math.max(0, selectedClient.bonoSessionsRemaining - 1),
+            bonoSessionsRemaining: newRemaining,
           };
-          await api.updateClient(updatedClient);
-          setClients(prev => prev.map(c => c.id === updatedClient.id ? updatedClient : c));
-          setSelectedClient(updatedClient);
-        } else if (inlineInvoiceDiscountType === 'bono' && selectedClient.hasBono && typeof selectedClient.bonoSessionsRemaining === 'number' && selectedClient.bonoSessionsRemaining > 0) {
-          const updatedClient = {
-            ...selectedClient,
-            bonoSessionsRemaining: Math.max(0, selectedClient.bonoSessionsRemaining - 1),
-          };
-          await api.updateClient(updatedClient);
-          setClients(prev => prev.map(c => c.id === updatedClient.id ? updatedClient : c));
-          setSelectedClient(updatedClient);
+          const savedClient = await api.updateClient(updatedClient);
+          setClients(prev => prev.map(c => c.id === savedClient.id ? savedClient : c));
+          setSelectedClient(savedClient);
         }
       } catch (bonoErr) {
         console.warn('Could not update client bono session count alongside inline invoice:', bonoErr);
