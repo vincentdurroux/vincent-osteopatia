@@ -108,7 +108,6 @@ const mockClients: Client[] = [
     lastSessionAt: '2026-08-20T17:00:00Z',
     hasBono: true,
     bonoType: 'Bono 3 séances',
-    defaultDiscount: 10,
     bonoSessionsRemaining: 2,
   }
 ];

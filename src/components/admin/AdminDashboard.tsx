@@ -715,7 +715,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
             ...client,
             hasBono: true,
             bonoType: bonoTitle,
-            defaultDiscount: newInvoiceBillingPlan === 'bono3' ? 20 : 50,
+            defaultDiscount: undefined,
             bonoSessionsRemaining: remaining,
           };
           const savedClient = await api.updateClient(updatedClient);
@@ -814,7 +814,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
             ...selectedClient,
             hasBono: true,
             bonoType: bonoTitle,
-            defaultDiscount: inlineBillingPlan === 'bono3' ? 20 : 50,
+            defaultDiscount: undefined,
             bonoSessionsRemaining: remaining,
           };
           const savedClient = await api.updateClient(updatedClient);
@@ -2194,11 +2194,6 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                               <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-emerald-50 text-emerald-800 border border-emerald-200/70">
                                 <BadgePercent size={13} className="text-emerald-600" />
                                 <span>{selectedClient.bonoType || 'Bono'}</span>
-                                {selectedClient.defaultDiscount !== undefined && selectedClient.defaultDiscount > 0 && (
-                                  <span className="text-emerald-700 font-bold bg-emerald-100/60 px-1.5 py-0.5 rounded-full text-[10px]">
-                                    -{selectedClient.defaultDiscount}€ / {lang === 'fr' ? 'séance' : lang === 'es' ? 'sesión' : 'session'}
-                                  </span>
-                                )}
                                 {typeof selectedClient.bonoSessionsRemaining === 'number' && (
                                   <span className="text-emerald-800 font-bold bg-white px-2 py-0.5 rounded-full text-[10px] shadow-xs border border-emerald-200">
                                     {selectedClient.bonoSessionsRemaining} {lang === 'fr' ? 'séance(s) restante(s)' : lang === 'es' ? 'sesión(es) restante(s)' : 'remaining session(s)'}
@@ -4768,7 +4763,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                   </div>
 
                   {newClient.hasBono && (
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-2 border-t border-black/5">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-2 border-t border-black/5">
                       <div>
                         <label className="text-[9px] uppercase tracking-wider font-bold text-gray-400 block mb-0.5">
                           {lang === 'fr' ? 'Type / Intitulé' : 'Bono Type'}
@@ -4777,31 +4772,19 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                           type="text"
                           value={newClient.bonoType}
                           onChange={(e) => setNewClient(prev => ({ ...prev, bonoType: e.target.value }))}
-                          placeholder="Ex: Bono 5 séances"
+                          placeholder="Ex: Bono 3 séances"
                           className="w-full p-2 bg-white rounded-xl border border-black/10 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
                         />
                       </div>
                       <div>
                         <label className="text-[9px] uppercase tracking-wider font-bold text-gray-400 block mb-0.5">
-                          {lang === 'fr' ? 'Remise / séance (€)' : 'Discount / session (€)'}
-                        </label>
-                        <input
-                          type="number"
-                          value={newClient.defaultDiscount}
-                          onChange={(e) => setNewClient(prev => ({ ...prev, defaultDiscount: Number(e.target.value) }))}
-                          placeholder="10"
-                          className="w-full p-2 bg-white rounded-xl border border-black/10 text-xs font-bold text-emerald-700 focus:outline-none focus:ring-1 focus:ring-primary"
-                        />
-                      </div>
-                      <div>
-                        <label className="text-[9px] uppercase tracking-wider font-bold text-gray-400 block mb-0.5">
-                          {lang === 'fr' ? 'Séances restantes' : 'Remaining sessions'}
+                          {lang === 'fr' ? 'Séances créditées' : 'Credited sessions'}
                         </label>
                         <input
                           type="number"
                           value={newClient.bonoSessionsRemaining}
                           onChange={(e) => setNewClient(prev => ({ ...prev, bonoSessionsRemaining: Number(e.target.value) }))}
-                          placeholder="5"
+                          placeholder="3"
                           className="w-full p-2 bg-white rounded-xl border border-black/10 text-xs font-bold text-primary focus:outline-none focus:ring-1 focus:ring-primary"
                         />
                       </div>
@@ -6234,7 +6217,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                   </div>
 
                   {editingClient.hasBono && (
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-2 border-t border-black/5">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-2 border-t border-black/5">
                       <div>
                         <label className="text-[9px] uppercase tracking-wider font-bold text-gray-400 block mb-0.5">
                           {lang === 'fr' ? 'Type / Intitulé' : 'Bono Type'}
@@ -6243,20 +6226,8 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                           type="text"
                           value={editingClient.bonoType || ''}
                           onChange={(e) => setEditingClient(prev => prev ? ({ ...prev, bonoType: e.target.value }) : null)}
-                          placeholder="Ex: Bono 5 séances"
+                          placeholder="Ex: Bono 3 séances"
                           className="w-full p-2 bg-white rounded-xl border border-black/10 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
-                        />
-                      </div>
-                      <div>
-                        <label className="text-[9px] uppercase tracking-wider font-bold text-gray-400 block mb-0.5">
-                          {lang === 'fr' ? 'Remise / séance (€)' : 'Discount / session (€)'}
-                        </label>
-                        <input
-                          type="number"
-                          value={editingClient.defaultDiscount ?? 10}
-                          onChange={(e) => setEditingClient(prev => prev ? ({ ...prev, defaultDiscount: Number(e.target.value) }) : null)}
-                          placeholder="10"
-                          className="w-full p-2 bg-white rounded-xl border border-black/10 text-xs font-bold text-emerald-700 focus:outline-none focus:ring-1 focus:ring-primary"
                         />
                       </div>
                       <div>
@@ -6265,9 +6236,9 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                         </label>
                         <input
                           type="number"
-                          value={editingClient.bonoSessionsRemaining ?? 5}
+                          value={editingClient.bonoSessionsRemaining ?? 3}
                           onChange={(e) => setEditingClient(prev => prev ? ({ ...prev, bonoSessionsRemaining: Number(e.target.value) }) : null)}
-                          placeholder="5"
+                          placeholder="3"
                           className="w-full p-2 bg-white rounded-xl border border-black/10 text-xs font-bold text-primary focus:outline-none focus:ring-1 focus:ring-primary"
                         />
                       </div>
