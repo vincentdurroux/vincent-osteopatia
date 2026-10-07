@@ -5,6 +5,65 @@ import SpineLogo from './components/SpineLogo';
 import { translations, Language } from './translations';
 import AdminDashboard from './components/admin/AdminDashboard';
 
+export const detectBrowserLanguage = (): Language => {
+  if (typeof window === 'undefined' || typeof navigator === 'undefined') {
+    return 'fr';
+  }
+
+  const rawLanguages: string[] = [];
+  if (Array.isArray(navigator.languages) && navigator.languages.length > 0) {
+    rawLanguages.push(...navigator.languages);
+  }
+  if (navigator.language) {
+    rawLanguages.push(navigator.language);
+  }
+  if ((navigator as any).userLanguage) {
+    rawLanguages.push((navigator as any).userLanguage);
+  }
+
+  for (const raw of rawLanguages) {
+    if (!raw || typeof raw !== 'string') continue;
+    const code = raw.toLowerCase().trim();
+
+    // Spanish and regional dialects in Spain (Valencia / Eliana)
+    if (
+      code.startsWith('es') ||
+      code.startsWith('ca') ||
+      code.startsWith('va') ||
+      code.startsWith('gl') ||
+      code.startsWith('eu')
+    ) {
+      return 'es';
+    }
+
+    // French
+    if (code.startsWith('fr')) {
+      return 'fr';
+    }
+
+    // English
+    if (code.startsWith('en')) {
+      return 'en';
+    }
+  }
+
+  return 'fr';
+};
+
+export const getInitialLanguage = (): Language => {
+  if (typeof window !== 'undefined') {
+    try {
+      const stored = localStorage.getItem('vincent_osteo_user_lang');
+      if (stored === 'fr' || stored === 'es' || stored === 'en') {
+        return stored;
+      }
+    } catch {
+      // Storage access might be restricted
+    }
+  }
+  return detectBrowserLanguage();
+};
+
 export const LanguageContext = createContext<{
   lang: Language;
   setLang: (l: Language) => void;
@@ -767,13 +826,49 @@ const PasscodeModal = ({ isOpen, onClose, onSuccess }: { isOpen: boolean; onClos
 };
 
 export default function App() {
-  const [lang, setLang] = useState<Language>('fr');
+  const [lang, setLangState] = useState<Language>(getInitialLanguage);
   const [isBookingModalOpen, setIsBookingModalOpen] = useState(false);
   const [isAdminOpen, setIsAdminOpen] = useState(false);
   const [isPasscodeOpen, setIsPasscodeOpen] = useState(false);
 
+  const setLang = (newLang: Language) => {
+    setLangState(newLang);
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.setItem('vincent_osteo_user_lang', newLang);
+      } catch {
+        // Storage access may fail in restricted environments
+      }
+    }
+  };
+
+  useEffect(() => {
+    if (typeof document !== 'undefined') {
+      document.documentElement.lang = lang;
+    }
+  }, [lang]);
+
+  useEffect(() => {
+    const handleLanguageChange = () => {
+      try {
+        const stored = localStorage.getItem('vincent_osteo_user_lang');
+        // Only automatically adjust if the user hasn't explicitly chosen a language
+        if (!stored) {
+          setLangState(detectBrowserLanguage());
+        }
+      } catch {
+        setLangState(detectBrowserLanguage());
+      }
+    };
+
+    window.addEventListener('languagechange', handleLanguageChange);
+    return () => {
+      window.removeEventListener('languagechange', handleLanguageChange);
+    };
+  }, []);
+
   return (
-    <LanguageContext.Provider value={{ lang, setLang, t: translations[lang] }}>
+    <LanguageContext.Provider value={{ lang, setLang, t: translations[lang] || translations.fr }}>
       <div className="min-h-screen">
         <Navbar onSecretAdmin={() => setIsPasscodeOpen(true)} />
         <Hero onOpenBooking={() => setIsBookingModalOpen(true)} />
