@@ -1855,36 +1855,54 @@ export const api = {
 
     if (isSupabaseConfigured && supabase) {
       try {
+        let deletedRemoteCount = 0;
+
         // 1. Delete by UUID if valid
         if (UUID_REGEX.test(targetId)) {
           const res = await supabase.from('invoices').delete().eq('id', targetId).select();
-          if (res.error) console.warn('[deleteInvoice] by id warning:', res.error.message);
+          if (res.data && res.data.length > 0) deletedRemoteCount += res.data.length;
         }
 
         // 2. Delete by invoiceNumber and invoice_number columns
         if (targetNum) {
           const res1 = await supabase.from('invoices').delete().eq('invoiceNumber', targetNum).select();
-          if (res1.error) console.warn('[deleteInvoice] by invoiceNumber warning:', res1.error.message);
+          if (res1.data && res1.data.length > 0) deletedRemoteCount += res1.data.length;
 
           const res2 = await supabase.from('invoices').delete().eq('invoice_number', targetNum).select();
-          if (res2.error) console.warn('[deleteInvoice] by invoice_number warning:', res2.error.message);
+          if (res2.data && res2.data.length > 0) deletedRemoteCount += res2.data.length;
         }
 
-        // 3. Fallback: find any row by invoiceNumber in remote DB and delete its specific ID
+        // 3. Fallback: query remote DB to find any rows matching targetNum or targetId and delete their specific IDs
         if (targetNum) {
-          try {
-            const { data: found } = await supabase.from('invoices').select('id').or(`invoiceNumber.eq.${targetNum},invoice_number.eq.${targetNum}`);
-            if (found && found.length > 0) {
-              for (const row of found) {
-                if (row.id) {
-                  await supabase.from('invoices').delete().eq('id', row.id);
-                }
-              }
+          const { data: rows1 } = await supabase.from('invoices').select('id').eq('invoiceNumber', targetNum);
+          if (rows1 && rows1.length > 0) {
+            for (const r of rows1) {
+              await supabase.from('invoices').delete().eq('id', r.id);
+              deletedRemoteCount++;
             }
-          } catch {}
+          }
+          const { data: rows2 } = await supabase.from('invoices').select('id').eq('invoice_number', targetNum);
+          if (rows2 && rows2.length > 0) {
+            for (const r of rows2) {
+              await supabase.from('invoices').delete().eq('id', r.id);
+              deletedRemoteCount++;
+            }
+          }
         }
+
+        lastSupabaseStatus = {
+          lastAction: `Suppression facture ${targetNum || targetId}`,
+          success: true,
+          timestamp: new Date().toLocaleTimeString(),
+        };
       } catch (err: any) {
         console.warn('Supabase delete invoice exception:', err);
+        lastSupabaseStatus = {
+          lastAction: `Suppression facture ${targetNum || targetId}`,
+          success: false,
+          error: err?.message || 'Erreur réseau',
+          timestamp: new Date().toLocaleTimeString(),
+        };
       }
     }
 

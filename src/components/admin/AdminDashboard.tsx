@@ -4,7 +4,7 @@ import {
   Users, Calendar, FileText, TrendingUp, Plus, Search, Trash2, 
   LogOut, ArrowLeft, Check, RefreshCw, Calendar as CalendarIcon, 
   CreditCard, Shield, Clock, MapPin, Phone, Mail, FileCheck, Printer,
-  ChevronRight, Pencil, ChevronLeft, LayoutGrid, List, ArrowRight,
+  ChevronRight, Pencil, ChevronLeft, ChevronDown, LayoutGrid, List, ArrowRight,
   Copy, CheckCircle2, XCircle, AlertTriangle, Database, Server, UserPlus, User,
   Tag, BadgePercent, Percent, Sparkles, IdCard, X, Columns3, Lock, Coffee, Briefcase, Bookmark, Pin, StickyNote,
   ArrowUpDown, ArrowUp, ArrowDown
@@ -282,6 +282,25 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
   const [selectedInvoiceForPrint, setSelectedInvoiceForPrint] = useState<Invoice | null>(null);
   const invoiceRef = useRef<HTMLDivElement>(null);
   const recapRef = useRef<HTMLDivElement>(null);
+
+  // Patient list scroll detection
+  const patientListRef = useRef<HTMLDivElement>(null);
+  const [canScrollPatientsDown, setCanScrollPatientsDown] = useState(false);
+  const [isScrolledPatients, setIsScrolledPatients] = useState(false);
+
+  const checkPatientScroll = () => {
+    const el = patientListRef.current;
+    if (!el) return;
+    const hasMore = el.scrollHeight - el.scrollTop - el.clientHeight > 15;
+    setCanScrollPatientsDown(hasMore);
+    setIsScrolledPatients(el.scrollTop > 8);
+  };
+
+  const handleScrollPatientsDown = () => {
+    if (patientListRef.current) {
+      patientListRef.current.scrollBy({ top: 220, behavior: 'smooth' });
+    }
+  };
 
   // Edit states
   const [isEditClientOpen, setIsEditClientOpen] = useState(false);
@@ -1512,6 +1531,13 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
     c.phone.includes(searchQuery)
   );
 
+  // Monitor patient list scrollability
+  useEffect(() => {
+    checkPatientScroll();
+    const t = setTimeout(checkPatientScroll, 120);
+    return () => clearTimeout(t);
+  }, [filteredClients.length, activeTab, searchQuery]);
+
   const handlePrintInvoice = () => {
     const element = invoiceRef.current;
     if (!element || !selectedInvoiceForPrint) return;
@@ -2117,138 +2143,166 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
 
         {/* TAB 2: CLIENT DIRECTORY & NOTES */}
         {activeTab === 'clients' && (
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 flex-1">
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start flex-1">
             
             {/* List and Search column */}
-            <div className="bg-white p-6 rounded-3xl border border-black/5 shadow-sm lg:col-span-1 flex flex-col">
-              <div className="flex items-center justify-between mb-6">
+            <div className="bg-white p-5 sm:p-6 rounded-3xl border border-black/5 shadow-sm lg:col-span-4 xl:col-span-4 flex flex-col lg:sticky lg:top-24 max-h-[82vh] relative">
+              <div className="flex items-center justify-between mb-4 gap-2">
                 <div>
-                  <h3 className="text-xl font-bold font-serif text-primary">{t.admin.clients.title}</h3>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-xl font-bold font-serif text-primary">{t.admin.clients.title}</h3>
+                    <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-primary/10 text-primary">
+                      {filteredClients.length}
+                    </span>
+                  </div>
                   <p className="text-xs text-gray-500">
-                    {lang === 'fr' ? "Gérez les fiches médicales." : lang === 'es' ? "Gestione los expedientes médicos." : "Manage medical records."}
+                    {lang === 'fr' ? "Fiches et dossiers médicaux" : lang === 'es' ? "Expedientes y notas médicas" : "Medical records"}
                   </p>
                 </div>
                 <button
+                  type="button"
                   onClick={() => setIsAddClientOpen(true)}
-                  className="w-8 h-8 rounded-full bg-primary flex items-center justify-center text-white hover:scale-105 transition-transform"
+                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-2xl bg-primary text-white text-xs font-bold hover:scale-[1.02] active:scale-[0.98] transition-all shadow-xs cursor-pointer shrink-0"
                   title={t.admin.clients.addPatient}
                 >
-                  <Plus size={18} />
+                  <Plus size={15} />
+                  <span>{lang === 'fr' ? 'Nouveau' : lang === 'es' ? 'Nuevo' : 'New'}</span>
                 </button>
               </div>
 
               {/* Search bar */}
-              <div className="relative mb-6">
-                <Search size={16} className="absolute left-3.5 top-3.5 text-gray-400" />
+              <div className="relative mb-3">
+                <Search size={15} className="absolute left-3.5 top-3.5 text-gray-400" />
                 <input
                   type="text"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder={lang === 'fr' ? "Rechercher un patient..." : lang === 'es' ? "Buscar paciente..." : "Search patient..."}
+                  placeholder={lang === 'fr' ? "Rechercher par nom, tél, DNI..." : lang === 'es' ? "Buscar por nombre, tel, DNI..." : "Search patient..."}
                   className="w-full pl-10 pr-4 py-2.5 rounded-2xl bg-secondary border border-black/5 text-xs focus:outline-none focus:ring-1 focus:ring-primary focus:bg-white transition-all"
                 />
               </div>
 
-              {/* Patients list */}
-              <div className="flex-1 overflow-y-auto space-y-2 max-h-[60vh] pr-1">
-                {filteredClients.map(c => {
-                  const isSelected = selectedClient?.id === c.id;
-                  return (
-                    <div
-                      key={c.id}
-                      className={`group w-full flex items-center justify-between p-3 rounded-2xl transition-all border ${
-                        isSelected 
-                          ? 'bg-primary/5 border-primary/20 shadow-sm' 
-                          : 'border-transparent hover:bg-black/5'
-                      }`}
-                    >
-                      <button
-                        type="button"
-                        onClick={() => setSelectedClient(c)}
-                        className="flex-1 flex items-center gap-3 overflow-hidden text-left"
+              {/* Patients list container with visible scroll cue */}
+              <div className="relative flex-1 min-h-0 flex flex-col">
+                {/* Subtle top shadow when scrolled */}
+                {isScrolledPatients && (
+                  <div className="absolute top-0 left-0 right-0 h-4 bg-gradient-to-b from-black/5 to-transparent pointer-events-none z-10 transition-opacity" />
+                )}
+
+                <div 
+                  ref={patientListRef}
+                  onScroll={checkPatientScroll}
+                  className="flex-1 overflow-y-auto space-y-2 max-h-[50vh] lg:max-h-[58vh] pr-1.5 scrollbar-thin scrollbar-thumb-stone-300 hover:scrollbar-thumb-stone-400"
+                >
+                  {filteredClients.map(c => {
+                    const isSelected = selectedClient?.id === c.id;
+                    return (
+                      <div
+                        key={c.id}
+                        className={`group w-full flex items-center justify-between p-3 rounded-2xl transition-all border ${
+                          isSelected 
+                            ? 'bg-primary/5 border-primary/20 shadow-sm' 
+                            : 'border-transparent hover:bg-black/5'
+                        }`}
                       >
-                        <div className={`w-9 h-9 rounded-full flex-shrink-0 flex items-center justify-center text-xs font-bold ${
-                          isSelected ? 'bg-primary text-white' : 'bg-primary/10 text-primary'
-                        }`}>
-                          <User size={18} />
-                        </div>
-                        <div className="overflow-hidden">
-                          <p className="text-xs font-bold truncate flex items-center gap-1.5">
-                            <span className="truncate">{c.name}</span>
-                            {c.profileNote && (
-                              <span className="inline-flex items-center gap-0.5 text-amber-800 bg-amber-100/90 px-1.5 py-0.2 rounded-full text-[9px] font-semibold shrink-0" title={c.profileNote}>
-                                <Pin size={9} className="fill-amber-700/40" />
-                                <span>Note</span>
-                              </span>
-                            )}
-                          </p>
-                          <div className="flex items-center gap-1.5 text-[10px] text-gray-500 truncate">
-                            {c.dni && (
-                              <span className="font-semibold text-primary/90 bg-primary/10 px-1.5 py-0.2 rounded text-[9px] font-mono shrink-0">
-                                {c.dni}
-                              </span>
-                            )}
-                            <span className="truncate">{c.phone || c.email}</span>
-                          </div>
-                        </div>
-                      </button>
-                      <div className="flex items-center gap-1">
                         <button
                           type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleDeleteClient(c.id);
-                          }}
-                          className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg opacity-70 sm:opacity-0 sm:group-hover:opacity-100 transition-all"
-                          title={lang === 'fr' ? "Supprimer le patient" : "Delete patient"}
+                          onClick={() => setSelectedClient(c)}
+                          className="flex-1 flex items-center gap-3 overflow-hidden text-left cursor-pointer"
                         >
-                          <Trash2 size={13} />
+                          <div className={`w-9 h-9 rounded-full flex-shrink-0 flex items-center justify-center text-xs font-bold ${
+                            isSelected ? 'bg-primary text-white shadow-xs' : 'bg-primary/10 text-primary'
+                          }`}>
+                            <User size={18} />
+                          </div>
+                          <div className="overflow-hidden min-w-0">
+                            <p className="text-xs font-bold truncate flex items-center gap-1.5">
+                              <span className="truncate">{c.name}</span>
+                              {c.profileNote && (
+                                <span className="inline-flex items-center gap-0.5 text-amber-800 bg-amber-100/90 px-1.5 py-0.2 rounded-full text-[9px] font-semibold shrink-0" title={c.profileNote}>
+                                  <Pin size={9} className="fill-amber-700/40" />
+                                  <span>Note</span>
+                                </span>
+                              )}
+                            </p>
+                            <div className="flex items-center gap-1.5 text-[10px] text-gray-500 truncate mt-0.5">
+                              {c.dni && (
+                                <span className="font-semibold text-primary/90 bg-primary/10 px-1.5 py-0.2 rounded text-[9px] font-mono shrink-0">
+                                  {c.dni}
+                                </span>
+                              )}
+                              <span className="truncate">{c.phone || c.email}</span>
+                            </div>
+                          </div>
                         </button>
-                        <ChevronRight size={14} className={isSelected ? 'text-primary' : 'text-gray-300'} />
+                        <div className="flex items-center gap-1 shrink-0">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDeleteClient(c.id);
+                            }}
+                            className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all"
+                            title={lang === 'fr' ? "Supprimer le patient" : "Delete patient"}
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                          <ChevronRight size={14} className={isSelected ? 'text-primary' : 'text-gray-300'} />
+                        </div>
                       </div>
+                    );
+                  })}
+                  {filteredClients.length === 0 && (
+                    <div className="py-12 text-center">
+                      <Users className="mx-auto text-gray-300 mb-2" size={28} />
+                      <p className="text-xs text-gray-400">
+                        {lang === 'fr' ? "Aucun patient trouvé." : lang === 'es' ? "No se encontraron pacientes." : "No patients found."}
+                      </p>
                     </div>
-                  );
-                })}
-                {filteredClients.length === 0 && (
-                  <p className="text-xs text-center text-gray-400 mt-12">
-                    {lang === 'fr' ? "Aucun patient trouvé." : lang === 'es' ? "No se encontraron pacientes." : "No patients found."}
-                  </p>
+                  )}
+                </div>
+
+                {/* Explicit Scroll Affordance Banner */}
+                {filteredClients.length > 4 && (
+                  <div className="mt-2 pt-2 border-t border-black/5 flex items-center justify-between text-[11px] text-gray-500">
+                    <span className="font-medium text-[11px] text-gray-500">
+                      {filteredClients.length} {lang === 'fr' ? 'patients' : lang === 'es' ? 'pacientes' : 'patients'}
+                    </span>
+                    {canScrollPatientsDown ? (
+                      <button
+                        type="button"
+                        onClick={handleScrollPatientsDown}
+                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold text-primary bg-primary/10 hover:bg-primary/20 transition-all cursor-pointer animate-pulse"
+                        title={lang === 'fr' ? 'Faites défiler vers le bas' : 'Desplace hacia abajo'}
+                      >
+                        <span>{lang === 'fr' ? 'Défiler pour voir plus' : lang === 'es' ? 'Desplazar abajo' : 'Scroll down'}</span>
+                        <ChevronDown size={12} />
+                      </button>
+                    ) : (
+                      <span className="text-[10px] text-gray-400">
+                        {lang === 'fr' ? 'Fin de liste' : lang === 'es' ? 'Fin de lista' : 'End of list'}
+                      </span>
+                    )}
+                  </div>
                 )}
               </div>
             </div>
 
             {/* Detailed clinical card column */}
-            <div className="lg:col-span-2 flex flex-col">
+            <div className="lg:col-span-8 xl:col-span-8 flex flex-col">
               {selectedClient ? (
                 <div className="space-y-6 flex flex-col flex-1">
                   
                   {/* Patient Info Header card */}
-                  <div className="bg-white p-6 rounded-3xl border border-black/5 shadow-sm">
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                      <div className="flex items-center gap-4">
-                        <div className="w-14 h-14 bg-primary/15 rounded-full flex items-center justify-center text-primary font-serif font-bold text-2xl">
-                          <User size={28} />
+                  <div className="bg-white p-5 sm:p-6 rounded-3xl border border-black/5 shadow-sm">
+                    <div className="flex flex-col md:flex-row md:items-start justify-between gap-4">
+                      <div className="flex items-start gap-3.5 sm:gap-4">
+                        <div className="w-13 h-13 sm:w-14 sm:h-14 bg-primary/15 rounded-full flex items-center justify-center text-primary font-serif font-bold text-2xl shrink-0">
+                          <User size={26} />
                         </div>
                         <div>
-                          <div className="flex items-center gap-2">
-                            <h3 className="text-xl font-bold font-serif text-primary leading-tight">{selectedClient.name}</h3>
-                            <button
-                              onClick={() => {
-                                setEditingClient(selectedClient);
-                                setIsEditClientOpen(true);
-                              }}
-                              className="p-1 hover:bg-black/5 rounded-lg text-gray-500 hover:text-primary transition-all"
-                              title={lang === 'fr' ? "Modifier la fiche du patient" : lang === 'es' ? "Editar ficha del paciente" : "Edit patient file"}
-                            >
-                              <Pencil size={14} />
-                            </button>
-                            <button
-                              onClick={() => handleDeleteClient(selectedClient.id)}
-                              className="p-1 hover:bg-red-50 rounded-lg text-gray-400 hover:text-red-500 transition-all"
-                              title={lang === 'fr' ? "Supprimer ce patient" : lang === 'es' ? "Eliminar paciente" : "Delete patient"}
-                            >
-                              <Trash2 size={14} />
-                            </button>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <h3 className="text-xl sm:text-2xl font-bold font-serif text-primary leading-tight">{selectedClient.name}</h3>
                           </div>
                           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1 text-xs text-gray-500">
                             <p>
@@ -2280,7 +2334,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                   setEditingClient(selectedClient);
                                   setIsEditClientOpen(true);
                                 }}
-                                className="text-[10px] text-primary hover:underline font-bold inline-flex items-center gap-1"
+                                className="text-[11px] text-primary hover:underline font-bold inline-flex items-center gap-1 cursor-pointer"
                               >
                                 <Pencil size={11} /> {lang === 'fr' ? 'Gérer le Bono' : lang === 'es' ? 'Gestionar Bono' : 'Manage Bono'}
                               </button>
@@ -2289,19 +2343,49 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                         </div>
                       </div>
 
-                      {/* Info lines grid */}
-                      <div className="flex flex-col gap-1.5 sm:text-right">
-                        <p className="text-xs font-bold text-gray-600 flex items-center sm:justify-end gap-1.5">
-                          <Phone size={12} className="text-primary" /> {selectedClient.phone}
-                        </p>
-                        <p className="text-xs text-gray-500 flex items-center sm:justify-end gap-1.5 truncate">
-                          <Mail size={12} className="text-primary" /> {selectedClient.email}
-                        </p>
-                        {selectedClient.address && (
-                          <p className="text-[10px] text-gray-400 flex items-center sm:justify-end gap-1.5">
-                            <MapPin size={10} className="text-primary" /> {selectedClient.address}
-                          </p>
-                        )}
+                      {/* Top Action Buttons Group & Contact lines */}
+                      <div className="flex flex-col sm:flex-row md:flex-col items-start sm:items-center md:items-end justify-between gap-3 shrink-0">
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditingClient(selectedClient);
+                              setIsEditClientOpen(true);
+                            }}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-secondary hover:bg-black/5 text-gray-700 rounded-xl border border-black/5 text-xs font-semibold transition-all cursor-pointer shadow-2xs"
+                            title={lang === 'fr' ? "Modifier la fiche du patient" : lang === 'es' ? "Editar ficha del paciente" : "Edit patient file"}
+                          >
+                            <Pencil size={13} className="text-gray-500" />
+                            <span>{lang === 'fr' ? 'Modifier la fiche' : lang === 'es' ? 'Editar ficha' : 'Edit file'}</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteClient(selectedClient.id)}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-xl border border-rose-200 text-xs font-semibold transition-all cursor-pointer shadow-2xs"
+                            title={lang === 'fr' ? "Supprimer ce patient" : lang === 'es' ? "Eliminar paciente" : "Delete patient"}
+                          >
+                            <Trash2 size={13} className="text-rose-500" />
+                            <span>{lang === 'fr' ? 'Supprimer' : lang === 'es' ? 'Eliminar' : 'Delete'}</span>
+                          </button>
+                        </div>
+
+                        <div className="flex flex-wrap sm:flex-nowrap md:flex-col gap-1.5 text-xs text-gray-600 md:text-right">
+                          {selectedClient.phone && (
+                            <a href={`tel:${selectedClient.phone}`} className="hover:text-primary font-bold flex items-center md:justify-end gap-1.5 transition-colors">
+                              <Phone size={12} className="text-primary" /> <span>{selectedClient.phone}</span>
+                            </a>
+                          )}
+                          {selectedClient.email && (
+                            <a href={`mailto:${selectedClient.email}`} className="hover:text-primary text-gray-500 flex items-center md:justify-end gap-1.5 truncate transition-colors max-w-[220px]">
+                              <Mail size={12} className="text-primary shrink-0" /> <span className="truncate">{selectedClient.email}</span>
+                            </a>
+                          )}
+                          {selectedClient.address && (
+                            <p className="text-[10px] text-gray-400 flex items-center md:justify-end gap-1.5">
+                              <MapPin size={10} className="text-primary shrink-0" /> <span>{selectedClient.address}</span>
+                            </p>
+                          )}
+                        </div>
                       </div>
                     </div>
 
@@ -2321,7 +2405,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                   setProfileNoteInput(selectedClient.profileNote || '');
                                   setIsEditingProfileNote(true);
                                 }}
-                                className="p-1 px-2 text-amber-900 hover:text-primary hover:bg-amber-200/60 rounded-lg transition-all text-xs font-semibold flex items-center gap-1 cursor-pointer"
+                                className="p-1 px-2.5 text-amber-900 hover:text-primary hover:bg-amber-200/60 rounded-lg transition-all text-xs font-semibold flex items-center gap-1 cursor-pointer bg-white/70 border border-amber-200/60"
                                 title={lang === 'fr' ? 'Modifier la remarque du profil' : 'Edit profile note'}
                               >
                                 <Pencil size={12} />
@@ -2330,7 +2414,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                               <button
                                 type="button"
                                 onClick={handleDeleteProfileNote}
-                                className="p-1 px-2 text-rose-700 hover:text-rose-800 hover:bg-rose-100/80 rounded-lg transition-all text-xs font-semibold flex items-center gap-1 cursor-pointer"
+                                className="p-1 px-2.5 text-rose-700 hover:text-rose-800 hover:bg-rose-100/80 rounded-lg transition-all text-xs font-semibold flex items-center gap-1 cursor-pointer bg-white/70 border border-rose-200/60"
                                 title={lang === 'fr' ? 'Supprimer la remarque du profil' : 'Delete profile note'}
                               >
                                 <Trash2 size={12} />
@@ -2411,7 +2495,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                             if (firstField) firstField.focus();
                           }
                         }}
-                        className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-bold bg-primary text-white hover:bg-primary/90 transition-all shadow-xs"
+                        className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-bold bg-primary text-white hover:bg-primary/90 transition-all shadow-xs cursor-pointer"
                       >
                         <Plus size={13} />
                         <span>{lang === 'fr' ? 'Ajouter une note' : lang === 'es' ? 'Añadir una nota' : 'Add a note'}</span>
@@ -2419,17 +2503,17 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                     </div>
                   </div>
 
-                  {/* Consultation Notes Section */}
-                  <div className="grid grid-cols-1 md:grid-cols-5 gap-6 items-stretch">
+                  {/* Consultation Notes Section - Responsive layout: stacked on tablet/mobile, side-by-side on large desktop */}
+                  <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 items-start">
                     
                     {/* Add Clinical Note Form Column */}
-                    <div id="new-note-form" className="bg-white p-6 rounded-3xl border border-black/5 shadow-sm md:col-span-2">
+                    <div id="new-note-form" className="bg-white p-6 rounded-3xl border border-black/5 shadow-sm xl:col-span-5">
                       <h4 className="text-sm font-bold uppercase tracking-wider text-primary mb-4 flex items-center gap-2">
                         <FileCheck size={16} /> {lang === 'fr' ? "Nouvelle Consultation / Note" : lang === 'es' ? "Nueva Consulta / Nota" : "New Consultation / Note"}
                       </h4>
 
                       <form onSubmit={handleAddNote} className="space-y-4">
-                        <div className="grid grid-cols-2 gap-3">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                           <div>
                             <label className="text-[10px] uppercase tracking-wider font-bold text-gray-400 block mb-1">
                               {lang === 'fr' ? "Catégorie" : lang === 'es' ? "Categoría" : "Category"}
@@ -2437,7 +2521,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                             <select
                               value={newNote.category}
                               onChange={(e) => setNewNote(prev => ({ ...prev, category: e.target.value as ClientNote['category'] }))}
-                              className="w-full p-2 bg-[#f4f4ec] rounded-xl border border-black/5 text-xs focus:outline-none focus:ring-1 focus:ring-primary focus:bg-white transition-all"
+                              className="w-full p-2 bg-[#f4f4ec] rounded-xl border border-black/5 text-xs focus:outline-none focus:ring-1 focus:ring-primary focus:bg-white transition-all font-medium"
                             >
                               <option value="treatment">{lang === 'fr' ? "Traitement / Ostéopathie" : lang === 'es' ? "Tratamiento / Osteopatía" : "Treatment / Osteopathy"}</option>
                               <option value="evaluation">{lang === 'fr' ? "Anamnèse / Évaluation" : lang === 'es' ? "Anamnesis / Evaluación" : "Anamnesis / Evaluation"}</option>
@@ -2455,7 +2539,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                               required
                               value={newNote.date}
                               onChange={(e) => setNewNote(prev => ({ ...prev, date: e.target.value }))}
-                              className="w-full p-2 bg-[#f4f4ec] rounded-xl border border-black/5 text-xs focus:outline-none focus:ring-1 focus:ring-primary focus:bg-white transition-all"
+                              className="w-full p-2 bg-[#f4f4ec] rounded-xl border border-black/5 text-xs focus:outline-none focus:ring-1 focus:ring-primary focus:bg-white transition-all font-medium"
                             />
                           </div>
                         </div>
@@ -2514,7 +2598,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                     </div>
 
                     {/* Chronic Notes History Column */}
-                    <div className="md:col-span-3 space-y-4">
+                    <div className="xl:col-span-7 space-y-4">
                       <h4 className="text-sm font-bold uppercase tracking-wider text-primary flex items-center gap-2 mb-2 px-1">
                         {lang === 'fr' ? 'Historique des fiches' : lang === 'es' ? 'Historial de fichas' : 'Record history'} ({clientNotes.length})
                       </h4>
@@ -2666,7 +2750,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                           setEditingNoteDate(new Date().toISOString().split('T')[0]);
                                         }
                                       }}
-                                      className="inline-flex items-center gap-1 px-2.5 py-1 text-gray-600 hover:text-primary hover:bg-primary/5 rounded-xl border border-black/10 bg-white text-xs font-semibold transition-all cursor-pointer shadow-2xs"
+                                      className="inline-flex items-center gap-1 px-2.5 py-1.5 text-gray-700 hover:text-primary hover:bg-primary/5 rounded-xl border border-black/10 bg-white text-xs font-semibold transition-all cursor-pointer shadow-2xs"
                                       title={lang === 'fr' ? "Modifier cette note" : lang === 'es' ? "Editar nota" : "Edit note"}
                                       aria-label={lang === 'fr' ? "Modifier la note" : lang === 'es' ? "Editar nota" : "Edit note"}
                                     >
@@ -2676,7 +2760,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                     <button
                                       type="button"
                                       onClick={() => handleDeleteNote(note.id)}
-                                      className="inline-flex items-center gap-1 px-2.5 py-1 text-rose-600 hover:text-rose-700 hover:bg-rose-50 rounded-xl border border-rose-200 bg-rose-50/50 text-xs font-semibold transition-all cursor-pointer shadow-2xs"
+                                      className="inline-flex items-center gap-1 px-2.5 py-1.5 text-rose-600 hover:text-rose-700 hover:bg-rose-50 rounded-xl border border-rose-200 bg-rose-50/50 text-xs font-semibold transition-all cursor-pointer shadow-2xs"
                                       title={lang === 'fr' ? "Supprimer cette note" : lang === 'es' ? "Eliminar nota" : "Delete note"}
                                       aria-label={lang === 'fr' ? "Supprimer la note" : lang === 'es' ? "Eliminar nota" : "Delete note"}
                                     >
@@ -2748,16 +2832,16 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                               });
 
                               return associatedInvoice ? (
-                                <div className="mt-4 pt-4 border-t border-black/5 flex flex-wrap items-center justify-between gap-3 bg-secondary/30 p-3 rounded-2xl">
-                                  <div className="flex items-center gap-2">
-                                    <CreditCard size={14} className="text-primary" />
+                                <div className="mt-4 pt-4 border-t border-black/5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-stone-50 p-3.5 rounded-2xl border border-black/5">
+                                  <div className="flex items-center gap-2.5">
+                                    <CreditCard size={15} className="text-primary shrink-0" />
                                     <div className="text-left">
-                                      <p className="text-xs font-bold text-gray-800 flex items-center gap-1.5">
-                                        <span>{lang === 'fr' ? 'Facture' : lang === 'es' ? 'Factura' : 'Invoice'} #{associatedInvoice.invoiceNumber}</span>
+                                      <div className="flex items-center gap-2 flex-wrap">
+                                        <span className="text-xs font-bold text-gray-800">{lang === 'fr' ? 'Facture' : lang === 'es' ? 'Factura' : 'Invoice'} #{associatedInvoice.invoiceNumber}</span>
                                         <button
                                           type="button"
                                           onClick={() => handleToggleInvoiceStatus(associatedInvoice)}
-                                          className={`text-[10px] px-2 py-0.5 rounded-full font-bold flex items-center gap-1 transition-all ${
+                                          className={`text-[10px] px-2 py-0.5 rounded-full font-bold flex items-center gap-1 transition-all cursor-pointer ${
                                             associatedInvoice.status === 'paid'
                                               ? 'text-emerald-700 bg-emerald-100 hover:bg-emerald-200 border border-emerald-200'
                                               : 'text-amber-800 bg-amber-100 hover:bg-amber-200 border border-amber-300 animate-pulse'
@@ -2778,8 +2862,8 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                             </>
                                           )}
                                         </button>
-                                      </p>
-                                      <p className="text-[10px] text-gray-500">
+                                      </div>
+                                      <p className="text-[10px] text-gray-500 mt-0.5">
                                         {associatedInvoice.amount} € • {
                                           associatedInvoice.paymentMethod === 'card' ? (lang === 'fr' ? 'Carte' : lang === 'es' ? 'Tarjeta' : 'Card') :
                                           associatedInvoice.paymentMethod === 'cash' ? (lang === 'fr' ? 'Espèces' : lang === 'es' ? 'Efectivo' : 'Cash') : (lang === 'fr' ? 'Virement' : lang === 'es' ? 'Transferencia' : 'Transfer')
@@ -2788,23 +2872,23 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                     </div>
                                   </div>
                                   
-                                  <div className="flex items-center gap-2">
+                                  <div className="flex items-center gap-2 shrink-0">
                                     {associatedInvoice.status === 'pending' && (
                                       <button
                                         type="button"
                                         onClick={() => handleToggleInvoiceStatus(associatedInvoice, 'paid')}
-                                        className="flex items-center gap-1 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-[10px] font-bold transition-all shadow-xs"
+                                        className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer"
                                       >
-                                        <CheckCircle2 size={12} />
+                                        <CheckCircle2 size={13} />
                                         <span>{lang === 'fr' ? 'Marquer payée' : lang === 'es' ? 'Marcar pagada' : 'Mark paid'}</span>
                                       </button>
                                     )}
                                     <button
                                       type="button"
                                       onClick={() => setSelectedInvoiceForPrint(associatedInvoice)}
-                                      className="flex items-center gap-1.5 px-3 py-1.5 bg-primary/10 hover:bg-primary text-primary hover:text-white rounded-xl text-[10px] font-bold uppercase tracking-wider transition-all"
+                                      className="flex items-center gap-1.5 px-3 py-1.5 bg-primary/10 hover:bg-primary text-primary hover:text-white rounded-xl text-xs font-bold uppercase tracking-wider transition-all cursor-pointer"
                                     >
-                                      <Printer size={12} />
+                                      <Printer size={13} />
                                       <span>{translations[lang].admin.billing.receipt}</span>
                                     </button>
                                   </div>
