@@ -10,7 +10,7 @@ import {
   ArrowUpDown, ArrowUp, ArrowDown
 } from 'lucide-react';
 import { Client, ClientNote, Invoice, CalendarEvent, EventType } from '../../types';
-import { api, isSupabaseConfigured, SUPABASE_SQL_SETUP, capitalizeFirstName, sortInvoicesByDate } from '../../lib/supabase';
+import { api, isSupabaseConfigured, SUPABASE_SQL_SETUP, capitalizeFirstName, sortInvoicesByDate, normalizeInvoiceDescription } from '../../lib/supabase';
 import SpineLogo from '../SpineLogo';
 import { useTranslation } from '../../App';
 import { Language, translations } from '../../translations';
@@ -42,11 +42,88 @@ const getMonthsList = (lang: string) => {
   return ["Janvier", "Février", "Mars", "Avril", "Mai", "Juin", "Juillet", "Août", "Septembre", "Octobre", "Novembre", "Décembre"];
 };
 
+const formatSpanishDateStr = (dateStr?: string) => {
+  if (!dateStr) return '';
+  const parts = dateStr.split('-');
+  if (parts.length === 3) {
+    const [y, m, d] = parts;
+    return `${d}/${m}/${y}`;
+  }
+  return dateStr;
+};
+
+const formatRecapPeriodTitle = (recap: {
+  periodType: 'monthly' | 'annual' | 'custom';
+  year?: number;
+  month?: number;
+  startDate?: string;
+  endDate?: string;
+}) => {
+  const spanishMonths = [
+    'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
+    'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'
+  ];
+
+  if (recap.periodType === 'annual') {
+    return `Balance Anual ${recap.year || new Date().getFullYear()}`;
+  }
+
+  if (recap.periodType === 'custom') {
+    const start = formatSpanishDateStr(recap.startDate);
+    const end = formatSpanishDateStr(recap.endDate);
+    if (start && end) {
+      if (start === end) {
+        return `Balance del ${start}`;
+      }
+      return `Balance del ${start} al ${end}`;
+    }
+    return 'Balance - Período personalizado';
+  }
+
+  const mIdx = typeof recap.month === 'number' && recap.month >= 0 && recap.month <= 11 
+    ? recap.month 
+    : new Date().getMonth();
+  const yVal = recap.year || new Date().getFullYear();
+  return `Balance Mensual - ${spanishMonths[mIdx]} ${yVal}`;
+};
+
+const formatRecapSubtitle = (recap: {
+  periodType: 'monthly' | 'annual' | 'custom';
+  year?: number;
+  month?: number;
+  startDate?: string;
+  endDate?: string;
+}) => {
+  const spanishMonths = [
+    'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
+    'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'
+  ];
+
+  if (recap.periodType === 'annual') {
+    return `Año ${recap.year || new Date().getFullYear()}`;
+  }
+
+  if (recap.periodType === 'custom') {
+    const start = formatSpanishDateStr(recap.startDate);
+    const end = formatSpanishDateStr(recap.endDate);
+    if (start && end) {
+      if (start === end) return `Fecha: ${start}`;
+      return `Del ${start} al ${end}`;
+    }
+    return 'Período personalizado';
+  }
+
+  const mIdx = typeof recap.month === 'number' && recap.month >= 0 && recap.month <= 11 
+    ? recap.month 
+    : new Date().getMonth();
+  const yVal = recap.year || new Date().getFullYear();
+  return `${spanishMonths[mIdx]} ${yVal}`;
+};
+
 type TabType = 'overview' | 'clients' | 'calendar' | 'billing';
 
 export default function AdminDashboard({ onClose }: AdminDashboardProps) {
   const { lang, setLang, t } = useTranslation();
-  const [receiptLang, setReceiptLang] = useState<Language>('fr');
   const [activeTab, setActiveTab] = useState<TabType>('overview');
   
   const [clients, setClients] = useState<Client[]>([]);
@@ -145,8 +222,9 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
     discountLabel: '',
     status: 'paid' as 'paid' | 'pending',
     paymentMethod: 'card' as Invoice['paymentMethod'],
-    description: "Séance d'Ostéopathie (1h)",
-    language: 'fr' as 'fr' | 'en' | 'es',
+    description: "Sesión de osteopatía",
+    language: 'es' as 'fr' | 'en' | 'es',
+    quantity: 1,
     date: new Date().toISOString().split('T')[0],
     paymentDate: new Date().toISOString().split('T')[0],
     eventId: '',
@@ -383,12 +461,6 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
   useEffect(() => {
     loadData();
   }, []);
-
-  useEffect(() => {
-    if (selectedInvoiceForPrint) {
-      setReceiptLang(selectedInvoiceForPrint.language || lang);
-    }
-  }, [selectedInvoiceForPrint, lang]);
 
   // Memoized sorted and filtered invoices for the billing log
   // Default sort is strictly by date descending (newest first)
@@ -680,8 +752,9 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
         paymentMethod: newInvoice.paymentMethod,
         date: newInvoice.date || new Date().toISOString().split('T')[0],
         paymentDate: newInvoice.status === 'paid' ? (newInvoice.paymentDate || newInvoice.date || new Date().toISOString().split('T')[0]) : undefined,
-        description: finalDescription,
-        language: newInvoice.language,
+        description: normalizeInvoiceDescription(finalDescription),
+        language: 'es',
+        quantity: 1,
         noteId: newInvoice.eventId || undefined,
       });
 
@@ -699,9 +772,11 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
         discountLabel: '',
         status: 'paid',
         paymentMethod: 'card',
-        description: "Séance d'Ostéopathie (1h)",
-        language: lang as 'fr' | 'en' | 'es',
+        description: "Sesión de osteopatía",
+        language: 'es',
+        quantity: 1,
         date: new Date().toISOString().split('T')[0],
+        paymentDate: new Date().toISOString().split('T')[0],
         eventId: '',
       });
 
@@ -795,8 +870,9 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
         paymentMethod: inlineInvoicePaymentMethod,
         date: noteDateStr,
         paymentDate: inlineInvoiceStatus === 'paid' ? noteDateStr : undefined,
-        description: finalDescription,
-        language: lang as 'fr' | 'en' | 'es',
+        description: normalizeInvoiceDescription(finalDescription),
+        language: 'es',
+        quantity: 1,
         noteId: note.id,
       });
 
@@ -1019,6 +1095,9 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
       const updated = await api.updateInvoice({
         ...editingInvoice,
         clientName,
+        language: 'es',
+        description: normalizeInvoiceDescription(editingInvoice.description),
+        quantity: 1,
       });
 
       setInvoices(prev => sortInvoicesByDate(prev.map(i => i.id === updated.id ? updated : i), false));
@@ -1039,6 +1118,9 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
           ...invoice,
           status: newStatus,
           paymentDate: newStatus === 'paid' ? (invoice.paymentDate || new Date().toISOString().split('T')[0]) : undefined,
+          language: 'es',
+          description: normalizeInvoiceDescription(invoice.description),
+          quantity: 1,
         });
         setInvoices(prev => sortInvoicesByDate(prev.map(i => i.id === updated.id ? updated : i), false));
         if (selectedInvoiceForPrint?.id === updated.id) {
@@ -1485,7 +1567,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
 
     const printWindow = window.open('', '_blank', 'width=800,height=1000');
     if (!printWindow) {
-      alert('Veuillez autoriser les fenêtres surgissantes (pop-ups) pour imprimer.');
+      alert('Por favor, autorice las ventanas emergentes (pop-ups) para imprimir.');
       return;
     }
 
@@ -1501,20 +1583,12 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
       })
       .join('');
 
-    let period = '';
-    if (selectedRecapForPrint.periodType === 'annual') {
-      period = `${selectedRecapForPrint.year}`;
-    } else if (selectedRecapForPrint.periodType === 'monthly') {
-      period = `${(selectedRecapForPrint.month !== undefined ? selectedRecapForPrint.month : 0) + 1}/${selectedRecapForPrint.year}`;
-    } else {
-      const toLabel = lang === 'fr' ? 'au' : lang === 'es' ? 'al' : 'to';
-      period = `${selectedRecapForPrint.startDate} ${toLabel} ${selectedRecapForPrint.endDate}`;
-    }
+    const period = formatRecapPeriodTitle(selectedRecapForPrint);
 
     printWindow.document.write(`
       <html>
         <head>
-          <title>Récapitulatif ${period}</title>
+          <title>${period}</title>
           <style>
             ${styles}
             @page { margin: 0; size: A4; }
@@ -3947,7 +4021,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
             <div className="bg-white p-6 rounded-3xl border border-black/5 shadow-sm flex flex-col sm:flex-row items-center justify-between gap-4">
               <div>
                 <h3 className="text-xl font-bold font-serif text-primary">
-                  {lang === 'fr' ? 'Facturation & Honoraires' : lang === 'es' ? 'Facturación y Honorarios' : 'Billing & Fees'}
+                  {lang === 'fr' ? 'Facturation' : lang === 'es' ? 'Facturación' : 'Billing'}
                 </h3>
                 <p className="text-xs text-gray-500">
                 </p>
@@ -5605,7 +5679,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                           discountAmount: 0,
                           discountLabel: '',
                           amount: 60,
-                          description: 'Consultation ostéopathie',
+                          description: 'Sesión de osteopatía',
                         }));
                       }
                       setNewInvoiceIncludeToday(true);
@@ -5644,23 +5718,18 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                               const selEvent = clientEvents.find(ev => ev.id === selEventId);
                               if (selEvent) {
                                 const eventDate = selEvent.start.split('T')[0];
-                                const formattedDate = new Date(selEvent.start).toLocaleDateString(lang === 'fr' ? 'fr-FR' : 'es-ES', { day: 'numeric', month: 'long', year: 'numeric' });
                                 setNewInvoice(prev => ({
                                   ...prev,
                                   eventId: selEventId,
                                   date: eventDate,
-                                  description: lang === 'fr' 
-                                    ? `Séance d'Ostéopathie du ${formattedDate}` 
-                                    : lang === 'es' 
-                                      ? `Sesión de Osteopatía del ${formattedDate}` 
-                                      : `Osteopathy Session of ${formattedDate}`
+                                  description: "Sesión de osteopatía",
                                 }));
                               } else {
                                 setNewInvoice(prev => ({
                                   ...prev,
                                   eventId: '',
                                   date: new Date().toISOString().split('T')[0],
-                                  description: lang === 'fr' ? "Séance d'Ostéopathie" : lang === 'es' ? "Sesión de osteopatía" : "Osteopathy session"
+                                  description: "Sesión de osteopatía",
                                 }));
                               }
                             }}
@@ -5720,7 +5789,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                 discountAmount: 0,
                                 discountLabel: '',
                                 amount: 60,
-                                description: 'Consultation ostéopathie',
+                                description: 'Sesión de osteopatía',
                               }));
                             }}
                             className={`p-2.5 rounded-xl border text-left transition-all ${
@@ -6029,21 +6098,6 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                     />
                   </div>
                 )}
-
-                <div>
-                  <label className="text-[10px] uppercase tracking-wider font-bold text-gray-400 block mb-1">
-                    {lang === 'fr' ? 'Langue du reçu' : lang === 'es' ? 'Idioma del recibo' : 'Receipt language'}
-                  </label>
-                  <select
-                    value={newInvoice.language}
-                    onChange={(e) => setNewInvoice(prev => ({ ...prev, language: e.target.value as 'fr' | 'en' | 'es' }))}
-                    className="w-full p-2.5 bg-secondary rounded-xl border border-black/5 text-xs focus:outline-none focus:ring-1 focus:ring-primary focus:bg-white transition-all"
-                  >
-                    <option value="fr">Français (FR)</option>
-                    <option value="en">English (EN)</option>
-                    <option value="es">Español (ES)</option>
-                  </select>
-                </div>
 
                 <div className="flex gap-3 pt-4">
                   <button
@@ -6513,21 +6567,6 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                   </div>
                 )}
 
-                <div>
-                  <label className="text-[10px] uppercase tracking-wider font-bold text-gray-400 block mb-1">
-                    {lang === 'fr' ? 'Langue du reçu' : lang === 'es' ? 'Idioma del recibo' : 'Receipt language'}
-                  </label>
-                  <select
-                    value={editingInvoice.language || 'fr'}
-                    onChange={(e) => setEditingInvoice(prev => prev ? ({ ...prev, language: e.target.value as 'fr' | 'en' | 'es' }) : null)}
-                    className="w-full p-2.5 bg-secondary rounded-xl border border-black/5 text-xs focus:outline-none focus:ring-1 focus:ring-primary focus:bg-white transition-all"
-                  >
-                    <option value="fr">Français (FR)</option>
-                    <option value="en">English (EN)</option>
-                    <option value="es">Español (ES)</option>
-                  </select>
-                </div>
-
                 <div className="flex items-center justify-between pt-4 gap-3">
                   <button
                     type="button"
@@ -6584,36 +6623,8 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
               {/* Close and Print Actions */}
               <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4 mb-8 pb-4 border-b border-black/5 print:hidden">
                 <div>
-                  <h4 className="text-sm font-bold uppercase tracking-wider text-primary">{translations[receiptLang].invoice.receiptSubtitle}</h4>
-                  
-                  {/* Language Selector for Invoice Receipts */}
-                  <div className="flex items-center gap-1.5 mt-2 bg-[#f4f4ec] p-1 rounded-xl border border-black/5 self-start">
-                    <span className="text-[10px] font-bold text-gray-500 px-2">{translations[receiptLang].invoice.invoiceLang} :</span>
-                    {(['fr', 'en', 'es'] as const).map((l) => (
-                      <button
-                        key={l}
-                        type="button"
-                        onClick={async () => {
-                          setReceiptLang(l);
-                          try {
-                            const updatedInvoice = { ...selectedInvoiceForPrint, language: l };
-                            await api.updateInvoice(updatedInvoice);
-                            setInvoices(prev => prev.map(inv => inv.id === selectedInvoiceForPrint.id ? updatedInvoice : inv));
-                            setSelectedInvoiceForPrint(updatedInvoice);
-                          } catch (err) {
-                            console.error('Failed to update invoice language:', err);
-                          }
-                        }}
-                        className={`px-2.5 py-1 text-[10px] font-bold uppercase rounded-lg transition-all ${
-                          receiptLang === l
-                            ? 'bg-primary text-white shadow-sm'
-                            : 'text-gray-500 hover:bg-black/5'
-                        }`}
-                      >
-                        {l}
-                      </button>
-                    ))}
-                  </div>
+                  <h4 className="text-sm font-bold uppercase tracking-wider text-primary">Vista Previa de la Factura</h4>
+                  <p className="text-[11px] text-gray-500 mt-0.5">Recibo oficial de honorarios en español</p>
                 </div>
 
                 <div className="flex items-center gap-3">
@@ -6622,13 +6633,13 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                     className="flex items-center gap-2 px-4 py-2 bg-primary text-white rounded-xl text-xs font-bold uppercase tracking-wider hover:bg-primary/95 transition-all shadow-sm active:scale-95"
                   >
                     <Printer size={14} /> 
-                    {translations[lang].admin.billing.printInvoice}
+                    Imprimir Factura
                   </button>
                   <button
                     onClick={() => setSelectedInvoiceForPrint(null)}
                     className="px-4 py-2 bg-secondary text-gray-600 rounded-xl text-xs font-bold uppercase tracking-wider hover:bg-black/5 transition-all shadow-sm active:scale-95"
                   >
-                    {translations[receiptLang]?.invoice?.closeButton || (lang === 'fr' ? 'Fermer' : 'Close')}
+                    Cerrar
                   </button>
                 </div>
               </div>
@@ -6645,10 +6656,10 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                       <Clock size={16} className="text-amber-700" />
                       <div>
                         <p className="font-bold text-xs uppercase tracking-wider">
-                          {receiptLang === 'fr' ? 'Facture en attente de paiement' : receiptLang === 'es' ? 'Factura pendiente de pago' : 'Invoice pending payment'}
+                          Factura pendiente de pago
                         </p>
                         <p className="text-[10px] text-amber-700 font-normal">
-                          {receiptLang === 'fr' ? 'Cette facture n\'a pas encore été marquée comme acquittée.' : receiptLang === 'es' ? 'Esta factura aún no ha sido marcada como saldada.' : 'This invoice has not been marked as paid yet.'}
+                          Esta factura aún no ha sido marcada como saldada.
                         </p>
                       </div>
                     </div>
@@ -6658,29 +6669,30 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                       className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-all shadow-xs print:hidden flex items-center gap-1.5 shrink-0"
                     >
                       <CheckCircle2 size={14} />
-                      <span>{receiptLang === 'fr' ? 'Marquer comme payée' : receiptLang === 'es' ? 'Marcar pagada' : 'Mark as paid'}</span>
+                      <span>Marcar como pagada</span>
                     </button>
                   </div>
                 )}
                 {/* Header Section */}
                 <div className="flex justify-between items-start">
                   <div>
-                    <h1 className="text-lg font-bold font-serif text-primary">{translations[receiptLang].invoice.practitionerTitle}</h1>
-                    <p className="text-gray-500 mt-1">{translations[receiptLang].invoice.practitionerSubtitle}</p>
+                    <h1 className="text-lg font-bold font-serif text-primary">Vincent Durroux</h1>
+                    <p className="text-gray-800 text-xs font-bold tracking-wide mt-0.5">NIE : Z1503310N</p>
+                    <p className="text-gray-500 text-xs mt-0.5">Osteo Valencia</p>
                     <p className="text-gray-400 text-[10px] mt-2">Calle General Pastor 25, 46183 L'Eliana, Valencia</p>
                     <p className="text-gray-400 text-[10px]">Tél : +34 614 159 462</p>
                   </div>
                   
                   <div className="text-right">
-                    <span className="text-[10px] uppercase font-bold tracking-widest text-primary/60">{translations[receiptLang].invoice.receiptTitle}</span>
+                    <span className="text-[10px] uppercase font-bold tracking-widest text-primary/60">RECIBO DE HONORARIOS</span>
                     <h3 className="text-base font-bold text-gray-800 mt-1">{selectedInvoiceForPrint.invoiceNumber}</h3>
-                    <p className="text-gray-400 mt-1">{translations[receiptLang].invoice.dateOfIssue} : {new Date(selectedInvoiceForPrint.date).toLocaleDateString(receiptLang === 'fr' ? 'fr-FR' : receiptLang === 'es' ? 'es-ES' : 'en-US', { day: 'numeric', month: 'long', year: 'numeric' })}</p>
+                    <p className="text-gray-400 mt-1">Fecha de emisión : {new Date(selectedInvoiceForPrint.date).toLocaleDateString('es-ES', { day: 'numeric', month: 'long', year: 'numeric' })}</p>
                   </div>
                 </div>
 
                 {/* Patient / Destinataire Block */}
                 <div className="bg-[#f4f4ec] p-4 print:p-3 rounded-2xl border border-black/5">
-                  <span className="text-[9px] uppercase tracking-widest font-bold text-primary/60 block mb-2">{translations[receiptLang].invoice.recipient}</span>
+                  <span className="text-[9px] uppercase tracking-widest font-bold text-primary/60 block mb-2">DESTINATARIO (PACIENTE)</span>
                   <h4 className="text-sm font-bold text-gray-800">{selectedInvoiceForPrint.clientName}</h4>
                   {(() => {
                     const client = clients.find(c => c.id === selectedInvoiceForPrint.clientId || c.name === selectedInvoiceForPrint.clientName);
@@ -6698,101 +6710,23 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                 <table className="w-full border-collapse">
                   <thead>
                     <tr className="border-b-2 border-primary/20 text-left text-[10px] font-bold uppercase text-gray-400">
-                      <th className="py-2.5">{translations[receiptLang].invoice.tableDescription}</th>
-                      <th className="py-2.5 text-center">{translations[receiptLang].invoice.tableTva}</th>
-                      <th className="py-2.5 text-right">{translations[receiptLang].invoice.tableUnitAmount}</th>
+                      <th className="py-2.5">Descripción de los servicios</th>
+                      <th className="py-2.5 text-center">Unidades</th>
+                      <th className="py-2.5 text-center">IVA</th>
+                      <th className="py-2.5 text-right">Importe Unitario</th>
                     </tr>
                   </thead>
                   <tbody>
                     <tr className="border-b border-black/5 text-gray-700">
                       <td className="py-4">
                         <p className="font-bold">
-                          {(() => {
-                            const desc = selectedInvoiceForPrint.description || '';
-                            const trimmed = desc.trim();
-
-                            // 1. Standard single session: "Séance d'Ostéopathie (1h)" or matches in other languages
-                            if (
-                              trimmed === "Séance d'Ostéopathie (1h)" || 
-                              trimmed === "Osteopathy Session (1h)" || 
-                              trimmed === "Sesión de Osteopatía (1h)"
-                            ) {
-                              return receiptLang === 'fr' ? "Séance d'Ostéopathie (1h)" :
-                                     receiptLang === 'es' ? "Sesión de Osteopatía (1h)" :
-                                     "Osteopathy Session (1h)";
-                            }
-
-                            // 2. Standard single session without (1h): "Séance d'Ostéopathie"
-                            if (
-                              trimmed === "Séance d'Ostéopathie" || 
-                              trimmed === "Osteopathy Session" || 
-                              trimmed === "Sesión de Osteopatía"
-                            ) {
-                              return receiptLang === 'fr' ? "Séance d'Ostéopathie" :
-                                     receiptLang === 'es' ? "Sesión de Osteopatía" :
-                                     "Osteopathy Session";
-                            }
-
-                            // 2.5. Standard session with date: "Séance d'Ostéopathie du [DATE]"
-                            if (
-                              trimmed.startsWith("Séance d'Ostéopathie du") ||
-                              trimmed.startsWith("Sesión de Osteopatía del") ||
-                              trimmed.startsWith("Osteopathy Session of")
-                            ) {
-                              try {
-                                const formattedSessionDate = new Date(selectedInvoiceForPrint.date).toLocaleDateString(
-                                  receiptLang === 'fr' ? 'fr-FR' : receiptLang === 'es' ? 'es-ES' : 'en-US',
-                                  { day: 'numeric', month: 'long', year: 'numeric' }
-                                );
-                                return receiptLang === 'fr' ? `Séance d'Ostéopathie du ${formattedSessionDate}` :
-                                       receiptLang === 'es' ? `Sesión de Osteopatía del ${formattedSessionDate}` :
-                                       `Osteopathy Session of ${formattedSessionDate}`;
-                              } catch (e) {
-                                return desc;
-                              }
-                            }
-
-                            // 3. Bono Deduct: "Séance d'Ostéopathie (Prise en compte Bono)"
-                            if (
-                              trimmed.startsWith("Séance d'Ostéopathie (Prise en compte Bono)") ||
-                              trimmed.startsWith("Osteopathy session (Redeemed on Bono)") ||
-                              trimmed.startsWith("Sesión de Osteopatía (Canjeada con Bono)") ||
-                              trimmed.includes("Prise en compte Bono") ||
-                              trimmed.includes("Redeemed on Bono") ||
-                              trimmed.includes("Canjeada con Bono")
-                            ) {
-                              return receiptLang === 'fr' ? "Séance d'Ostéopathie (Prise en compte Bono)" :
-                                     receiptLang === 'es' ? "Sesión de Osteopatía (Canjeada con Bono)" :
-                                     "Osteopathy session (Redeemed on Bono)";
-                            }
-
-                            // 4. Bono 3 pack
-                            if (
-                              trimmed.startsWith("Bono Ostéopathie - Forfait 3 séances") ||
-                              trimmed.startsWith("Osteopathy Bono - 3-session pack") ||
-                              trimmed.startsWith("Bono Osteopatía - 3 sesiones")
-                            ) {
-                              return receiptLang === 'fr' ? "Bono Ostéopathie - Forfait 3 séances (160 €)" :
-                                     receiptLang === 'es' ? "Bono Osteopatía - 3 sesiones (160 €)" :
-                                     "Osteopathy Bono - 3-session pack (160 €)";
-                            }
-
-                            // 5. Bono 5 pack
-                            if (
-                              trimmed.startsWith("Bono Ostéopathie - Forfait 5 séances") ||
-                              trimmed.startsWith("Osteopathy Bono - 5-session pack") ||
-                              trimmed.startsWith("Bono Osteopatía - 5 sesiones")
-                            ) {
-                              return receiptLang === 'fr' ? "Bono Ostéopathie - Forfait 5 séances (250 €)" :
-                                     receiptLang === 'es' ? "Bono Osteopatía - 5 sesiones (250 €)" :
-                                     "Osteopathy Bono - 5-session pack (250 €)";
-                            }
-
-                            return desc;
-                          })()}
+                          {normalizeInvoiceDescription(selectedInvoiceForPrint.description)}
                         </p>
                       </td>
-                      <td className="py-4 text-center">{translations[receiptLang].invoice.tableExempt}</td>
+                      <td className="py-4 text-center font-medium">
+                        {selectedInvoiceForPrint.quantity || 1}
+                      </td>
+                      <td className="py-4 text-center">21%</td>
                       <td className="py-4 text-right font-bold">
                         {selectedInvoiceForPrint.originalAmount ? `${selectedInvoiceForPrint.originalAmount} €` : `${selectedInvoiceForPrint.amount} €`}
                       </td>
@@ -6802,11 +6736,12 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                         <td className="py-3">
                           <p className="font-semibold text-xs flex items-center gap-1.5">
                             <span className="px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 text-[9px] font-bold uppercase">
-                              {selectedInvoiceForPrint.discountType === 'bono' ? 'Bono' : (receiptLang === 'fr' ? 'Remise' : receiptLang === 'es' ? 'Descuento' : 'Discount')}
+                              {selectedInvoiceForPrint.discountType === 'bono' ? 'Bono' : 'Descuento'}
                             </span>
-                            {selectedInvoiceForPrint.discountLabel || (receiptLang === 'fr' ? 'Remise Bono séance' : receiptLang === 'es' ? 'Descuento sesión' : 'Bono session discount')}
+                            {selectedInvoiceForPrint.discountLabel || (selectedInvoiceForPrint.discountType === 'bono' ? 'Bono aplicado' : 'Descuento aplicado')}
                           </p>
                         </td>
+                        <td className="py-3 text-center text-[10px] text-emerald-700 font-medium">-</td>
                         <td className="py-3 text-center text-[10px] text-emerald-700 font-medium">-</td>
                         <td className="py-3 text-right font-bold text-emerald-700">
                           -{selectedInvoiceForPrint.discountAmount} €
@@ -6822,29 +6757,27 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                     {(selectedInvoiceForPrint.discountAmount !== undefined && selectedInvoiceForPrint.discountAmount > 0 && selectedInvoiceForPrint.originalAmount !== undefined) ? (
                       <>
                         <div className="flex justify-between text-[11px] text-gray-500">
-                          <span>{receiptLang === 'fr' ? 'Tarif standard' : receiptLang === 'es' ? 'Tarifa estándar' : 'Standard fee'}</span>
+                          <span>Tarifa estándar</span>
                           <span>{selectedInvoiceForPrint.originalAmount} €</span>
                         </div>
                         <div className="flex justify-between text-[11px] text-emerald-700 font-medium">
                           <span>
-                            {selectedInvoiceForPrint.discountType === 'bono'
-                              ? (receiptLang === 'fr' ? 'Remise Forfait Bono' : receiptLang === 'es' ? 'Descuento' : 'Bono discount')
-                              : (receiptLang === 'fr' ? 'Remise accordée' : receiptLang === 'es' ? 'Descuento aplicado' : 'Discount')}
+                            {selectedInvoiceForPrint.discountType === 'bono' ? 'Descuento Bono' : 'Descuento aplicado'}
                           </span>
                           <span>-{selectedInvoiceForPrint.discountAmount} €</span>
                         </div>
                       </>
                     ) : null}
                     <div className="flex justify-between text-[11px] text-gray-500">
-                      <span>{translations[receiptLang].invoice.totalHt}</span>
+                      <span>Total base imponible</span>
                       <span>{(selectedInvoiceForPrint.amount / 1.21).toFixed(2)} €</span>
                     </div>
                     <div className="flex justify-between text-[11px] text-gray-500">
-                      <span>{translations[receiptLang].invoice.tvaLabel}</span>
+                      <span>IVA (21%)</span>
                       <span>{(selectedInvoiceForPrint.amount - (selectedInvoiceForPrint.amount / 1.21)).toFixed(2)} €</span>
                     </div>
                     <div className="flex justify-between text-sm font-bold text-primary pt-2 border-t border-black/10">
-                      <span>{translations[receiptLang].invoice.totalTtc}</span>
+                      <span>Total con IVA</span>
                       <span>{selectedInvoiceForPrint.amount} €</span>
                     </div>
                   </div>
@@ -6855,25 +6788,20 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                   <div>
                     <p className="text-[10px] text-gray-400 leading-relaxed max-w-sm">
                       {selectedInvoiceForPrint.status === 'pending'
-                        ? (receiptLang === 'fr'
-                            ? "Document valant facture en attente de règlement (non acquittée)."
-                            : receiptLang === 'es'
-                            ? "Documento de factura pendiente de pago (no saldada)."
-                            : "Invoice document pending payment (unpaid).")
-                        : ((translations[receiptLang]?.invoice?.receiptDeclaration || "Reçu valant facture acquittée le {date} par {paymentMethod}.")
-                            .replace('{date}', new Date(selectedInvoiceForPrint.paymentDate || selectedInvoiceForPrint.date).toLocaleDateString(receiptLang === 'fr' ? 'fr-FR' : receiptLang === 'es' ? 'es-ES' : 'en-US'))
-                            .replace('{paymentMethod}', selectedInvoiceForPrint.paymentMethod === 'card' 
-                              ? (translations[receiptLang]?.invoice?.methods?.card || 'Carte bancaire')
+                        ? "Factura pendiente de pago (no saldada)."
+                        : `Recibo de factura pagada el ${new Date(selectedInvoiceForPrint.paymentDate || selectedInvoiceForPrint.date).toLocaleDateString('es-ES', { day: 'numeric', month: 'long', year: 'numeric' })} mediante ${
+                            selectedInvoiceForPrint.paymentMethod === 'card' 
+                              ? 'tarjeta de crédito' 
                               : selectedInvoiceForPrint.paymentMethod === 'cash' 
-                                ? (translations[receiptLang]?.invoice?.methods?.cash || 'Espèces') 
-                                : (translations[receiptLang]?.invoice?.methods?.transfer || 'Virement bancaire')
-                            ))
+                                ? 'efectivo' 
+                                : 'transferencia bancaria'
+                          }.`
                       }
                     </p>
                   </div>
                   
                   <div className="text-center w-48 border-t border-dashed border-gray-300 pt-3">
-                    <p className="font-serif italic text-primary mt-1 text-[13px]">{translations[receiptLang].invoice.signatureName}</p>
+                    <p className="font-serif italic text-primary mt-1 text-[13px]">Vincent Durroux</p>
                   </div>
                 </div>
 
@@ -6903,13 +6831,10 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
               <div className="flex justify-between items-center mb-8 pb-4 border-b border-black/5 print:hidden">
                 <div>
                   <h4 className="text-sm font-bold uppercase tracking-wider text-primary">
-                    {lang === 'fr' ? "Récapitulatif Comptable" : lang === 'es' ? "Resumen de Contabilidad" : "Accounting Summary"}
+                    Resumen Contable
                   </h4>
                   <p className="text-[11px] text-gray-500 mt-1">
-                    {selectedRecapForPrint.periodType === 'annual'
-                      ? `${lang === 'fr' ? 'Année' : lang === 'es' ? 'Año' : 'Year'} ${selectedRecapForPrint.year}`
-                      : `${getMonthsList(lang)[selectedRecapForPrint.month]} ${selectedRecapForPrint.year}`
-                    }
+                    {formatRecapSubtitle(selectedRecapForPrint)}
                   </p>
                 </div>
 
@@ -6919,13 +6844,13 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                     className="flex items-center gap-2 px-4 py-2 bg-primary text-white rounded-xl text-xs font-bold uppercase tracking-wider hover:bg-primary/95 transition-all shadow-sm active:scale-95"
                   >
                     <Printer size={14} /> 
-                    {lang === 'fr' ? 'Imprimer le récapitulatif' : lang === 'es' ? 'Imprimir resumen' : 'Print summary'}
+                    Imprimir resumen
                   </button>
                   <button
                     onClick={() => setSelectedRecapForPrint(null)}
                     className="px-4 py-2 bg-secondary text-gray-600 rounded-xl text-xs font-bold uppercase tracking-wider hover:bg-black/5 transition-all shadow-sm active:scale-95"
                   >
-                    {lang === 'fr' ? 'Fermer' : 'Close'}
+                    Cerrar
                   </button>
                 </div>
               </div>
@@ -6940,22 +6865,20 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                 <div className="flex justify-between items-start border-b border-black/5 pb-6">
                   <div>
                     <h1 className="text-lg font-bold font-serif text-primary">Vincent Durroux</h1>
+                    <p className="text-gray-800 text-xs font-bold tracking-wide mt-0.5">NIE : Z1503310N</p>
                     <p className="text-gray-500 mt-1 font-medium">Osteo Valencia</p>
                     <p className="text-gray-400 text-[10px] mt-1">Calle General Pastor 25, 46183 L'Eliana, Valencia</p>
                     <p className="text-gray-400 text-[10px]">Tél : +34 614 159 462</p>
                   </div>
                   <div className="text-right">
                     <span className="text-[10px] uppercase font-bold tracking-widest text-primary/60 block">
-                      {lang === 'fr' ? 'Rapport Financier' : lang === 'es' ? 'Informe Financiero' : 'Financial Report'}
+                      INFORME FINANCIERO
                     </span>
                     <p className="text-sm font-serif font-bold text-gray-800 mt-1">
-                      {selectedRecapForPrint.periodType === 'annual'
-                        ? `${lang === 'fr' ? 'Bilan Annuel' : lang === 'es' ? 'Balance Anual' : 'Annual Balance'} ${selectedRecapForPrint.year}`
-                        : `${lang === 'fr' ? 'Bilan Mensuel' : lang === 'es' ? 'Balance Mensual' : 'Monthly Balance'} - ${getMonthsList(lang)[selectedRecapForPrint.month]} ${selectedRecapForPrint.year}`
-                      }
+                      {formatRecapPeriodTitle(selectedRecapForPrint)}
                     </p>
                     <p className="text-[9px] text-gray-400 mt-1">
-                      {lang === 'fr' ? 'Généré le' : lang === 'es' ? 'Generado el' : 'Generated on'} : {new Date().toLocaleDateString(lang === 'fr' ? 'fr-FR' : lang === 'es' ? 'es-ES' : 'en-US')}
+                      Generado el : {new Date().toLocaleDateString('es-ES', { day: 'numeric', month: 'long', year: 'numeric' })}
                     </p>
                   </div>
                 </div>
@@ -6964,107 +6887,64 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                 <div className="grid grid-cols-4 gap-3">
                   <div className="bg-[#f4f4ec] p-3.5 rounded-2xl border border-black/5">
                     <p className="text-[9px] uppercase font-bold text-emerald-800">
-                      {lang === 'fr' ? 'Total Encaissé' : lang === 'es' ? 'Total Cobrado' : 'Total Collected'}
+                      Total Cobrado
                     </p>
                     <p className="text-lg font-bold font-serif text-emerald-700 mt-1">
                       {selectedRecapForPrint.collectedTotal !== undefined ? selectedRecapForPrint.collectedTotal : selectedRecapForPrint.total} €
                     </p>
                     <p className="text-[8px] text-emerald-600 font-medium mt-0.5">
-                      {selectedRecapForPrint.collectedCount !== undefined ? selectedRecapForPrint.collectedCount : selectedRecapForPrint.count} {lang === 'fr' ? 'payées' : 'paid'}
+                      {selectedRecapForPrint.collectedCount !== undefined ? selectedRecapForPrint.collectedCount : selectedRecapForPrint.count} pagadas
                     </p>
                   </div>
                   <div className="bg-[#f4f4ec] p-3.5 rounded-2xl border border-black/5">
                     <p className="text-[9px] uppercase font-bold text-amber-800">
-                      {lang === 'fr' ? 'En Attente' : lang === 'es' ? 'Pendiente' : 'Pending'}
+                      Pendiente
                     </p>
                     <p className="text-lg font-bold font-serif text-amber-700 mt-1">
                       {selectedRecapForPrint.pendingTotal || 0} €
                     </p>
                     <p className="text-[8px] text-amber-600 font-medium mt-0.5">
-                      {selectedRecapForPrint.invoices.filter(i => i.status === 'pending').length} {lang === 'fr' ? 'en attente' : 'pending'}
+                      {selectedRecapForPrint.invoices.filter(i => i.status === 'pending').length} pendientes
                     </p>
                   </div>
                   <div className="bg-[#f4f4ec] p-3.5 rounded-2xl border border-black/5">
                     <p className="text-[9px] uppercase font-bold text-gray-400">
-                      {lang === 'fr' ? 'Total Facturé' : lang === 'es' ? 'Total Facturado' : 'Total Invoiced'}
+                      Total Facturado
                     </p>
                     <p className="text-lg font-bold font-serif text-primary mt-1">
                       {selectedRecapForPrint.total} €
                     </p>
                     <p className="text-[8px] text-gray-400 font-medium mt-0.5">
-                      {selectedRecapForPrint.count} {lang === 'fr' ? 'consultations' : 'consultations'}
+                      {selectedRecapForPrint.count} consultas
                     </p>
                   </div>
                   <div className="bg-[#f4f4ec] p-3.5 rounded-2xl border border-black/5">
                     <p className="text-[9px] uppercase font-bold text-gray-400">
-                      {lang === 'fr' ? 'Panier Moyen' : lang === 'es' ? 'Ticket Promedio' : 'Average Ticket'}
+                      Ticket Promedio
                     </p>
                     <p className="text-lg font-bold font-serif text-primary mt-1">
                       {selectedRecapForPrint.count > 0 ? Math.round(selectedRecapForPrint.total / selectedRecapForPrint.count) : 0} €
                     </p>
                     <p className="text-[8px] text-gray-400 font-medium mt-0.5">
-                      {lang === 'fr' ? 'par séance' : 'per session'}
+                      por sesión
                     </p>
                   </div>
-                </div>
-
-                {/* Payment Breakdown */}
-                <div className="space-y-3">
-                  <h3 className="text-xs font-bold uppercase tracking-wider text-primary">
-                    {lang === 'fr' ? 'Répartition des montants encaissés (payés)' : lang === 'es' ? 'Distribución por método de pago (cobrado)' : 'Breakdown of collected amounts'}
-                  </h3>
-                  <div className="grid grid-cols-3 gap-4 text-xs">
-                    <div className="p-3 bg-white rounded-xl border border-black/5 flex justify-between items-center">
-                      <span className="text-gray-500">{lang === 'fr' ? 'Carte Bancaire' : lang === 'es' ? 'Tarjeta' : 'Credit Card'}</span>
-                      <span className="font-bold text-gray-800">{selectedRecapForPrint.breakdown.card} €</span>
-                    </div>
-                    <div className="p-3 bg-white rounded-xl border border-black/5 flex justify-between items-center">
-                      <span className="text-gray-500">{lang === 'fr' ? 'Espèces' : lang === 'es' ? 'Efectivo' : 'Cash'}</span>
-                      <span className="font-bold text-gray-800">{selectedRecapForPrint.breakdown.cash} €</span>
-                    </div>
-                    <div className="p-3 bg-white rounded-xl border border-black/5 flex justify-between items-center">
-                      <span className="text-gray-500">{lang === 'fr' ? 'Virement' : lang === 'es' ? 'Transferencia' : 'Transfer'}</span>
-                      <span className="font-bold text-gray-800">{selectedRecapForPrint.breakdown.transfer} €</span>
-                    </div>
-                  </div>
-
-                  {(selectedRecapForPrint.pendingTotal || 0) > 0 && (
-                    <div className="p-3 bg-amber-50/50 rounded-xl border border-amber-200 text-xs text-amber-800 space-y-1">
-                      <p className="font-bold uppercase tracking-wider text-[8px] text-amber-600 mb-1">
-                        {lang === 'fr' ? 'Rappels des montants impayés (en attente) :' : lang === 'es' ? 'Montos pendientes de cobro:' : 'Pending unpaid amounts:'}
-                      </p>
-                      <div className="grid grid-cols-3 gap-4">
-                        <div className="flex justify-between">
-                          <span className="text-amber-700/80">{lang === 'fr' ? 'Carte' : 'Card'} :</span>
-                          <span className="font-bold text-amber-900">{selectedRecapForPrint.pendingBreakdown?.card || 0} €</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-amber-700/80">{lang === 'fr' ? 'Espèces' : 'Cash'} :</span>
-                          <span className="font-bold text-amber-900">{selectedRecapForPrint.pendingBreakdown?.cash || 0} €</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-amber-700/80">{lang === 'fr' ? 'Virement' : 'Transfer'} :</span>
-                          <span className="font-bold text-amber-900">{selectedRecapForPrint.pendingBreakdown?.transfer || 0} €</span>
-                        </div>
-                      </div>
-                    </div>
-                  )}
                 </div>
 
                 {/* Detailed Invoices List */}
                 <div className="space-y-3">
                   <h3 className="text-xs font-bold uppercase tracking-wider text-primary">
-                    {lang === 'fr' ? 'Détail des factures' : lang === 'es' ? 'Detalle de facturas' : 'Invoices detail'} ({selectedRecapForPrint.invoices.length})
+                    Detalle de facturas ({selectedRecapForPrint.invoices.length})
                   </h3>
                   <table className="w-full border-collapse text-xs">
                     <thead>
                       <tr className="border-b-2 border-primary/20 text-left font-bold text-gray-400 uppercase text-[9px] tracking-wider">
-                        <th className="py-2">{lang === 'fr' ? 'Facture' : lang === 'es' ? 'Factura' : 'Invoice'}</th>
-                        <th className="py-2">{lang === 'fr' ? 'Patient' : lang === 'es' ? 'Paciente' : 'Patient'}</th>
-                        <th className="py-2">{lang === 'fr' ? 'Date' : lang === 'es' ? 'Fecha' : 'Date'}</th>
-                        <th className="py-2">{lang === 'fr' ? 'Règlement' : lang === 'es' ? 'Pago' : 'Payment'}</th>
-                        <th className="py-2 text-center">{lang === 'fr' ? 'Statut' : lang === 'es' ? 'Estado' : 'Status'}</th>
-                        <th className="py-2 text-right">{lang === 'fr' ? 'Montant' : lang === 'es' ? 'Monto' : 'Amount'}</th>
+                        <th className="py-2">Factura</th>
+                        <th className="py-2">Paciente</th>
+                        <th className="py-2">Fecha</th>
+                        <th className="py-2">Pago</th>
+                        <th className="py-2 text-center">Estado</th>
+                        <th className="py-2 text-right">Importe</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -7072,11 +6952,11 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                         <tr key={inv.id} className="border-b border-black/5 text-gray-700">
                           <td className="py-2 font-bold text-primary">{inv.invoiceNumber}</td>
                           <td className="py-2 font-medium">{inv.clientName}</td>
-                          <td className="py-2 text-gray-500">{new Date(inv.date).toLocaleDateString(lang === 'fr' ? 'fr-FR' : lang === 'es' ? 'es-ES' : 'en-US')}</td>
+                          <td className="py-2 text-gray-500">{new Date(inv.date).toLocaleDateString('es-ES')}</td>
                           <td className="py-2">
                             <span className="text-[10px] font-medium uppercase">
-                              {inv.paymentMethod === 'card' ? (lang === 'fr' ? 'Carte' : lang === 'es' ? 'Tarjeta' : 'Card') :
-                               inv.paymentMethod === 'cash' ? (lang === 'fr' ? 'Espèces' : lang === 'es' ? 'Efectivo' : 'Cash') : (lang === 'fr' ? 'Virement' : lang === 'es' ? 'Transferencia' : 'Transfer')}
+                              {inv.paymentMethod === 'card' ? 'Tarjeta' :
+                               inv.paymentMethod === 'cash' ? 'Efectivo' : 'Transferencia'}
                             </span>
                           </td>
                           <td className="py-2 text-center font-bold">
@@ -7085,9 +6965,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                 ? 'bg-emerald-100 text-emerald-800' 
                                 : 'bg-amber-100 text-amber-900 font-bold'
                             }`}>
-                              {inv.status === 'paid' 
-                                ? (lang === 'fr' ? 'Payée' : lang === 'es' ? 'Pagada' : 'Paid') 
-                                : (lang === 'fr' ? 'En attente' : lang === 'es' ? 'Pendiente' : 'Pending')}
+                              {inv.status === 'paid' ? 'Pagada' : 'Pendiente'}
                             </span>
                           </td>
                           <td className="py-2 text-right font-bold">{inv.amount} €</td>
@@ -7100,13 +6978,9 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                 {/* Footer validation statement */}
                 <div className="pt-8 border-t border-black/5 flex justify-between items-center text-[10px] text-gray-400">
                   <p>
-                    {lang === 'fr' 
-                      ? "Rapport comptable officiel pour déclarations fiscales et suivi d'activité." 
-                      : lang === 'es' 
-                        ? "Informe contable oficial para declaraciones fiscales y seguimiento de actividad." 
-                        : "Official accounting report for tax declarations and activity tracking."}
+                    Informe contable oficial para declaraciones fiscales y seguimiento de actividad.
                   </p>
-                  <p className="font-serif italic text-primary">{lang === 'fr' ? "Vincent Durroux - Ostéo Valencia" : "Vincent Durroux - Osteo Valencia"}</p>
+                  <p className="font-serif italic text-primary">Vincent Durroux - Osteo Valencia</p>
                 </div>
               </div>
             </motion.div>

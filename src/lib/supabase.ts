@@ -42,7 +42,7 @@ export let lastSupabaseStatus: {
 } = {};
 
 // ==========================================
-// SEED DATA FOR LOCAL STORAGE FALLBACK
+// DATA INITIALIZATION & LOCAL STORAGE HELPERS
 // ==========================================
 export function capitalizeFirstName(str: string): string {
   if (!str) return '';
@@ -54,277 +54,40 @@ export function capitalizeFirstName(str: string): string {
     .join('');
 }
 
-const mockClients: Client[] = [
-  {
-    id: 'c1',
-    firstName: 'Marie',
-    lastName: 'LAURENT',
-    name: 'LAURENT Marie',
-    dni: '48765432A',
-    email: 'marie.laurent@gmail.com',
-    phone: '+33 6 12 34 56 78',
-    birthDate: '1988-04-12',
-    address: 'Calle del Mar 14, L\'Eliana',
-    createdAt: '2026-01-10T10:00:00Z',
-    lastSessionAt: '2026-08-25T14:30:00Z',
-  },
-  {
-    id: 'c2',
-    firstName: 'Jean-Pierre',
-    lastName: 'PETIT',
-    name: 'PETIT Jean-Pierre',
-    dni: 'Y1234567X',
-    email: 'jp.petit@yahoo.fr',
-    phone: '+34 612 987 654',
-    birthDate: '1964-11-03',
-    address: 'Avenida de las Cortes 45, Valencia',
-    createdAt: '2026-02-15T09:00:00Z',
-    lastSessionAt: '2026-08-28T11:00:00Z',
-  },
-  {
-    id: 'c3',
-    firstName: 'Lucas',
-    lastName: 'MERCIER (BÉBÉ)',
-    name: 'MERCIER (BÉBÉ) Lucas',
-    dni: '',
-    email: 'sophie.mercier@gmail.com',
-    phone: '+33 6 88 55 44 22',
-    birthDate: '2025-10-05',
-    address: 'Calle Mayor 8, L\'Eliana',
-    createdAt: '2026-05-20T16:00:00Z',
-    lastSessionAt: '2026-08-30T10:00:00Z',
-  },
-  {
-    id: 'c4',
-    firstName: 'Sofía',
-    lastName: 'BENÍTEZ',
-    name: 'BENÍTEZ Sofía',
-    dni: '53987123K',
-    email: 'sofia.benitez@outlook.com',
-    phone: '+34 654 321 098',
-    birthDate: '1995-07-22',
-    address: 'Gran Vía de les Corts 112, Valencia',
-    createdAt: '2026-03-05T11:00:00Z',
-    lastSessionAt: '2026-08-20T17:00:00Z',
-    hasBono: true,
-    bonoType: 'Bono 3 séances',
-    bonoSessionsRemaining: 2,
-  }
-];
+// No mock data: empty defaults
+const mockClients: Client[] = [];
+const mockNotes: ClientNote[] = [];
+const mockInvoices: Invoice[] = [];
+const mockEvents: CalendarEvent[] = [];
 
-const mockNotes: ClientNote[] = [
-  {
-    id: 'n1',
-    clientId: 'c1',
-    date: '2026-08-25T15:30:00Z',
-    motif: 'Lombalgie aiguë',
-    anamnese: 'Douleur lombaire basse gauche survenue après port de charge. Douleur irradiant fessier mais sans trajet radiculaire franc. Examen : Bloc de la sacro-iliaque gauche, tension importante du psoas homolatéral.',
-    treatment: 'Libération de la charnière thoraco-lombaire, pompage sacré, étirement doux du psoas gauche. Recommandations : Étirements quotidiens, hydratation soutenue.',
-    content: 'Anamnèse : Douleur lombaire basse gauche survenue après port de charge. Douleur irradiant fessier mais sans trajet radiculaire franc.\n\nExamen : Bloc de la sacro-iliaque gauche, tension importante du psoas homolatéral.\n\nTraitement : Libération de la charnière thoraco-lombaire, pompage sacré, étirement doux du psoas gauche.\n\nRecommandations : Étirements quotidiens, hydratation soutenue.',
-    category: 'treatment',
-  },
-  {
-    id: 'n2',
-    clientId: 'c1',
-    date: '2026-08-11T10:00:00Z',
-    motif: 'Bilan postural initial',
-    anamnese: 'Première consultation. Bilan complet postural : légère bascule du bassin à gauche. Chaîne descendante cervicale à investiguer.',
-    treatment: 'Bilan et explications cliniques de début de parcours.',
-    content: 'Première consultation. Bilan complet postural : légère bascule du bassin à gauche. Chaîne descendante cervicale à investiguer.',
-    category: 'evaluation',
-  },
-  {
-    id: 'n3',
-    clientId: 'c2',
-    date: '2026-08-28T12:00:00Z',
-    motif: 'Cervicalgie chronique',
-    anamnese: 'Suivi cervicalgie chronique. Tension persistante des trapèzes supérieurs.',
-    treatment: 'Techniques d\'énergie musculaire sur les cervicaux moyens. Mobilisation des côtes hautes (C1-C2). Soulagement immédiat de 70% de la raideur lors des tests dynamiques de fin de séance.',
-    content: 'Suivi cervicalgie chronique. Tension persistante des trapèzes supérieurs.\n\nTraitement : Techniques d\'énergie musculaire sur les cervicaux moyens. Mobilisation des côtes hautes (C1-C2).\n\nSoulagement immédiat de 70% de la raideur lors des tests dynamiques de fin de séance.',
-    category: 'treatment',
-  },
-  {
-    id: 'n4',
-    clientId: 'c3',
-    date: '2026-08-30T10:45:00Z',
-    motif: 'Coliques et reflux gastro-œsophagien',
-    anamnese: 'Coliques du nourrisson et reflux persistant. Examen crânien : Légère asymétrie de la SSB (Synchondrose Sphéno-Basilaire) liée à l\'accouchement par ventouse.',
-    treatment: 'Relâchement de la base du crâne (occiput-atlas), massage doux de la sphère abdominale (côlon descendant). Bébé s\'est endormi détendu pendant les techniques viscérales.',
-    content: 'Coliques du nourrisson et reflux persistant.\n\nExamen crânien : Légère asymétrie de la SSB (Synchondrose Sphéno-Basilaire) liée à l\'accouchement par ventouse.\n\nTraitement : Relâchement de la base du crâne (occiput-atlas), massage doux de la sphère abdominale (côlon descendant).\n\nBébé s\'est endormi détendu pendant les techniques viscérales.',
-    category: 'treatment',
-  }
-];
+// Known legacy mock IDs to purge from any browser localStorage cache
+const LEGACY_MOCK_IDS = new Set([
+  'c1', 'c2', 'c3', 'c4',
+  'n1', 'n2', 'n3', 'n4',
+  'i1', 'i2', 'i3', 'i4', 'i5', 'i_h1', 'i_h2', 'i_h3', 'i_h4', 'i_h5', 'i_h6',
+  'e1', 'e2', 'e3'
+]);
 
-const mockInvoices: Invoice[] = [
-  {
-    id: 'i1',
-    invoiceNumber: 'FAC-2026-101',
-    clientId: 'c1',
-    clientName: 'Marie Laurent',
-    date: '2026-08-25',
-    amount: 60,
-    status: 'paid',
-    paymentMethod: 'card',
-    description: 'Séance d\'Ostéopathie (1h)',
-    noteId: 'n1',
-  },
-  {
-    id: 'i2',
-    invoiceNumber: 'FAC-2026-102',
-    clientId: 'c2',
-    clientName: 'Jean-Pierre Petit',
-    date: '2026-08-28',
-    amount: 60,
-    status: 'paid',
-    paymentMethod: 'cash',
-    description: 'Séance d\'Ostéopathie (1h)',
-    noteId: 'n2',
-  },
-  {
-    id: 'i3',
-    invoiceNumber: 'FAC-2026-103',
-    clientId: 'c3',
-    clientName: 'Lucas Mercier (Bébé)',
-    date: '2026-08-30',
-    amount: 60,
-    status: 'paid',
-    paymentMethod: 'transfer',
-    description: 'Séance d\'Ostéopathie pédiatrique',
-    noteId: 'n3',
-  },
-  {
-    id: 'i4',
-    invoiceNumber: 'FAC-2026-098',
-    clientId: 'c4',
-    clientName: 'Sofía Benítez',
-    date: '2026-08-20',
-    amount: 160,
-    originalAmount: 180,
-    discountAmount: 20,
-    discountType: 'bono',
-    discountLabel: 'Bono 3 séances',
-    status: 'paid',
-    paymentMethod: 'card',
-    description: 'Forfait Ostéopathie - 3 séances',
-  },
-  {
-    id: 'i5',
-    invoiceNumber: 'FAC-2026-095',
-    clientId: 'c1',
-    clientName: 'Marie Laurent',
-    date: '2026-08-11',
-    amount: 60,
-    status: 'paid',
-    paymentMethod: 'card',
-    description: 'Séance d\'Ostéopathie (1h)',
-  },
-  {
-    id: 'i_h1',
-    invoiceNumber: 'FAC-2026-021',
-    clientId: 'c1',
-    clientName: 'Marie Laurent',
-    date: '2026-02-15',
-    amount: 60,
-    status: 'paid',
-    paymentMethod: 'cash',
-    description: 'Séance d\'Ostéopathie',
-  },
-  {
-    id: 'i_h2',
-    invoiceNumber: 'FAC-2026-031',
-    clientId: 'c2',
-    clientName: 'Jean-Pierre Petit',
-    date: '2026-03-20',
-    amount: 160,
-    status: 'paid',
-    paymentMethod: 'transfer',
-    description: 'Forfait 3 séances',
-  },
-  {
-    id: 'i_h3',
-    invoiceNumber: 'FAC-2026-041',
-    clientId: 'c4',
-    clientName: 'Sofía Benítez',
-    date: '2026-04-10',
-    amount: 250,
-    status: 'paid',
-    paymentMethod: 'card',
-    description: 'Forfait 5 séances',
-  },
-  {
-    id: 'i_h4',
-    invoiceNumber: 'FAC-2026-051',
-    clientId: 'c3',
-    clientName: 'Lucas Mercier (Bébé)',
-    date: '2026-05-22',
-    amount: 60,
-    status: 'paid',
-    paymentMethod: 'cash',
-    description: 'Séance pédiatrique',
-  },
-  {
-    id: 'i_h5',
-    invoiceNumber: 'FAC-2026-061',
-    clientId: 'c2',
-    clientName: 'Jean-Pierre Petit',
-    date: '2026-06-12',
-    amount: 60,
-    status: 'paid',
-    paymentMethod: 'card',
-    description: 'Séance de suivi',
-  },
-  {
-    id: 'i_h6',
-    invoiceNumber: 'FAC-2026-071',
-    clientId: 'c4',
-    clientName: 'Sofía Benítez',
-    date: '2026-07-05',
-    amount: 160,
-    status: 'paid',
-    paymentMethod: 'card',
-    description: 'Forfait 3 séances',
-  }
-];
-
-const mockEvents: CalendarEvent[] = [
-  {
-    id: 'e1',
-    summary: 'Séance de suivi',
-    description: 'Charnière thoraco-lombaire, psoas et bassin.',
-    start: '2026-09-03T10:00:00Z',
-    end: '2026-09-03T11:00:00Z',
-    clientId: 'c1',
-    clientName: 'LAURENT Marie',
-  },
-  {
-    id: 'e2',
-    summary: 'Cervicales',
-    description: 'Suivi cervicalgie chronique et trapèzes.',
-    start: '2026-09-04T14:30:00Z',
-    end: '2026-09-04T15:30:00Z',
-    clientId: 'c2',
-    clientName: 'PETIT Jean-Pierre',
-  },
-  {
-    id: 'e3',
-    summary: 'Séance pédiatrique',
-    description: 'Bébé coliques, sphère viscérale.',
-    start: '2026-09-05T09:30:00Z',
-    end: '2026-09-05T10:30:00Z',
-    clientId: 'c3',
-    clientName: 'MERCIER (BÉBÉ) Lucas',
-  }
-];
-
-// Helper to load or initialize from LocalStorage
-const loadLocal = <T>(key: string, seed: T[]): T[] => {
+// Helper to load or initialize from LocalStorage (with legacy mock filtering)
+const loadLocal = <T>(key: string, seed: T[] = []): T[] => {
+  if (typeof window === 'undefined' || typeof localStorage === 'undefined') return seed;
   const data = localStorage.getItem(`vincent_osteo_${key}`);
   if (!data) {
-    localStorage.setItem(`vincent_osteo_${key}`, JSON.stringify(seed));
+    if (seed.length > 0) {
+      localStorage.setItem(`vincent_osteo_${key}`, JSON.stringify(seed));
+    }
     return seed;
   }
   try {
-    return JSON.parse(data);
+    const parsed = JSON.parse(data);
+    if (Array.isArray(parsed)) {
+      const cleaned = parsed.filter((item: any) => !item || !LEGACY_MOCK_IDS.has(item.id));
+      if (cleaned.length !== parsed.length) {
+        localStorage.setItem(`vincent_osteo_${key}`, JSON.stringify(cleaned));
+      }
+      return cleaned as T[];
+    }
+    return parsed;
   } catch {
     return seed;
   }
@@ -391,6 +154,25 @@ export function mapNoteFromDB(n: any): ClientNote {
   };
 }
 
+export function normalizeInvoiceDescription(desc?: string): string {
+  if (!desc) return "Sesión de osteopatía";
+  const t = desc.trim().toLowerCase();
+
+  // Bono packages
+  if (t.includes('bono') && (t.includes('160') || t.includes('3 session') || t.includes('3 séance') || t.includes('3 sesion') || t.includes('3-session'))) {
+    return "Bono Osteopatía - 3 sesiones (160 €)";
+  }
+  if (t.includes('bono') && (t.includes('250') || t.includes('5 session') || t.includes('5 séance') || t.includes('5 sesion') || t.includes('5-session'))) {
+    return "Bono Osteopatía - 5 sesiones (250 €)";
+  }
+  if (t.includes('décompté') || t.includes('canjeada') || t.includes('redeemed') || t.includes('prise en compte')) {
+    return "Sesión de osteopatía";
+  }
+
+  // Any single osteopathy session
+  return "Sesión de osteopatía";
+}
+
 export function mapInvoiceFromDB(i: any): Invoice {
   return {
     id: String(i.id),
@@ -406,8 +188,9 @@ export function mapInvoiceFromDB(i: any): Invoice {
     discountLabel: i.discountLabel || i.discount_label || undefined,
     status: i.status || 'paid',
     paymentMethod: i.paymentMethod || i.payment_method || i.paymentmethod || 'card',
-    description: i.description || "Séance d'Ostéopathie",
-    language: i.language || 'fr',
+    description: normalizeInvoiceDescription(i.description),
+    language: 'es',
+    quantity: Number(i.quantity) || 1,
     noteId: i.noteId || i.note_id || undefined,
   };
 }
@@ -1713,7 +1496,13 @@ export const api = {
   },
 
   async getInvoices(): Promise<Invoice[]> {
-    const localInvoices = loadLocal('invoices', mockInvoices);
+    const rawLocal = loadLocal('invoices', mockInvoices);
+    const localInvoices: Invoice[] = rawLocal.map(loc => ({
+      ...loc,
+      description: normalizeInvoiceDescription(loc.description),
+      language: 'es' as const,
+      quantity: 1,
+    }));
     const localMap = new Map(localInvoices.map(i => [i.id, i]));
     const localNumMap = new Map(localInvoices.map(i => [i.invoiceNumber, i]));
 
@@ -1730,7 +1519,12 @@ export const api = {
               if (!mapped.paymentDate && local.paymentDate) mapped.paymentDate = local.paymentDate;
               if (!mapped.noteId && local.noteId) mapped.noteId = local.noteId;
             }
-            return mapped;
+            return {
+              ...mapped,
+              description: normalizeInvoiceDescription(mapped.description),
+              language: 'es' as const,
+              quantity: 1,
+            };
           });
           
           // Smart merge: retain local invoices that haven't synced yet or have distinct IDs
@@ -1745,7 +1539,12 @@ export const api = {
             // Never re-add if invoice number is already in remote records
             if (loc.invoiceNumber && remoteNums.has(loc.invoiceNumber)) continue;
             if (!remoteIds.has(loc.id)) {
-              merged.push(loc);
+              merged.push({
+                ...loc,
+                description: normalizeInvoiceDescription(loc.description),
+                language: 'es',
+                quantity: 1,
+              });
             }
           }
 
@@ -1759,6 +1558,7 @@ export const api = {
         console.warn('Supabase invoices fetch exception:', err);
       }
     }
+    saveLocal('invoices', localInvoices);
     return sortInvoicesByDate(localInvoices, false);
   },
 
@@ -1823,8 +1623,9 @@ export const api = {
           status: newInvoice.status || 'paid',
           paymentMethod: newInvoice.paymentMethod || 'card',
           payment_method: newInvoice.paymentMethod || 'card',
-          description: newInvoice.description || "Séance d'Ostéopathie",
-          language: newInvoice.language || 'fr',
+          description: normalizeInvoiceDescription(newInvoice.description),
+          language: 'es',
+          quantity: 1,
           noteId: newInvoice.noteId || null,
           note_id: newInvoice.noteId || null,
         };
@@ -1904,8 +1705,9 @@ export const api = {
           status: invoice.status || 'paid',
           paymentMethod: invoice.paymentMethod || 'card',
           payment_method: invoice.paymentMethod || 'card',
-          description: invoice.description || "Séance d'Ostéopathie",
-          language: invoice.language || 'fr',
+          description: normalizeInvoiceDescription(invoice.description),
+          language: 'es',
+          quantity: 1,
           originalAmount: Number(invoice.originalAmount ?? invoice.amount) || 0,
           original_amount: Number(invoice.originalAmount ?? invoice.amount) || 0,
           discountAmount: Number(invoice.discountAmount ?? 0),

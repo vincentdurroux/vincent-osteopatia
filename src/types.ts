@@ -45,6 +45,7 @@ export interface Invoice {
   description: string;
   language?: 'fr' | 'en' | 'es';
   noteId?: string;
+  quantity?: number;
 }
 
 export type EventType = 'appointment' | 'blocked';
