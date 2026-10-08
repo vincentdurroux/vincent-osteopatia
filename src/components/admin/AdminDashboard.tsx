@@ -687,8 +687,8 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
       isDangerous: true,
       onConfirm: async () => {
         try {
-          await api.deleteInvoice(invoiceId);
-          setInvoices(prev => prev.filter(i => i.id !== invoiceId));
+          await api.deleteInvoice(invoiceId, inv?.invoiceNumber);
+          setInvoices(prev => prev.filter(i => i.id !== invoiceId && (!inv?.invoiceNumber || i.invoiceNumber !== inv.invoiceNumber)));
           if (isEditInvoiceOpen && editingInvoice?.id === invoiceId) {
             setIsEditInvoiceOpen(false);
             setEditingInvoice(null);

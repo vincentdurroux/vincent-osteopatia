@@ -68,7 +68,34 @@ const LEGACY_MOCK_IDS = new Set([
   'e1', 'e2', 'e3'
 ]);
 
-// Helper to load or initialize from LocalStorage (with legacy mock filtering)
+// Persistent tombstones so deleted entities stay deleted even across remote syncs
+export const addDeletedTombstone = (entity: string, key?: string | null) => {
+  if (typeof window === 'undefined' || typeof localStorage === 'undefined' || !key) return;
+  try {
+    const storageKey = `vincent_osteo_deleted_${entity}`;
+    const raw = localStorage.getItem(storageKey);
+    const list: string[] = raw ? JSON.parse(raw) : [];
+    if (!list.includes(key)) {
+      list.push(key);
+      localStorage.setItem(storageKey, JSON.stringify(list));
+    }
+  } catch {}
+};
+
+export const isDeletedTombstone = (entity: string, ...keys: (string | undefined | null)[]): boolean => {
+  if (typeof window === 'undefined' || typeof localStorage === 'undefined') return false;
+  try {
+    const storageKey = `vincent_osteo_deleted_${entity}`;
+    const raw = localStorage.getItem(storageKey);
+    if (!raw) return false;
+    const list: string[] = JSON.parse(raw);
+    return keys.some(k => k && list.includes(k));
+  } catch {
+    return false;
+  }
+};
+
+// Helper to load or initialize from LocalStorage (with legacy mock filtering & tombstone support)
 const loadLocal = <T>(key: string, seed: T[] = []): T[] => {
   if (typeof window === 'undefined' || typeof localStorage === 'undefined') return seed;
   const data = localStorage.getItem(`vincent_osteo_${key}`);
@@ -81,7 +108,12 @@ const loadLocal = <T>(key: string, seed: T[] = []): T[] => {
   try {
     const parsed = JSON.parse(data);
     if (Array.isArray(parsed)) {
-      const cleaned = parsed.filter((item: any) => !item || !LEGACY_MOCK_IDS.has(item.id));
+      const cleaned = parsed.filter((item: any) => {
+        if (!item) return false;
+        if (LEGACY_MOCK_IDS.has(item.id)) return false;
+        if (isDeletedTombstone(key, item.id, item.invoiceNumber, item.invoice_number, item.name)) return false;
+        return true;
+      });
       if (cleaned.length !== parsed.length) {
         localStorage.setItem(`vincent_osteo_${key}`, JSON.stringify(cleaned));
       }
@@ -989,10 +1021,18 @@ export const api = {
             return mapped;
           });
           
+          const activeRemoteClients = remoteClients.filter(c => !isDeletedTombstone('clients', c.id, c.name));
+          // Clean up any deleted client that still lingers in Supabase in the background
+          const deletedRemotes = remoteClients.filter(c => isDeletedTombstone('clients', c.id, c.name));
+          for (const d of deletedRemotes) {
+            supabase.from('clients').delete().eq('id', d.id).then(() => {});
+          }
+
           // Merge local clients that haven't synced to remote yet
-          const remoteIds = new Set(remoteClients.map(c => c.id));
-          const mergedClients = [...remoteClients];
+          const remoteIds = new Set(activeRemoteClients.map(c => c.id));
+          const mergedClients = [...activeRemoteClients];
           for (const loc of localClients) {
+            if (isDeletedTombstone('clients', loc.id, loc.name)) continue;
             if (!remoteIds.has(loc.id)) {
               mergedClients.push(loc);
             }
@@ -1291,17 +1331,59 @@ export const api = {
   },
 
   async deleteClient(id: string): Promise<boolean> {
+    const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    const current = loadLocal('clients', []);
+    const target = current.find(c => c.id === id);
+
+    addDeletedTombstone('clients', id);
+    if (target?.name) addDeletedTombstone('clients', target.name);
+
     if (isSupabaseConfigured && supabase) {
+      // 1. Delete associated notes without .or() that causes Postgres 42703 errors
       try {
-        await supabase.from('client_notes').delete().or(`clientId.eq.${id},client_id.eq.${id}`);
-        await supabase.from('invoices').delete().or(`clientId.eq.${id},client_id.eq.${id}`);
-        await supabase.from('clients').delete().eq('id', id);
+        await supabase.from('client_notes').delete().eq('clientId', id);
+      } catch {}
+      try {
+        await supabase.from('client_notes').delete().eq('client_id', id);
+      } catch {}
+
+      // 2. Delete associated invoices
+      try {
+        await supabase.from('invoices').delete().eq('clientId', id);
+      } catch {}
+      try {
+        await supabase.from('invoices').delete().eq('client_id', id);
+      } catch {}
+
+      // 3. Delete associated events
+      try {
+        await supabase.from('calendar_events').delete().eq('clientId', id);
+      } catch {}
+      try {
+        await supabase.from('calendar_events').delete().eq('client_id', id);
+      } catch {}
+
+      // 4. Delete client record itself
+      try {
+        if (UUID_REGEX.test(id)) {
+          await supabase.from('clients').delete().eq('id', id);
+        }
+        if (target?.name) {
+          const { data: dbClients } = await supabase.from('clients').select('id, name, firstName, lastName');
+          if (dbClients) {
+            for (const dbc of dbClients) {
+              const fullName = `${dbc.firstName || ''} ${dbc.lastName || ''}`.trim();
+              if (fullName === target.name || dbc.name === target.name) {
+                await supabase.from('clients').delete().eq('id', dbc.id);
+              }
+            }
+          }
+        }
       } catch (err) {
         console.warn('Supabase delete client exception:', err);
       }
     }
 
-    const current = loadLocal('clients', mockClients);
     const filtered = current.filter(c => c.id !== id);
     saveLocal('clients', filtered);
     return true;
@@ -1444,15 +1526,20 @@ export const api = {
   },
 
   async deleteClientNote(id: string): Promise<boolean> {
+    const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    addDeletedTombstone('notes', id);
+
     if (isSupabaseConfigured && supabase) {
       try {
-        await supabase.from('client_notes').delete().eq('id', id);
+        if (UUID_REGEX.test(id)) {
+          await supabase.from('client_notes').delete().eq('id', id);
+        }
       } catch (err) {
         console.warn('Supabase delete note exception:', err);
       }
     }
 
-    const current = loadLocal('notes', mockNotes);
+    const current = loadLocal('notes', []);
     const filtered = current.filter(n => n.id !== id);
     saveLocal('notes', filtered);
     return true;
@@ -1527,15 +1614,23 @@ export const api = {
             };
           });
           
+          const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+          const activeRemoteInvoices = remoteInvoices.filter(i => !isDeletedTombstone('invoices', i.id, i.invoiceNumber));
+          
+          // Background cleanup of any deleted invoice that might still be in remote DB
+          const deletedRemotes = remoteInvoices.filter(i => isDeletedTombstone('invoices', i.id, i.invoiceNumber));
+          for (const d of deletedRemotes) {
+            if (UUID_REGEX.test(d.id)) supabase.from('invoices').delete().eq('id', d.id).then(() => {});
+            if (d.invoiceNumber) supabase.from('invoices').delete().eq('invoiceNumber', d.invoiceNumber).then(() => {});
+          }
+
           // Smart merge: retain local invoices that haven't synced yet or have distinct IDs
-          // Exclude seed mock invoices (i1, i2) if remote invoices exist, and exclude anything that collides with a remote invoice number
-          const remoteIds = new Set(remoteInvoices.map(r => r.id));
-          const remoteNums = new Set(remoteInvoices.map(r => r.invoiceNumber).filter(Boolean));
-          const merged = [...remoteInvoices];
+          const remoteIds = new Set(activeRemoteInvoices.map(r => r.id));
+          const remoteNums = new Set(activeRemoteInvoices.map(r => r.invoiceNumber).filter(Boolean));
+          const merged = [...activeRemoteInvoices];
 
           for (const loc of localInvoices) {
-            // Never re-add mock sample invoices if remote invoices already exist
-            if ((loc.id === 'i1' || loc.id === 'i2') && remoteInvoices.length > 0) continue;
+            if (isDeletedTombstone('invoices', loc.id, loc.invoiceNumber)) continue;
             // Never re-add if invoice number is already in remote records
             if (loc.invoiceNumber && remoteNums.has(loc.invoiceNumber)) continue;
             if (!remoteIds.has(loc.id)) {
@@ -1747,20 +1842,53 @@ export const api = {
     return invoice;
   },
 
-  async deleteInvoice(id: string): Promise<boolean> {
+  async deleteInvoice(id: string, invoiceNumber?: string): Promise<boolean> {
+    const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    const current = loadLocal('invoices', []);
+    const target = current.find(i => i.id === id || i.invoiceNumber === id || (invoiceNumber && (i.invoiceNumber === invoiceNumber || i.id === invoiceNumber)));
+    const targetNum = invoiceNumber || target?.invoiceNumber || (id.startsWith('FAC-') ? id : undefined);
+    const targetId = target?.id || id;
+
+    // Record tombstones immediately so it can never resurrect
+    addDeletedTombstone('invoices', targetId);
+    if (targetNum) addDeletedTombstone('invoices', targetNum);
+
     if (isSupabaseConfigured && supabase) {
       try {
-        const { error } = await supabase.from('invoices').delete().eq('id', id);
-        if (error) {
-          console.warn('Supabase delete invoice by id error:', error.message);
+        // 1. Delete by UUID if valid
+        if (UUID_REGEX.test(targetId)) {
+          const res = await supabase.from('invoices').delete().eq('id', targetId).select();
+          if (res.error) console.warn('[deleteInvoice] by id warning:', res.error.message);
         }
-      } catch (err) {
+
+        // 2. Delete by invoiceNumber and invoice_number columns
+        if (targetNum) {
+          const res1 = await supabase.from('invoices').delete().eq('invoiceNumber', targetNum).select();
+          if (res1.error) console.warn('[deleteInvoice] by invoiceNumber warning:', res1.error.message);
+
+          const res2 = await supabase.from('invoices').delete().eq('invoice_number', targetNum).select();
+          if (res2.error) console.warn('[deleteInvoice] by invoice_number warning:', res2.error.message);
+        }
+
+        // 3. Fallback: find any row by invoiceNumber in remote DB and delete its specific ID
+        if (targetNum) {
+          try {
+            const { data: found } = await supabase.from('invoices').select('id').or(`invoiceNumber.eq.${targetNum},invoice_number.eq.${targetNum}`);
+            if (found && found.length > 0) {
+              for (const row of found) {
+                if (row.id) {
+                  await supabase.from('invoices').delete().eq('id', row.id);
+                }
+              }
+            }
+          } catch {}
+        }
+      } catch (err: any) {
         console.warn('Supabase delete invoice exception:', err);
       }
     }
 
-    const current = loadLocal('invoices', []);
-    const filtered = current.filter(i => i.id !== id);
+    const filtered = current.filter(i => i.id !== targetId && (!targetNum || i.invoiceNumber !== targetNum));
     saveLocal('invoices', filtered);
     return true;
   },
@@ -2016,18 +2144,23 @@ export const api = {
   },
 
   async deleteLocalEvent(id: string): Promise<boolean> {
+    const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    addDeletedTombstone('events', id);
+
     if (isSupabaseConfigured && supabase) {
       try {
-        const { error } = await supabase.from('calendar_events').delete().eq('id', id);
-        if (error && (error.message?.includes('relation') || error.code === '42P01')) {
-          await supabase.from('events').delete().eq('id', id);
+        if (UUID_REGEX.test(id)) {
+          const { error } = await supabase.from('calendar_events').delete().eq('id', id);
+          if (error && (error.message?.includes('relation') || error.code === '42P01')) {
+            await supabase.from('events').delete().eq('id', id);
+          }
         }
       } catch (err) {
         console.warn('Supabase deleteLocalEvent exception:', err);
       }
     }
 
-    const current = loadLocal('events', mockEvents);
+    const current = loadLocal('events', []);
     const filtered = current.filter(e => e.id !== id);
     saveLocal('events', filtered);
     return true;
