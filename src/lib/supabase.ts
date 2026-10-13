@@ -95,6 +95,19 @@ export const isDeletedTombstone = (entity: string, ...keys: (string | undefined 
   }
 };
 
+export const removeDeletedTombstone = (entity: string, ...keys: (string | undefined | null)[]) => {
+  if (typeof window === 'undefined' || typeof localStorage === 'undefined') return;
+  try {
+    const storageKey = `vincent_osteo_deleted_${entity}`;
+    const raw = localStorage.getItem(storageKey);
+    if (!raw) return;
+    const list: string[] = JSON.parse(raw);
+    const toRemove = new Set(keys.filter(Boolean));
+    const filtered = list.filter(k => !toRemove.has(k));
+    localStorage.setItem(storageKey, JSON.stringify(filtered));
+  } catch {}
+};
+
 // Helper to load or initialize from LocalStorage (with legacy mock filtering & tombstone support)
 const loadLocal = <T>(key: string, seed: T[] = []): T[] => {
   if (typeof window === 'undefined' || typeof localStorage === 'undefined') return seed;
@@ -1065,6 +1078,9 @@ export const api = {
       createdAt: client.createdAt || new Date().toISOString(),
     };
 
+    // Remove any accidental tombstone for this patient so they appear immediately
+    removeDeletedTombstone('clients', newClient.id, newClient.name, `${cleanLastName} ${cleanFirstName}`, fullName);
+
     if (isSupabaseConfigured && supabase) {
       try {
         // Clean matching payload for Supabase schema
@@ -1081,6 +1097,7 @@ export const api = {
           defaultDiscount: newClient.defaultDiscount ?? 0,
           bono_sessions_remaining: newClient.bonoSessionsRemaining ?? 0,
           profile_note: newClient.profileNote || null,
+          createdAt: newClient.createdAt,
           created_at: newClient.createdAt,
         };
         if (newClient.dni) cleanPayload.dni = newClient.dni;
@@ -1093,17 +1110,35 @@ export const api = {
           cleanPayload.last_session_at = newClient.lastSessionAt;
         }
 
-        const fallbackPayload: Record<string, any> = {
+        const snakePayload: Record<string, any> = {
           id: newClient.id,
-          name: newClient.name,
           first_name: newClient.firstName,
           last_name: newClient.lastName,
+          name: fullName,
           email: newClient.email || '',
           phone: newClient.phone || '',
           address: newClient.address || '',
+          created_at: newClient.createdAt,
         };
 
-        const result = await executeResilientInsert('clients', [cleanPayload, fallbackPayload]);
+        const fallbackPayload: Record<string, any> = {
+          id: newClient.id,
+          firstName: newClient.firstName,
+          lastName: newClient.lastName,
+          email: newClient.email || '',
+          phone: newClient.phone || '',
+          address: newClient.address || '',
+          createdAt: newClient.createdAt,
+          created_at: newClient.createdAt,
+        };
+
+        const minimalPayload: Record<string, any> = {
+          id: newClient.id,
+          firstName: newClient.firstName,
+          lastName: newClient.lastName,
+        };
+
+        const result = await executeResilientInsert('clients', [cleanPayload, snakePayload, fallbackPayload, minimalPayload]);
 
         if (result.success && result.data) {
           const mapped = mapClientFromDB(result.data);
@@ -1123,7 +1158,16 @@ export const api = {
           if (fIdx !== -1) fresh[fIdx] = finalClient;
           else fresh.unshift(finalClient);
           saveLocal('clients', fresh);
+
+          lastSupabaseStatus = {
+            lastAction: `Création patient ${fullName}`,
+            success: true,
+            timestamp: new Date().toLocaleTimeString(),
+          };
+
           return finalClient;
+        } else {
+          console.error('[Supabase createClient error]', result.error);
         }
       } catch (err) {
         console.warn('Supabase createClient exception:', err);

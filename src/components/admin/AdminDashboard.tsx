@@ -1348,6 +1348,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
           const filtered = prev.filter(c => c.id !== createdCl.id);
           return [...filtered, createdCl].sort((a, b) => a.name.localeCompare(b.name));
         });
+        setSelectedClient(createdCl);
         finalClientId = createdCl.id;
         finalClientName = (createdCl.name && createdCl.name !== 'Patient sans nom') ? createdCl.name : fullName;
       } catch (err) {
@@ -1359,6 +1360,55 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
       const client = clients.find(c => c.id === newEvent.clientId);
       if (client) {
         finalClientName = client.name;
+      }
+    } else if (!isOtherType && !newEvent.clientId) {
+      // If no patient was selected from the dropdown, check if user entered a patient name in the title
+      const cleanTitle = newEvent.title.trim();
+      const isDefaultTitle = !cleanTitle || 
+        cleanTitle === "Sesión de osteopatía" || 
+        cleanTitle === "Séance d'ostéopathie" || 
+        cleanTitle === "Osteopathy session" || 
+        cleanTitle === getDefaultAppointmentTitle(lang) ||
+        cleanTitle.toLowerCase() === 'consultation' ||
+        cleanTitle.toLowerCase() === 'rdv' ||
+        cleanTitle.toLowerCase() === 'rendez-vous';
+
+      if (!isDefaultTitle && cleanTitle.length >= 2) {
+        // First check if an existing client matches this name
+        const existing = clients.find(c => 
+          c.name.toLowerCase() === cleanTitle.toLowerCase() ||
+          `${c.firstName} ${c.lastName}`.toLowerCase() === cleanTitle.toLowerCase() ||
+          `${c.lastName} ${c.firstName}`.toLowerCase() === cleanTitle.toLowerCase()
+        );
+
+        if (existing) {
+          finalClientId = existing.id;
+          finalClientName = existing.name;
+        } else {
+          // Auto-create new patient from entered title so it is saved in DB and appears in patient list
+          try {
+            const parts = cleanTitle.split(/\s+/);
+            const cleanLastName = parts[0].toUpperCase();
+            const cleanFirstName = parts.length > 1 ? capitalizeFirstName(parts.slice(1).join(' ')) : cleanLastName;
+            const fullName = `${cleanLastName} ${cleanFirstName}`.trim();
+            const createdCl = await api.createClient({
+              firstName: cleanFirstName,
+              lastName: cleanLastName,
+              name: fullName,
+              email: '',
+              phone: '',
+            });
+            setClients(prev => {
+              const filtered = prev.filter(c => c.id !== createdCl.id);
+              return [...filtered, createdCl].sort((a, b) => a.name.localeCompare(b.name));
+            });
+            setSelectedClient(createdCl);
+            finalClientId = createdCl.id;
+            finalClientName = createdCl.name || fullName;
+          } catch (err) {
+            console.warn('Auto-create patient from appointment title warning:', err);
+          }
+        }
       }
     }
 
@@ -1405,6 +1455,13 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
         description: '',
         eventType: 'appointment',
       });
+
+      // Background refresh to guarantee local client cache reflects Supabase
+      api.getClients().then(refreshed => {
+        if (refreshed && refreshed.length > 0) {
+          setClients(refreshed);
+        }
+      }).catch(() => {});
     } catch (err: any) {
       console.error('Failed to create event:', err);
       alert(lang === 'fr' ? "Erreur lors de l'enregistrement de l'événement." : "Error creating event.");
@@ -5292,7 +5349,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                       <div className="p-3 bg-primary/5 rounded-2xl border border-primary/20 space-y-2.5">
                         <p className="text-[11px] font-bold text-primary flex items-center gap-1.5">
                           <UserPlus size={13} />
-                          <span>{lang === 'fr' ? 'Nouveau patient (création automatique)' : lang === 'es' ? 'Nuevo paciente (creación automática)' : 'New patient (auto-created)'}</span>
+                          <span>{lang === 'fr' ? 'Nouveau patient (enregistré en base de données & dans vos patients)' : lang === 'es' ? 'Nuevo paciente (guardado en base de datos & en sus pacientes)' : 'New patient (saved to database & patient list)'}</span>
                         </p>
                         <div className="grid grid-cols-2 gap-2">
                           <input
@@ -5343,6 +5400,10 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                         value={newEvent.clientId}
                         onChange={(e) => {
                           const selectedId = e.target.value;
+                          if (selectedId === '__new__') {
+                            setIsInlineNewPatient(true);
+                            return;
+                          }
                           const client = clients.find(c => c.id === selectedId);
                           setNewEvent(prev => ({
                             ...prev,
@@ -5350,9 +5411,12 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                             title: client ? client.name : getDefaultAppointmentTitle(lang)
                           }));
                         }}
-                        className="w-full p-2.5 bg-secondary rounded-xl border border-black/5 text-xs focus:outline-none focus:ring-1 focus:ring-primary focus:bg-white transition-all"
+                        className="w-full p-2.5 bg-secondary rounded-xl border border-black/5 text-xs focus:outline-none focus:ring-1 focus:ring-primary focus:bg-white transition-all font-medium"
                       >
                         <option value="">-- {lang === 'fr' ? 'Aucun ou patient non répertorié' : lang === 'es' ? 'Ninguno o no registrado' : 'None or unlisted'} --</option>
+                        <option value="__new__" className="font-bold text-primary">
+                          ✨ + {lang === 'fr' ? 'Nouveau patient (créer fiche patient)' : lang === 'es' ? 'Nuevo paciente (crear ficha)' : 'New patient (create profile)'}
+                        </option>
                         {clients.map(c => (
                           <option key={c.id} value={c.id}>{c.name} ({c.phone || c.email || 'N/A'})</option>
                         ))}
