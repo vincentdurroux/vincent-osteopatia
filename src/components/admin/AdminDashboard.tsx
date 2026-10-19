@@ -10,7 +10,7 @@ import {
   ArrowUpDown, ArrowUp, ArrowDown
 } from 'lucide-react';
 import { Client, ClientNote, Invoice, CalendarEvent, EventType } from '../../types';
-import { api, isSupabaseConfigured, SUPABASE_SQL_SETUP, capitalizeFirstName, sortInvoicesByDate, normalizeInvoiceDescription } from '../../lib/supabase';
+import { api, supabase, isSupabaseConfigured, SUPABASE_SQL_SETUP, capitalizeFirstName, sortInvoicesByDate, normalizeInvoiceDescription } from '../../lib/supabase';
 import SpineLogo from '../SpineLogo';
 import { useTranslation } from '../../App';
 import { Language, translations } from '../../translations';
@@ -479,6 +479,24 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
 
   useEffect(() => {
     loadData();
+  }, []);
+
+  // Real-time synchronization
+  useEffect(() => {
+    if (!supabase) return;
+
+    const channel = supabase.channel('calendar-sync')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'calendar_events' }, () => {
+        loadData();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'events' }, () => {
+        loadData();
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   // Memoized sorted and filtered invoices for the billing log
