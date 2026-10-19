@@ -487,16 +487,8 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
 
     console.log('Setting up Realtime subscription...');
     const channel = supabase.channel('calendar-sync')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'calendar_events' }, (payload) => {
-        console.log('Realtime event received for calendar_events:', payload);
-        loadData();
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'events' }, (payload) => {
-        console.log('Realtime event received for events:', payload);
-        loadData();
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'clients' }, (payload) => {
-        console.log('Realtime event received for clients:', payload);
+      .on('postgres_changes', { event: '*', schema: 'public' }, (payload) => {
+        console.log('Realtime update received:', payload);
         loadData();
       })
       .subscribe((status) => {
