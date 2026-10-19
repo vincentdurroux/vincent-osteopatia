@@ -1167,10 +1167,11 @@ export const api = {
 
           return finalClient;
         } else {
-          console.error('[Supabase createClient error]', result.error);
+          throw new Error(`Supabase createClient failed: ${result.error?.message || 'Unknown error'}`);
         }
       } catch (err) {
         console.warn('Supabase createClient exception:', err);
+        throw err;
       }
     }
 

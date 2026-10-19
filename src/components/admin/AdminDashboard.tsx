@@ -485,16 +485,26 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
   useEffect(() => {
     if (!supabase) return;
 
+    console.log('Setting up Realtime subscription...');
     const channel = supabase.channel('calendar-sync')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'calendar_events' }, () => {
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'calendar_events' }, (payload) => {
+        console.log('Realtime event received for calendar_events:', payload);
         loadData();
       })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'events' }, () => {
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'events' }, (payload) => {
+        console.log('Realtime event received for events:', payload);
         loadData();
       })
-      .subscribe();
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'clients' }, (payload) => {
+        console.log('Realtime event received for clients:', payload);
+        loadData();
+      })
+      .subscribe((status) => {
+        console.log('Realtime subscription status:', status);
+      });
 
     return () => {
+      console.log('Removing Realtime subscription...');
       supabase.removeChannel(channel);
     };
   }, []);
@@ -2267,8 +2277,16 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                 <div 
                   ref={patientListRef}
                   onScroll={checkPatientScroll}
-                  className="flex-1 overflow-y-auto space-y-2 max-h-[50vh] lg:max-h-[58vh] pr-1.5 scrollbar-thin scrollbar-thumb-stone-300 hover:scrollbar-thumb-stone-400"
+                  className="flex-1 overflow-y-auto space-y-2 pr-1.5 scrollbar-thin scrollbar-thumb-stone-300 hover:scrollbar-thumb-stone-400"
                 >
+                  {canScrollPatientsDown && (
+                    <button 
+                      onClick={handleScrollPatientsDown} 
+                      className="absolute bottom-2 right-4 p-1.5 bg-primary/10 rounded-full text-primary z-20 hover:bg-primary/20"
+                    >
+                      <ChevronDown size={16} />
+                    </button>
+                  )}
                   {filteredClients.map(c => {
                     const isSelected = selectedClient?.id === c.id;
                     return (
