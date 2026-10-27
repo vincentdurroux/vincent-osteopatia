@@ -196,6 +196,7 @@ export function mapNoteFromDB(n: any): ClientNote {
     treatment: n.treatment || '',
     content: n.content || `Anamnèse :\n${n.anamnese || ''}\n\nTraitement :\n${n.treatment || ''}`,
     category: n.category || 'treatment',
+    eventId: n.eventId || n.event_id || undefined,
   };
 }
 
@@ -237,6 +238,7 @@ export function mapInvoiceFromDB(i: any): Invoice {
     language: 'es',
     quantity: Number(i.quantity) || 1,
     noteId: i.noteId || i.note_id || undefined,
+    eventId: i.eventId || i.event_id || i.noteId || i.note_id || undefined,
   };
 }
 
@@ -1483,6 +1485,9 @@ export const api = {
           content: newNote.content || '',
           category: newNote.category || 'treatment',
         };
+        if (newNote.eventId) {
+          snakePayload.event_id = newNote.eventId;
+        }
 
         const camelPayload: Record<string, any> = {
           id: newNote.id,
@@ -1494,6 +1499,9 @@ export const api = {
           content: newNote.content || '',
           category: newNote.category || 'treatment',
         };
+        if (newNote.eventId) {
+          camelPayload.eventId = newNote.eventId;
+        }
 
         const result = await executeResilientInsert('client_notes', [snakePayload, camelPayload]);
 
@@ -1768,6 +1776,8 @@ export const api = {
           quantity: 1,
           noteId: newInvoice.noteId || null,
           note_id: newInvoice.noteId || null,
+          eventId: newInvoice.eventId || newInvoice.noteId || null,
+          event_id: newInvoice.eventId || newInvoice.noteId || null,
         };
 
         const result = await executeResilientInsert('invoices', [cleanPayload]);

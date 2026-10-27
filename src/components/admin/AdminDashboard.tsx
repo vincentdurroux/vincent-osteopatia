@@ -164,6 +164,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
     category: 'treatment' as ClientNote['category'],
     date: new Date().toISOString().split('T')[0],
     motif: '',
+    eventId: '',
   });
 
   // Keep note drafts in sync per patient when switching clients
@@ -197,6 +198,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
           category: 'treatment',
           date: new Date().toISOString().split('T')[0],
           motif: '',
+          eventId: '',
         });
       }
     } else {
@@ -206,6 +208,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
         category: 'treatment',
         date: new Date().toISOString().split('T')[0],
         motif: '',
+        eventId: '',
       });
     }
 
@@ -662,6 +665,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
         category: newNote.category,
         motif: newNote.motif?.trim() || undefined,
         date: new Date(newNote.date).toISOString(),
+        eventId: newNote.eventId || undefined,
       });
       setClientNotes(prev => [created, ...prev]);
       if (selectedClient?.id) {
@@ -673,6 +677,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
         category: 'treatment',
         date: new Date().toISOString().split('T')[0],
         motif: '',
+        eventId: '',
       });
       
       // Update lastSessionAt locally
@@ -704,6 +709,18 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
         }
       },
     });
+  };
+
+  // Scroll smoothly to a specific note in the history list and highlight it
+  const handleScrollToNote = (noteId: string) => {
+    const el = document.getElementById(`note-${noteId}`);
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      el.classList.add('ring-2', 'ring-primary', 'bg-primary/5');
+      setTimeout(() => {
+        el.classList.remove('ring-2', 'ring-primary', 'bg-primary/5');
+      }, 2500);
+    }
   };
 
   // Delete Invoice with confirmation
@@ -1276,7 +1293,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
   };
 
   // Direct Redirection to Clinical Notes from an Appointment
-  const handleGoToNotes = (event: { clientId?: string; clientName?: string; summary?: string; start?: string; description?: string; eventType?: EventType }) => {
+  const handleGoToNotes = (event: { id?: string; clientId?: string; clientName?: string; summary?: string; start?: string; description?: string; eventType?: EventType }) => {
     // 1. Try finding client by explicit clientId
     let targetClient = event.clientId ? clients.find(c => c.id === event.clientId) : undefined;
 
@@ -1310,6 +1327,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
           ...prev,
           date: dateStr,
           motif: event.summary || prev.motif,
+          eventId: event.id || '',
         }));
       }
     } else {
@@ -2660,6 +2678,32 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                 year: 'numeric'
                               });
                               const timeStr = `${evDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} - ${new Date(ev.end).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+                              const evDateStr = ev.start ? ev.start.split('T')[0] : '';
+
+                              // 1. Associated clinical notes (by eventId or same client & date)
+                              const associatedNotes = clientNotes.filter(n => {
+                                if (n.eventId && n.eventId === ev.id) return true;
+                                const nDateStr = n.date ? n.date.split('T')[0] : '';
+                                return nDateStr === evDateStr;
+                              });
+                              const hasNote = associatedNotes.length > 0;
+                              const firstNote = associatedNotes[0];
+
+                              // 2. Associated invoices / payments (by eventId, noteId, or same client & date)
+                              const associatedInvoices = invoices.filter(inv => {
+                                if (inv.eventId && inv.eventId === ev.id) return true;
+                                if (inv.noteId && inv.noteId === ev.id) return true;
+                                if (inv.noteId && associatedNotes.some(n => n.id === inv.noteId)) return true;
+                                const isSameClient = inv.clientId === (ev.clientId || selectedClient.id);
+                                if (isSameClient) {
+                                  const invDateStr = inv.date ? inv.date.split('T')[0] : '';
+                                  const invPayDateStr = inv.paymentDate ? inv.paymentDate.split('T')[0] : '';
+                                  if (invDateStr === evDateStr || invPayDateStr === evDateStr) return true;
+                                }
+                                return false;
+                              });
+                              const paidInvoice = associatedInvoices.find(inv => inv.status === 'paid');
+                              const pendingInvoice = associatedInvoices.find(inv => inv.status === 'pending');
 
                               return (
                                 <div 
@@ -2671,15 +2715,77 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                   }`}
                                 >
                                   <div className="flex items-start justify-between gap-2">
-                                    <div>
-                                      <div className="flex items-center gap-2 flex-wrap">
+                                    <div className="space-y-1.5 flex-1 min-w-0">
+                                      {/* Badges row: Past/Upcoming + Note Notification + Payment Notification */}
+                                      <div className="flex items-center gap-1.5 flex-wrap">
                                         <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${
                                           isUpcoming ? 'bg-emerald-600 text-white' : 'bg-gray-200 text-gray-700'
                                         }`}>
                                           {isUpcoming ? (lang === 'fr' ? 'À venir' : 'Upcoming') : (lang === 'fr' ? 'Passé' : 'Past')}
                                         </span>
                                         <span className="text-xs font-bold text-gray-900">{dateStr}</span>
+
+                                        {/* Note Status Notification Badge */}
+                                        {hasNote ? (
+                                          <button
+                                            type="button"
+                                            onClick={() => handleScrollToNote(firstNote.id)}
+                                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-sky-100 text-sky-800 border border-sky-300 hover:bg-sky-200 transition-colors cursor-pointer"
+                                            title={lang === 'fr' ? "Note rédigée - Cliquer pour voir au dossier" : "Nota redactada - Ver en ficha"}
+                                          >
+                                            <FileCheck size={11} className="text-sky-700" />
+                                            <span>{lang === 'fr' ? '✓ Note rédigée' : lang === 'es' ? '✓ Nota redactada' : '✓ Note added'}</span>
+                                          </button>
+                                        ) : !isUpcoming ? (
+                                          <span 
+                                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium bg-amber-50 text-amber-700 border border-amber-200/80"
+                                            title={lang === 'fr' ? "Aucune note rédigée pour ce rendez-vous" : "Sin nota"}
+                                          >
+                                            <FileText size={10} className="text-amber-500" />
+                                            <span>{lang === 'fr' ? 'Note en attente' : lang === 'es' ? 'Nota pendiente' : 'Note pending'}</span>
+                                          </span>
+                                        ) : null}
+
+                                        {/* Payment Status Notification Badge */}
+                                        {paidInvoice ? (
+                                          (() => {
+                                            const methodLabel = paidInvoice.discountType === 'bono'
+                                              ? 'Bono'
+                                              : paidInvoice.paymentMethod === 'card'
+                                              ? (lang === 'fr' ? 'CB' : lang === 'es' ? 'Tarjeta' : 'Card')
+                                              : paidInvoice.paymentMethod === 'cash'
+                                              ? (lang === 'fr' ? 'Espèces' : lang === 'es' ? 'Efectivo' : 'Cash')
+                                              : (lang === 'fr' ? 'Virement' : lang === 'es' ? 'Transf.' : 'Transfer');
+                                            return (
+                                              <button
+                                                type="button"
+                                                onClick={() => setSelectedInvoiceForPrint(paidInvoice)}
+                                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-emerald-100 text-emerald-900 border border-emerald-300 hover:bg-emerald-200 transition-colors cursor-pointer"
+                                                title={lang === 'fr' ? `Paiement validé (${paidInvoice.amount} € - ${methodLabel}) - Cliquer pour voir la facture` : `Pago registrado (${paidInvoice.amount} €)`}
+                                              >
+                                                <CheckCircle2 size={11} className="text-emerald-700" />
+                                                <span>{lang === 'fr' ? 'Payé' : lang === 'es' ? 'Pagado' : 'Paid'} : {paidInvoice.amount} € ({methodLabel})</span>
+                                              </button>
+                                            );
+                                          })()
+                                        ) : pendingInvoice ? (
+                                          <button
+                                            type="button"
+                                            onClick={() => setSelectedInvoiceForPrint(pendingInvoice)}
+                                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-300 hover:bg-amber-200 transition-colors cursor-pointer"
+                                            title={lang === 'fr' ? `Facture émise en attente de paiement (${pendingInvoice.amount} €)` : `Factura pendiente`}
+                                          >
+                                            <Clock size={11} className="text-amber-700" />
+                                            <span>{lang === 'fr' ? 'En attente' : lang === 'es' ? 'Pendiente' : 'Pending'} : {pendingInvoice.amount} €</span>
+                                          </button>
+                                        ) : (
+                                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium bg-gray-100 text-gray-500 border border-gray-200">
+                                            <CreditCard size={10} className="text-gray-400" />
+                                            <span>{lang === 'fr' ? 'Non réglé' : lang === 'es' ? 'No cobrado' : 'Unbilled'}</span>
+                                          </span>
+                                        )}
                                       </div>
+
                                       <p className="text-xs font-semibold text-primary mt-1">
                                         {ev.summary || (lang === 'fr' ? "Séance d'ostéopathie" : "Osteopathy session")}
                                       </p>
@@ -2690,6 +2796,29 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                         <p className="text-[11px] text-gray-600 italic mt-1 line-clamp-2 bg-white/70 p-1.5 rounded-lg border border-black/5">
                                           {ev.description}
                                         </p>
+                                      )}
+
+                                      {/* Note Preview Snippet if note exists */}
+                                      {hasNote && (firstNote.motif || firstNote.treatment || firstNote.anamnese || firstNote.content) && (
+                                        <div 
+                                          onClick={() => handleScrollToNote(firstNote.id)}
+                                          className="bg-sky-50/80 hover:bg-sky-100/90 p-2 rounded-xl border border-sky-200/80 text-[11px] text-gray-700 cursor-pointer transition-all group/note mt-1"
+                                          title={lang === 'fr' ? "Cliquer pour voir la note complète dans le dossier" : "Clic para ver la nota en la ficha"}
+                                        >
+                                          <div className="flex items-center justify-between gap-1 text-[10px] font-bold text-sky-900 mb-0.5">
+                                            <span className="flex items-center gap-1 truncate">
+                                              <FileCheck size={11} className="text-sky-600 shrink-0" />
+                                              <span className="truncate">{firstNote.motif || (lang === 'fr' ? "Note clinique associée" : "Nota clínica")}</span>
+                                            </span>
+                                            <span className="text-sky-600 group-hover/note:underline font-semibold text-[9px] shrink-0 flex items-center gap-0.5">
+                                              <span>{lang === 'fr' ? "Voir note" : "Ver"}</span>
+                                              <ArrowDown size={10} />
+                                            </span>
+                                          </div>
+                                          <p className="line-clamp-2 text-gray-600 text-[10px] leading-relaxed italic">
+                                            {firstNote.treatment || firstNote.anamnese || firstNote.content}
+                                          </p>
+                                        </div>
                                       )}
                                     </div>
 
@@ -2714,28 +2843,68 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                   </div>
 
                                   {/* Quick actions for this appointment */}
-                                  <div className="pt-2 border-t border-black/5 flex items-center justify-between text-[11px]">
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        const isoDate = evDate.toISOString().split('T')[0];
-                                        setNewNote(prev => ({
-                                          ...prev,
-                                          date: isoDate,
-                                          motif: ev.summary || prev.motif,
-                                        }));
-                                        const noteFormElem = document.getElementById('new-note-form');
-                                        if (noteFormElem) {
-                                          noteFormElem.scrollIntoView({ behavior: 'smooth' });
-                                          const firstField = noteFormElem.querySelector('input, textarea') as HTMLInputElement | HTMLTextAreaElement | null;
-                                          if (firstField) firstField.focus();
-                                        }
-                                      }}
-                                      className="text-primary hover:underline font-bold inline-flex items-center gap-1 cursor-pointer"
-                                    >
-                                      <Plus size={11} />
-                                      <span>{lang === 'fr' ? 'Rédiger une note pour ce RDV' : 'Write note for this appointment'}</span>
-                                    </button>
+                                  <div className="pt-2 border-t border-black/5 flex items-center justify-between gap-2 text-[11px] flex-wrap">
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                      {hasNote ? (
+                                        <button
+                                          type="button"
+                                          onClick={() => handleScrollToNote(firstNote.id)}
+                                          className="text-sky-700 hover:text-sky-900 font-bold inline-flex items-center gap-1 cursor-pointer hover:underline"
+                                        >
+                                          <FileCheck size={11} className="text-sky-600" />
+                                          <span>{lang === 'fr' ? 'Voir la note au dossier' : lang === 'es' ? 'Ver nota en ficha' : 'View note in file'} ↓</span>
+                                        </button>
+                                      ) : (
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            const isoDate = evDate.toISOString().split('T')[0];
+                                            setNewNote(prev => ({
+                                              ...prev,
+                                              date: isoDate,
+                                              motif: ev.summary || prev.motif,
+                                              eventId: ev.id,
+                                            }));
+                                            const noteFormElem = document.getElementById('new-note-form');
+                                            if (noteFormElem) {
+                                              noteFormElem.scrollIntoView({ behavior: 'smooth' });
+                                              const firstField = noteFormElem.querySelector('input, textarea') as HTMLInputElement | HTMLTextAreaElement | null;
+                                              if (firstField) firstField.focus();
+                                            }
+                                          }}
+                                          className="text-primary hover:underline font-bold inline-flex items-center gap-1 cursor-pointer"
+                                        >
+                                          <Plus size={11} />
+                                          <span>{lang === 'fr' ? 'Rédiger une note pour ce RDV' : 'Write note for this appointment'}</span>
+                                        </button>
+                                      )}
+
+                                      {!paidInvoice && (
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            if (!selectedClient) return;
+                                            const isoDate = evDate.toISOString().split('T')[0];
+                                            setNewInvoice(prev => ({
+                                              ...prev,
+                                              clientId: selectedClient.id,
+                                              date: isoDate,
+                                              paymentDate: isoDate,
+                                              eventId: ev.id,
+                                              description: ev.summary || prev.description,
+                                            }));
+                                            setNewInvoiceBillingPlan(selectedClient.hasBono && (selectedClient.bonoSessionsRemaining ?? 0) > 0 ? 'deduct_bono' : 'single');
+                                            setNewInvoiceIncludeToday(true);
+                                            setIsAddInvoiceOpen(true);
+                                          }}
+                                          className="text-emerald-800 hover:text-emerald-950 font-bold inline-flex items-center gap-1 bg-emerald-50 hover:bg-emerald-100 px-2 py-0.5 rounded-lg border border-emerald-200/80 transition-all cursor-pointer text-[10px]"
+                                          title={lang === 'fr' ? "Associer un paiement ou émettre une facture pour ce rendez-vous" : "Cobrar cita"}
+                                        >
+                                          <Plus size={10} />
+                                          <span>{lang === 'fr' ? 'Encaisser / Facturer' : lang === 'es' ? 'Cobrar / Facturar' : 'Bill / Collect'}</span>
+                                        </button>
+                                      )}
+                                    </div>
 
                                     <button
                                       type="button"
@@ -2744,7 +2913,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                         setActiveTab('calendar');
                                         setCalendarViewMode('day');
                                       }}
-                                      className="text-gray-500 hover:text-gray-800 text-[10px] font-medium cursor-pointer"
+                                      className="text-gray-500 hover:text-gray-800 text-[10px] font-medium cursor-pointer ml-auto"
                                     >
                                       {lang === 'fr' ? "Voir dans l'agenda" : "View in calendar"} →
                                     </button>
@@ -2775,6 +2944,25 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                       <h4 className="text-sm font-bold uppercase tracking-wider text-primary mb-4 flex items-center gap-2">
                         <FileCheck size={16} /> {lang === 'fr' ? "Nouvelle Consultation / Note" : lang === 'es' ? "Nueva Consulta / Nota" : "New Consultation / Note"}
                       </h4>
+
+                      {newNote.eventId && (
+                        <div className="mb-4 p-2.5 rounded-xl bg-sky-50 border border-sky-200/80 flex items-center justify-between gap-2 text-xs text-sky-900">
+                          <div className="flex items-center gap-1.5 truncate">
+                            <CalendarIcon size={13} className="text-sky-600 shrink-0" />
+                            <span className="font-semibold truncate">
+                              {lang === 'fr' ? 'Note associée au rendez-vous' : lang === 'es' ? 'Nota asociada a la cita' : 'Note linked to appointment'}
+                            </span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setNewNote(prev => ({ ...prev, eventId: '' }))}
+                            className="text-sky-600 hover:text-sky-900 p-0.5 rounded hover:bg-sky-100 transition-colors cursor-pointer"
+                            title={lang === 'fr' ? "Dissocier du rendez-vous" : "Desvincular"}
+                          >
+                            <X size={12} />
+                          </button>
+                        </div>
+                      )}
 
                       <form onSubmit={handleAddNote} className="space-y-4">
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -2870,7 +3058,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                       {clientNotes.map(note => {
                         const isEditing = editingNoteId === note.id;
                         return (
-                          <div key={note.id} className="bg-white p-5 rounded-3xl border border-black/5 shadow-sm space-y-3 relative group transition-all">
+                          <div key={note.id} id={`note-${note.id}`} className="bg-white p-5 rounded-3xl border border-black/5 shadow-sm space-y-3 relative group transition-all">
                             {isEditing ? (
                               <div className="space-y-3 bg-[#fafaf7] p-4 rounded-2xl border border-primary/20 shadow-inner">
                                 <div className="flex items-center justify-between gap-4">
@@ -2996,6 +3184,12 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                     <span className="text-[10px] text-gray-500 font-medium">
                                       {new Date(note.date).toLocaleDateString(lang === 'fr' ? 'fr-FR' : lang === 'es' ? 'es-ES' : 'en-US', { day: 'numeric', month: 'short', year: 'numeric' })}
                                     </span>
+                                    {note.eventId && (
+                                      <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-sky-50 text-sky-700 border border-sky-200/70 inline-flex items-center gap-1">
+                                        <CalendarIcon size={10} />
+                                        <span>{lang === 'fr' ? 'Liée à un RDV' : lang === 'es' ? 'Vinculada a cita' : 'Linked to appt'}</span>
+                                      </span>
+                                    )}
                                   </div>
 
                                   {/* Edit & Delete Buttons - ALWAYS clearly visible on all devices */}
@@ -4200,6 +4394,24 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                                       }`}>
                                                         {startStr} - {endStr}
                                                       </span>
+                                                      {!isOther && (() => {
+                                                        const evDateStr = ev.start ? ev.start.split('T')[0] : '';
+                                                        const dayAssociatedInv = invoices.find(i => (i.eventId && i.eventId === ev.id) || (i.noteId && i.noteId === ev.id) || (ev.clientId && i.clientId === ev.clientId && (i.date.split('T')[0] === evDateStr || (i.paymentDate && i.paymentDate.split('T')[0] === evDateStr))));
+                                                        if (dayAssociatedInv) {
+                                                          return (
+                                                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-900 border border-emerald-300 inline-flex items-center gap-1">
+                                                              <CheckCircle2 size={10} className="text-emerald-700" />
+                                                              <span>{dayAssociatedInv.status === 'paid' ? (lang === 'fr' ? 'Payé' : 'Pagado') : (lang === 'fr' ? 'En attente' : 'Pendiente')} ({dayAssociatedInv.amount} €)</span>
+                                                            </span>
+                                                          );
+                                                        }
+                                                        return (
+                                                          <span className="text-[10px] font-medium px-2 py-0.5 rounded-md bg-gray-100 text-gray-500 border border-gray-200 inline-flex items-center gap-1">
+                                                            <CreditCard size={10} className="text-gray-400" />
+                                                            <span>{lang === 'fr' ? 'Non réglé' : 'No cobrado'}</span>
+                                                          </span>
+                                                        );
+                                                      })()}
                                                       {isOther && (
                                                         <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-amber-200/80 text-amber-900 border border-amber-300">
                                                           {getEventTypeLabel(ev.eventType)}
@@ -5977,33 +6189,75 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                 </div>
               </div>
               
-              {/* Direct Link to Clinical Notes (for appointments) */}
-              {(!editingEvent.eventType || editingEvent.eventType === 'appointment') && (
-                <div className="mb-4 bg-emerald-50 border border-emerald-200/80 rounded-2xl p-3.5 flex items-center justify-between gap-3">
-                  <div>
-                    <p className="text-xs font-bold text-emerald-900 flex items-center gap-1.5">
-                      <FileCheck size={15} className="text-emerald-700" />
-                      {lang === 'fr' ? 'Dossier Patient & Prise de notes' : lang === 'es' ? 'Historial del Paciente & Notas' : 'Patient File & Clinical Notes'}
-                    </p>
-                    <p className="text-[10px] text-emerald-700 mt-0.5">
-                      {lang === 'fr' ? 'Ouvrir la fiche clinique pour ce rendez-vous' : lang === 'es' ? 'Abrir ficha clínica para esta cita' : 'Open clinical file for this appointment'}
-                    </p>
+              {/* Direct Link to Clinical Notes & Billing Status (for appointments) */}
+              {(!editingEvent.eventType || editingEvent.eventType === 'appointment') && (() => {
+                const evDateStr = editingEvent.date;
+                const associatedNote = clientNotes.find(n => (n.eventId && n.eventId === editingEvent.id) || (editingEvent.clientId && n.clientId === editingEvent.clientId && n.date.split('T')[0] === evDateStr));
+                const associatedInv = invoices.find(i => (i.eventId && i.eventId === editingEvent.id) || (i.noteId && i.noteId === editingEvent.id) || (editingEvent.clientId && i.clientId === editingEvent.clientId && (i.date.split('T')[0] === evDateStr || (i.paymentDate && i.paymentDate.split('T')[0] === evDateStr))));
+
+                return (
+                  <div className="mb-4 bg-emerald-50 border border-emerald-200/80 rounded-2xl p-3.5 space-y-2.5">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <p className="text-xs font-bold text-emerald-900 flex items-center gap-1.5">
+                          <FileCheck size={15} className="text-emerald-700" />
+                          {lang === 'fr' ? 'Dossier Patient & Prise de notes' : lang === 'es' ? 'Historial del Paciente & Notas' : 'Patient File & Clinical Notes'}
+                        </p>
+                        <p className="text-[10px] text-emerald-700 mt-0.5">
+                          {associatedNote
+                            ? (lang === 'fr' ? '✓ Une note clinique est rédigée pour ce rendez-vous' : '✓ Nota clínica redactada para esta cita')
+                            : (lang === 'fr' ? 'Ouvrir la fiche clinique pour ce rendez-vous' : 'Abrir ficha clínica para esta cita')
+                          }
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (editingEvent) {
+                            setIsEditEventOpen(false);
+                            handleGoToNotes(editingEvent);
+                          }
+                        }}
+                        className="px-3.5 py-2 bg-primary hover:bg-primary/95 text-white rounded-xl text-xs font-bold transition-all shadow-xs shrink-0 flex items-center gap-1 cursor-pointer"
+                      >
+                        <span>{associatedNote ? (lang === 'fr' ? 'Consulter la note' : 'Ver nota') : (lang === 'fr' ? 'Prendre des notes' : 'Tomar notas')}</span>
+                        <ArrowRight size={13} />
+                      </button>
+                    </div>
+
+                    {/* Status badges for this event in edit modal */}
+                    <div className="flex items-center gap-2 pt-2 border-t border-emerald-200/60 text-[10px] flex-wrap">
+                      {associatedNote ? (
+                        <span className="font-bold text-sky-800 bg-sky-100 px-2 py-0.5 rounded-md inline-flex items-center gap-1 border border-sky-300">
+                          <FileCheck size={11} className="text-sky-700" />
+                          <span>{lang === 'fr' ? '✓ Note rédigée' : '✓ Nota redactada'}</span>
+                        </span>
+                      ) : (
+                        <span className="font-medium text-amber-800 bg-amber-100/70 px-2 py-0.5 rounded-md inline-flex items-center gap-1 border border-amber-300">
+                          <FileText size={11} className="text-amber-600" />
+                          <span>{lang === 'fr' ? 'Note en attente' : 'Sin nota'}</span>
+                        </span>
+                      )}
+
+                      {associatedInv ? (
+                        <span className="font-bold text-emerald-900 bg-emerald-100 px-2 py-0.5 rounded-md inline-flex items-center gap-1 border border-emerald-300">
+                          <CheckCircle2 size={11} className="text-emerald-700" />
+                          <span>
+                            {associatedInv.status === 'paid' 
+                              ? `${lang === 'fr' ? 'Payé' : 'Pagado'} : ${associatedInv.amount} €`
+                              : `${lang === 'fr' ? 'En attente' : 'Pendiente'} : ${associatedInv.amount} €`}
+                          </span>
+                        </span>
+                      ) : (
+                        <span className="font-medium text-gray-600 bg-white px-2 py-0.5 rounded-md inline-flex items-center gap-1 border border-gray-200">
+                          <CreditCard size={11} className="text-gray-400" />
+                          <span>{lang === 'fr' ? 'Paiement non associé' : 'Sin pago asociado'}</span>
+                        </span>
+                      )}
+                    </div>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (editingEvent) {
-                        setIsEditEventOpen(false);
-                        handleGoToNotes(editingEvent);
-                      }
-                    }}
-                    className="px-3.5 py-2 bg-primary hover:bg-primary/95 text-white rounded-xl text-xs font-bold transition-all shadow-xs shrink-0 flex items-center gap-1"
-                  >
-                    <span>{lang === 'fr' ? 'Prendre des notes' : lang === 'es' ? 'Tomar notas' : 'Take Notes'}</span>
-                    <ArrowRight size={13} />
-                  </button>
-                </div>
-              )}
+                );
+              })()}
               
               <form onSubmit={handleUpdateEvent} className="space-y-4">
                 {(!editingEvent.eventType || editingEvent.eventType === 'appointment') && (
@@ -6144,6 +6398,25 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
               <h3 className="text-xl font-serif font-bold text-primary mb-6">
                 {lang === 'fr' ? 'Nouvelle Facture' : lang === 'es' ? 'Nueva Factura' : 'New Invoice'}
               </h3>
+
+              {newInvoice.eventId && (
+                <div className="mb-4 p-2.5 rounded-xl bg-emerald-50 border border-emerald-200/80 flex items-center justify-between gap-2 text-xs text-emerald-900">
+                  <div className="flex items-center gap-1.5 truncate">
+                    <CalendarIcon size={13} className="text-emerald-700 shrink-0" />
+                    <span className="font-semibold truncate">
+                      {lang === 'fr' ? 'Facture associée au rendez-vous' : lang === 'es' ? 'Factura asociada a la cita' : 'Invoice linked to appointment'}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setNewInvoice(prev => ({ ...prev, eventId: '' }))}
+                    className="text-emerald-700 hover:text-emerald-900 p-0.5 rounded hover:bg-emerald-100 transition-colors cursor-pointer"
+                    title={lang === 'fr' ? "Dissocier du rendez-vous" : "Desvincular"}
+                  >
+                    <X size={12} />
+                  </button>
+                </div>
+              )}
               
               <form onSubmit={handleAddInvoice} className="space-y-4">
                 <div>

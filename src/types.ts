@@ -26,6 +26,7 @@ export interface ClientNote {
   treatment: string;
   content: string;
   category: 'evaluation' | 'treatment' | 'follow-up' | 'general';
+  eventId?: string;
 }
 
 export interface Invoice {
@@ -45,6 +46,7 @@ export interface Invoice {
   description: string;
   language?: 'fr' | 'en' | 'es';
   noteId?: string;
+  eventId?: string;
   quantity?: number;
 }
 
