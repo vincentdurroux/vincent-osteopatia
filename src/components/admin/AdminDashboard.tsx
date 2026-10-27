@@ -7,7 +7,7 @@ import {
   ChevronRight, Pencil, ChevronLeft, ChevronDown, LayoutGrid, List, ArrowRight,
   Copy, CheckCircle2, XCircle, AlertTriangle, Database, Server, UserPlus, User,
   Tag, BadgePercent, Percent, Sparkles, IdCard, X, Columns3, Lock, Coffee, Briefcase, Bookmark, Pin, StickyNote,
-  ArrowUpDown, ArrowUp, ArrowDown
+  ArrowUpDown, ArrowUp, ArrowDown, ExternalLink
 } from 'lucide-react';
 import { Client, ClientNote, Invoice, CalendarEvent, EventType } from '../../types';
 import { api, supabase, isSupabaseConfigured, SUPABASE_SQL_SETUP, capitalizeFirstName, sortInvoicesByDate, normalizeInvoiceDescription } from '../../lib/supabase';
@@ -122,6 +122,20 @@ const formatRecapSubtitle = (recap: {
 
 type TabType = 'overview' | 'clients' | 'calendar' | 'billing';
 
+const DEFAULT_PATIENT_FORM = {
+  firstName: '',
+  lastName: '',
+  dni: '',
+  email: '',
+  phone: '',
+  birthDate: '',
+  address: '',
+  hasBono: false,
+  bonoType: 'Bono 5 séances',
+  defaultDiscount: 10,
+  bonoSessionsRemaining: 5,
+};
+
 export default function AdminDashboard({ onClose }: AdminDashboardProps) {
   const { lang, setLang, t } = useTranslation();
   const [activeTab, setActiveTab] = useState<TabType>('overview');
@@ -142,19 +156,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
   
   // Forms states
   const [isAddClientOpen, setIsAddClientOpen] = useState(false);
-  const [newClient, setNewClient] = useState({
-    firstName: '',
-    lastName: '',
-    dni: '',
-    email: '',
-    phone: '',
-    birthDate: '',
-    address: '',
-    hasBono: false,
-    bonoType: 'Bono 5 séances',
-    defaultDiscount: 10,
-    bonoSessionsRemaining: 5,
-  });
+  const [newClient, setNewClient] = useState({ ...DEFAULT_PATIENT_FORM });
   
   const [newNote, setNewNote] = useState({
     anamnese: '',
@@ -233,13 +235,8 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
   const [isAddEventOpen, setIsAddEventOpen] = useState(false);
   const [selectedDayModalDate, setSelectedDayModalDate] = useState<string | null>(null);
   const [isInlineNewPatient, setIsInlineNewPatient] = useState(false);
-  const [inlinePatient, setInlinePatient] = useState({
-    firstName: '',
-    lastName: '',
-    dni: '',
-    phone: '',
-    email: '',
-  });
+  const [inlinePatient, setInlinePatient] = useState({ ...DEFAULT_PATIENT_FORM });
+  const [returnToAppointmentAfterClientCreate, setReturnToAppointmentAfterClientCreate] = useState(false);
   const [newEvent, setNewEvent] = useState<{
     clientId: string;
     title: string;
@@ -582,21 +579,22 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
       });
       setSelectedClient(created);
       setIsAddClientOpen(false);
-      setNewClient({
-        firstName: '',
-        lastName: '',
-        dni: '',
-        email: '',
-        phone: '',
-        birthDate: '',
-        address: '',
-        hasBono: false,
-        bonoType: 'Bono 5 séances',
-        defaultDiscount: 10,
-        bonoSessionsRemaining: 5,
-      });
-    } catch (err) {
+      setNewClient({ ...DEFAULT_PATIENT_FORM });
+
+      // If opened from within appointment modal, automatically link this patient to the appointment
+      if (returnToAppointmentAfterClientCreate) {
+        setNewEvent(prev => ({
+          ...prev,
+          clientId: created.id,
+          title: created.name,
+        }));
+        setIsInlineNewPatient(false);
+        setIsAddEventOpen(true);
+        setReturnToAppointmentAfterClientCreate(false);
+      }
+    } catch (err: any) {
       console.error('Failed to create client:', err);
+      alert(lang === 'fr' ? `Erreur lors de la création du patient : ${err?.message || 'Erreur réseau'}` : "Error creating patient.");
     }
   };
 
@@ -1363,6 +1361,12 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
           dni: inlinePatient.dni?.trim() ? inlinePatient.dni.trim().toUpperCase() : undefined,
           email: inlinePatient.email?.trim() || '',
           phone: inlinePatient.phone?.trim() || '',
+          birthDate: inlinePatient.birthDate || '',
+          address: inlinePatient.address || '',
+          hasBono: inlinePatient.hasBono,
+          bonoType: inlinePatient.hasBono ? inlinePatient.bonoType : undefined,
+          defaultDiscount: inlinePatient.hasBono ? Number(inlinePatient.defaultDiscount) : undefined,
+          bonoSessionsRemaining: inlinePatient.hasBono ? Number(inlinePatient.bonoSessionsRemaining) : undefined,
         });
         setClients(prev => {
           const filtered = prev.filter(c => c.id !== createdCl.id);
@@ -1371,9 +1375,9 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
         setSelectedClient(createdCl);
         finalClientId = createdCl.id;
         finalClientName = (createdCl.name && createdCl.name !== 'Patient sans nom') ? createdCl.name : fullName;
-      } catch (err) {
+      } catch (err: any) {
         console.error('Failed to create inline patient:', err);
-        alert(lang === 'fr' ? "Erreur lors de la création du patient." : "Error creating patient.");
+        alert(lang === 'fr' ? `Erreur lors de la création du patient : ${err?.message || 'Erreur réseau'}` : "Error creating patient.");
         return;
       }
     } else if (!isOtherType && newEvent.clientId) {
@@ -1417,6 +1421,12 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
               name: fullName,
               email: '',
               phone: '',
+              birthDate: '',
+              address: '',
+              hasBono: false,
+              bonoType: 'Bono 5 séances',
+              defaultDiscount: 10,
+              bonoSessionsRemaining: 5,
             });
             setClients(prev => {
               const filtered = prev.filter(c => c.id !== createdCl.id);
@@ -1465,7 +1475,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
       setEvents(prev => [...prev, created].sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime()));
       setIsAddEventOpen(false);
       setIsInlineNewPatient(false);
-      setInlinePatient({ firstName: '', lastName: '', dni: '', phone: '', email: '' });
+      setInlinePatient({ ...DEFAULT_PATIENT_FORM });
       setNewEvent({
         clientId: '',
         title: getDefaultAppointmentTitle(lang),
@@ -2587,6 +2597,175 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                       </button>
                     </div>
                   </div>
+
+                  {/* Patient Appointments Card - Directly links Agenda & Medical Dossier */}
+                  {(() => {
+                    const patientAppointments = events.filter(ev => {
+                      if (ev.eventType && ev.eventType !== 'appointment') return false;
+                      if (ev.clientId === selectedClient.id) return true;
+                      if (ev.clientName && ev.clientName.trim().toLowerCase() === selectedClient.name.trim().toLowerCase()) return true;
+                      return false;
+                    }).sort((a, b) => new Date(b.start).getTime() - new Date(a.start).getTime());
+
+                    return (
+                      <div className="bg-white p-5 sm:p-6 rounded-3xl border border-black/5 shadow-sm space-y-4">
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                          <div className="flex items-center gap-2.5">
+                            <div className="w-9 h-9 rounded-2xl bg-emerald-100 text-emerald-800 flex items-center justify-center">
+                              <CalendarIcon size={18} />
+                            </div>
+                            <div>
+                              <h4 className="text-sm font-bold text-gray-900 flex items-center gap-2">
+                                <span>{lang === 'fr' ? 'Rendez-vous associés au dossier' : lang === 'es' ? 'Citas asociadas al expediente' : 'Appointments on file'}</span>
+                                <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
+                                  {patientAppointments.length}
+                                </span>
+                              </h4>
+                              <p className="text-[11px] text-gray-500">
+                                {lang === 'fr' 
+                                  ? 'Consultations planifiées ou passées issues de votre agenda' 
+                                  : 'Appointments scheduled or completed in your calendar'}
+                              </p>
+                            </div>
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setNewEvent(prev => ({
+                                ...prev,
+                                clientId: selectedClient.id,
+                                title: selectedClient.name,
+                                eventType: 'appointment'
+                              }));
+                              setIsInlineNewPatient(false);
+                              setIsAddEventOpen(true);
+                            }}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold bg-primary text-white hover:bg-primary/95 transition-all shadow-xs cursor-pointer"
+                          >
+                            <Plus size={13} />
+                            <span>{lang === 'fr' ? 'Planifier un RDV' : lang === 'es' ? 'Programar cita' : 'Schedule appointment'}</span>
+                          </button>
+                        </div>
+
+                        {patientAppointments.length > 0 ? (
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
+                            {patientAppointments.map(ev => {
+                              const evDate = new Date(ev.start);
+                              const isUpcoming = evDate.getTime() >= new Date().setHours(0, 0, 0, 0);
+                              const dateStr = evDate.toLocaleDateString(lang === 'fr' ? 'fr-FR' : lang === 'es' ? 'es-ES' : 'en-US', {
+                                weekday: 'short',
+                                day: 'numeric',
+                                month: 'short',
+                                year: 'numeric'
+                              });
+                              const timeStr = `${evDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} - ${new Date(ev.end).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+
+                              return (
+                                <div 
+                                  key={ev.id}
+                                  className={`p-3.5 rounded-2xl border transition-all flex flex-col justify-between gap-2.5 ${
+                                    isUpcoming 
+                                      ? 'bg-emerald-50/50 border-emerald-200/80 hover:bg-emerald-50' 
+                                      : 'bg-[#fafafa] border-black/5 hover:bg-white'
+                                  }`}
+                                >
+                                  <div className="flex items-start justify-between gap-2">
+                                    <div>
+                                      <div className="flex items-center gap-2 flex-wrap">
+                                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${
+                                          isUpcoming ? 'bg-emerald-600 text-white' : 'bg-gray-200 text-gray-700'
+                                        }`}>
+                                          {isUpcoming ? (lang === 'fr' ? 'À venir' : 'Upcoming') : (lang === 'fr' ? 'Passé' : 'Past')}
+                                        </span>
+                                        <span className="text-xs font-bold text-gray-900">{dateStr}</span>
+                                      </div>
+                                      <p className="text-xs font-semibold text-primary mt-1">
+                                        {ev.summary || (lang === 'fr' ? "Séance d'ostéopathie" : "Osteopathy session")}
+                                      </p>
+                                      <p className="text-[11px] text-gray-500 font-mono mt-0.5">
+                                        {timeStr}
+                                      </p>
+                                      {ev.description && (
+                                        <p className="text-[11px] text-gray-600 italic mt-1 line-clamp-2 bg-white/70 p-1.5 rounded-lg border border-black/5">
+                                          {ev.description}
+                                        </p>
+                                      )}
+                                    </div>
+
+                                    <div className="flex items-center gap-1 shrink-0">
+                                      <button
+                                        type="button"
+                                        onClick={() => openEditEventModal(ev)}
+                                        className="p-1.5 text-gray-500 hover:text-primary hover:bg-white rounded-lg transition-all"
+                                        title={lang === 'fr' ? "Modifier le rendez-vous" : "Edit appointment"}
+                                      >
+                                        <Pencil size={13} />
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleDeleteEvent(ev.id)}
+                                        className="p-1.5 text-gray-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-all"
+                                        title={lang === 'fr' ? "Supprimer le rendez-vous" : "Delete appointment"}
+                                      >
+                                        <Trash2 size={13} />
+                                      </button>
+                                    </div>
+                                  </div>
+
+                                  {/* Quick actions for this appointment */}
+                                  <div className="pt-2 border-t border-black/5 flex items-center justify-between text-[11px]">
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        const isoDate = evDate.toISOString().split('T')[0];
+                                        setNewNote(prev => ({
+                                          ...prev,
+                                          date: isoDate,
+                                          motif: ev.summary || prev.motif,
+                                        }));
+                                        const noteFormElem = document.getElementById('new-note-form');
+                                        if (noteFormElem) {
+                                          noteFormElem.scrollIntoView({ behavior: 'smooth' });
+                                          const firstField = noteFormElem.querySelector('input, textarea') as HTMLInputElement | HTMLTextAreaElement | null;
+                                          if (firstField) firstField.focus();
+                                        }
+                                      }}
+                                      className="text-primary hover:underline font-bold inline-flex items-center gap-1 cursor-pointer"
+                                    >
+                                      <Plus size={11} />
+                                      <span>{lang === 'fr' ? 'Rédiger une note pour ce RDV' : 'Write note for this appointment'}</span>
+                                    </button>
+
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setCurrentCalendarDate(evDate);
+                                        setActiveTab('calendar');
+                                        setCalendarViewMode('day');
+                                      }}
+                                      className="text-gray-500 hover:text-gray-800 text-[10px] font-medium cursor-pointer"
+                                    >
+                                      {lang === 'fr' ? "Voir dans l'agenda" : "View in calendar"} →
+                                    </button>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        ) : (
+                          <div className="py-5 px-4 bg-[#fafafa] rounded-2xl border border-dashed border-gray-200 text-center space-y-1.5">
+                            <CalendarIcon className="mx-auto text-gray-300" size={20} />
+                            <p className="text-xs text-gray-400">
+                              {lang === 'fr' 
+                                ? "Aucun rendez-vous enregistré pour ce patient dans l'agenda." 
+                                : "No appointments scheduled for this patient in the calendar."}
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
 
                   {/* Consultation Notes Section - Responsive layout: stacked on tablet/mobile, side-by-side on large desktop */}
                   <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 items-start">
@@ -5362,7 +5541,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                       <button
                         type="button"
                         onClick={() => setIsInlineNewPatient(!isInlineNewPatient)}
-                        className="text-xs font-bold text-primary hover:underline flex items-center gap-1"
+                        className="text-xs font-bold text-primary hover:underline flex items-center gap-1 cursor-pointer"
                       >
                         <UserPlus size={13} />
                         <span>
@@ -5374,53 +5553,189 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                     </div>
 
                     {isInlineNewPatient ? (
-                      <div className="p-3 bg-primary/5 rounded-2xl border border-primary/20 space-y-2.5">
-                        <p className="text-[11px] font-bold text-primary flex items-center gap-1.5">
-                          <UserPlus size={13} />
-                          <span>{lang === 'fr' ? 'Nouveau patient (enregistré en base de données & dans vos patients)' : lang === 'es' ? 'Nuevo paciente (guardado en base de datos & en sus pacientes)' : 'New patient (saved to database & patient list)'}</span>
-                        </p>
-                        <div className="grid grid-cols-2 gap-2">
-                          <input
-                            type="text"
-                            required
-                            placeholder={lang === 'fr' ? 'Nom *' : lang === 'es' ? 'Apellidos *' : 'Last Name *'}
-                            value={inlinePatient.lastName}
-                            onChange={(e) => setInlinePatient(prev => ({ ...prev, lastName: e.target.value.toUpperCase() }))}
-                            className="w-full p-2 bg-white rounded-xl border border-black/10 text-xs focus:outline-none focus:ring-1 focus:ring-primary uppercase"
-                          />
-                          <input
-                            type="text"
-                            required
-                            placeholder={lang === 'fr' ? 'Prénom *' : lang === 'es' ? 'Nombre *' : 'First Name *'}
-                            value={inlinePatient.firstName}
-                            onChange={(e) => setInlinePatient(prev => ({ ...prev, firstName: capitalizeFirstName(e.target.value) }))}
-                            className="w-full p-2 bg-white rounded-xl border border-black/10 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
-                          />
+                      <div className="p-4 bg-primary/5 rounded-2xl border border-primary/20 space-y-3">
+                        <div className="flex items-center justify-between gap-2 border-b border-primary/10 pb-2">
+                          <p className="text-[11px] font-bold text-primary flex items-center gap-1.5">
+                            <UserPlus size={14} />
+                            <span>{lang === 'fr' ? 'Création de la fiche patient (enregistrée dans vos dossiers)' : lang === 'es' ? 'Creación de ficha paciente' : 'Create patient record'}</span>
+                          </p>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setNewClient({
+                                firstName: inlinePatient.firstName,
+                                lastName: inlinePatient.lastName,
+                                dni: inlinePatient.dni,
+                                email: inlinePatient.email,
+                                phone: inlinePatient.phone,
+                                birthDate: inlinePatient.birthDate || '',
+                                address: inlinePatient.address || '',
+                                hasBono: inlinePatient.hasBono || false,
+                                bonoType: inlinePatient.bonoType || 'Bono 5 séances',
+                                defaultDiscount: inlinePatient.defaultDiscount || 10,
+                                bonoSessionsRemaining: inlinePatient.bonoSessionsRemaining || 5,
+                              });
+                              setReturnToAppointmentAfterClientCreate(true);
+                              setIsAddClientOpen(true);
+                            }}
+                            className="text-[10px] text-primary hover:underline font-bold inline-flex items-center gap-1 cursor-pointer"
+                            title={lang === 'fr' ? "Ouvrir dans la boîte de dialogue complète" : "Open in full modal"}
+                          >
+                            <ExternalLink size={11} />
+                            <span>{lang === 'fr' ? 'Formulaire complet' : 'Full form'}</span>
+                          </button>
                         </div>
+
+                        {/* Nom & Prénom */}
                         <div className="grid grid-cols-2 gap-2">
-                          <input
-                            type="tel"
-                            placeholder={lang === 'fr' ? 'Téléphone' : lang === 'es' ? 'Teléfono' : 'Phone'}
-                            value={inlinePatient.phone}
-                            onChange={(e) => setInlinePatient(prev => ({ ...prev, phone: e.target.value }))}
-                            className="w-full p-2 bg-white rounded-xl border border-black/10 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
-                          />
-                          <input
-                            type="email"
-                            placeholder={lang === 'fr' ? 'Email' : lang === 'es' ? 'Correo' : 'Email'}
-                            value={inlinePatient.email}
-                            onChange={(e) => setInlinePatient(prev => ({ ...prev, email: e.target.value }))}
-                            className="w-full p-2 bg-white rounded-xl border border-black/10 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
-                          />
+                          <div>
+                            <label className="text-[9px] uppercase tracking-wider font-bold text-gray-500 block mb-0.5">
+                              {lang === 'fr' ? 'Nom *' : 'Last name *'}
+                            </label>
+                            <input
+                              type="text"
+                              required
+                              placeholder="NOM"
+                              value={inlinePatient.lastName}
+                              onChange={(e) => setInlinePatient(prev => ({ ...prev, lastName: e.target.value.toUpperCase() }))}
+                              className="w-full p-2 bg-white rounded-xl border border-black/10 text-xs focus:outline-none focus:ring-1 focus:ring-primary uppercase"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-[9px] uppercase tracking-wider font-bold text-gray-500 block mb-0.5">
+                              {lang === 'fr' ? 'Prénom *' : 'First name *'}
+                            </label>
+                            <input
+                              type="text"
+                              required
+                              placeholder="Prénom"
+                              value={inlinePatient.firstName}
+                              onChange={(e) => setInlinePatient(prev => ({ ...prev, firstName: capitalizeFirstName(e.target.value) }))}
+                              className="w-full p-2 bg-white rounded-xl border border-black/10 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
+                            />
+                          </div>
                         </div>
+
+                        {/* Téléphone & Email */}
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <label className="text-[9px] uppercase tracking-wider font-bold text-gray-500 block mb-0.5">
+                              {lang === 'fr' ? 'Téléphone' : 'Phone'}
+                            </label>
+                            <input
+                              type="tel"
+                              placeholder="06 12 34 56 78"
+                              value={inlinePatient.phone}
+                              onChange={(e) => setInlinePatient(prev => ({ ...prev, phone: e.target.value }))}
+                              className="w-full p-2 bg-white rounded-xl border border-black/10 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-[9px] uppercase tracking-wider font-bold text-gray-500 block mb-0.5">
+                              {lang === 'fr' ? 'Email' : 'Email'}
+                            </label>
+                            <input
+                              type="email"
+                              placeholder="patient@email.com"
+                              value={inlinePatient.email}
+                              onChange={(e) => setInlinePatient(prev => ({ ...prev, email: e.target.value }))}
+                              className="w-full p-2 bg-white rounded-xl border border-black/10 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
+                            />
+                          </div>
+                        </div>
+
+                        {/* DNI / NIE & Date de Naissance */}
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <label className="text-[9px] uppercase tracking-wider font-bold text-gray-500 block mb-0.5">
+                              {lang === 'fr' ? 'DNI / NIE (Identité)' : 'DNI / NIE (ID)'}
+                            </label>
+                            <input
+                              type="text"
+                              placeholder="48765432A"
+                              value={inlinePatient.dni}
+                              onChange={(e) => setInlinePatient(prev => ({ ...prev, dni: e.target.value.toUpperCase() }))}
+                              className="w-full p-2 bg-white rounded-xl border border-black/10 text-xs focus:outline-none focus:ring-1 focus:ring-primary uppercase placeholder:normal-case font-mono"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-[9px] uppercase tracking-wider font-bold text-gray-500 block mb-0.5">
+                              {lang === 'fr' ? 'Date de Naissance' : 'Date of Birth'}
+                            </label>
+                            <input
+                              type="date"
+                              value={inlinePatient.birthDate}
+                              onChange={(e) => setInlinePatient(prev => ({ ...prev, birthDate: e.target.value }))}
+                              className="w-full p-2 bg-white rounded-xl border border-black/10 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
+                            />
+                          </div>
+                        </div>
+
+                        {/* Adresse */}
                         <div>
+                          <label className="text-[9px] uppercase tracking-wider font-bold text-gray-500 block mb-0.5">
+                            {lang === 'fr' ? 'Adresse postale' : 'Postal address'}
+                          </label>
                           <input
                             type="text"
-                            placeholder={lang === 'fr' ? 'DNI / NIE (optionnel)' : lang === 'es' ? 'DNI / NIE (opcional)' : 'DNI / NIE (optional)'}
-                            value={inlinePatient.dni}
-                            onChange={(e) => setInlinePatient(prev => ({ ...prev, dni: e.target.value.toUpperCase() }))}
-                            className="w-full p-2 bg-white rounded-xl border border-black/10 text-xs focus:outline-none focus:ring-1 focus:ring-primary uppercase placeholder:normal-case font-mono"
+                            placeholder="Rue, Code postal, Ville..."
+                            value={inlinePatient.address}
+                            onChange={(e) => setInlinePatient(prev => ({ ...prev, address: e.target.value }))}
+                            className="w-full p-2 bg-white rounded-xl border border-black/10 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
                           />
+                        </div>
+
+                        {/* Bono / Forfait */}
+                        <div className="bg-white/80 p-2.5 rounded-xl border border-black/5 space-y-2">
+                          <label className="text-xs font-bold text-gray-700 flex items-center justify-between cursor-pointer select-none">
+                            <span className="flex items-center gap-1.5">
+                              <input
+                                type="checkbox"
+                                checked={inlinePatient.hasBono || false}
+                                onChange={(e) => setInlinePatient(prev => ({
+                                  ...prev,
+                                  hasBono: e.target.checked,
+                                  defaultDiscount: e.target.checked ? (prev.defaultDiscount || 10) : 0,
+                                  bonoSessionsRemaining: e.target.checked ? (prev.bonoSessionsRemaining || 5) : 0,
+                                  bonoType: e.target.checked ? (prev.bonoType || 'Bono 5 séances') : ''
+                                }))}
+                                className="rounded text-primary focus:ring-primary w-3.5 h-3.5"
+                              />
+                              <span>{lang === 'fr' ? 'Patient avec Bono / Forfait' : 'Patient with Bono / Pack'}</span>
+                            </span>
+                            <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-emerald-100 text-emerald-800">
+                              Bono
+                            </span>
+                          </label>
+
+                          {inlinePatient.hasBono && (
+                            <div className="grid grid-cols-2 gap-2 pt-1 border-t border-black/5">
+                              <div>
+                                <label className="text-[9px] uppercase tracking-wider font-bold text-gray-400 block mb-0.5">
+                                  {lang === 'fr' ? 'Type' : 'Type'}
+                                </label>
+                                <input
+                                  type="text"
+                                  value={inlinePatient.bonoType}
+                                  onChange={(e) => setInlinePatient(prev => ({ ...prev, bonoType: e.target.value }))}
+                                  placeholder="Ex: Bono 5 séances"
+                                  className="w-full p-1.5 bg-white rounded-lg border border-black/10 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
+                                />
+                              </div>
+                              <div>
+                                <label className="text-[9px] uppercase tracking-wider font-bold text-gray-400 block mb-0.5">
+                                  {lang === 'fr' ? 'Séances créditées' : 'Sessions'}
+                                </label>
+                                <input
+                                  type="number"
+                                  value={inlinePatient.bonoSessionsRemaining}
+                                  onChange={(e) => setInlinePatient(prev => ({ ...prev, bonoSessionsRemaining: Number(e.target.value) }))}
+                                  placeholder="5"
+                                  className="w-full p-1.5 bg-white rounded-lg border border-black/10 text-xs font-bold text-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                                />
+                              </div>
+                            </div>
+                          )}
                         </div>
                       </div>
                     ) : (
@@ -5430,6 +5745,11 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                           const selectedId = e.target.value;
                           if (selectedId === '__new__') {
                             setIsInlineNewPatient(true);
+                            return;
+                          }
+                          if (selectedId === '__new_modal__') {
+                            setReturnToAppointmentAfterClientCreate(true);
+                            setIsAddClientOpen(true);
                             return;
                           }
                           const client = clients.find(c => c.id === selectedId);
@@ -5443,7 +5763,10 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                       >
                         <option value="">-- {lang === 'fr' ? 'Aucun ou patient non répertorié' : lang === 'es' ? 'Ninguno o no registrado' : 'None or unlisted'} --</option>
                         <option value="__new__" className="font-bold text-primary">
-                          ✨ + {lang === 'fr' ? 'Nouveau patient (créer fiche patient)' : lang === 'es' ? 'Nuevo paciente (crear ficha)' : 'New patient (create profile)'}
+                          ✨ + {lang === 'fr' ? 'Nouveau patient (fiche complète ici)' : lang === 'es' ? 'Nuevo paciente (ficha aquí)' : 'New patient (inline file)'}
+                        </option>
+                        <option value="__new_modal__" className="font-bold text-primary">
+                          📋 + {lang === 'fr' ? 'Nouveau patient (formulaire complet)' : lang === 'es' ? 'Nuevo paciente (formulario completo)' : 'New patient (full modal)'}
                         </option>
                         {clients.map(c => (
                           <option key={c.id} value={c.id}>{c.name} ({c.phone || c.email || 'N/A'})</option>
