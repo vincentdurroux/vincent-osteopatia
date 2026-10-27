@@ -147,7 +147,16 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
   // Calendar View Mode: 'month' (Month grid), 'week' (Weekly columns), 'day' (Daily timeline)
   const [calendarViewMode, setCalendarViewMode] = useState<'month' | 'week' | 'day'>('month');
   const [currentCalendarDate, setCurrentCalendarDate] = useState(new Date());
+  const [currentTime, setCurrentTime] = useState<Date>(new Date());
   const [isSyncing, setIsSyncing] = useState(false);
+
+  // Live clock: tick every 15 seconds so appointment statuses (Upcoming -> Ongoing -> Past) transition in real-time
+  useEffect(() => {
+    const clockInterval = setInterval(() => {
+      setCurrentTime(new Date());
+    }, 15000);
+    return () => clearInterval(clockInterval);
+  }, []);
   
   // Modals & Selected states
   const [selectedClient, setSelectedClient] = useState<Client | null>(null);
@@ -1255,6 +1264,25 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
     }
   };
 
+  // Helper to determine real-time status of an appointment (ongoing, past, upcoming)
+  const getAppointmentTimeStatus = (ev: { start: string; end?: string }) => {
+    try {
+      const startMs = new Date(ev.start).getTime();
+      const endMs = ev.end ? new Date(ev.end).getTime() : startMs + 55 * 60 * 1000;
+      const nowMs = currentTime.getTime();
+
+      if (nowMs >= startMs && nowMs < endMs) {
+        return { status: 'ongoing' as const, isOngoing: true, isPast: false, isUpcoming: false };
+      }
+      if (nowMs >= endMs) {
+        return { status: 'past' as const, isOngoing: false, isPast: true, isUpcoming: false };
+      }
+      return { status: 'upcoming' as const, isOngoing: false, isPast: false, isUpcoming: true };
+    } catch {
+      return { status: 'upcoming' as const, isOngoing: false, isPast: false, isUpcoming: true };
+    }
+  };
+
   // Helper to open edit event modal
   const openEditEventModal = (event: CalendarEvent) => {
     try {
@@ -1885,7 +1913,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
 
             {/* AGENDA DU CABINET DIRECT SUR L'APERÇU */}
             {(() => {
-              const now = new Date();
+              const now = currentTime;
               const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
               
               const todayEvents = events.filter(ev => {
@@ -1903,7 +1931,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
               const upcomingEvents = events.filter(ev => {
                 try {
                   const isAppt = !ev.eventType || ev.eventType === 'appointment';
-                  return isAppt && new Date(ev.start).getTime() >= now.getTime();
+                  return isAppt && new Date(ev.start).getTime() >= currentTime.getTime();
                 } catch {
                   return false;
                 }
@@ -1957,6 +1985,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                         {todayEvents.map(event => {
                           const isOther = event.eventType && event.eventType !== 'appointment';
+                          const timeStatus = getAppointmentTimeStatus(event);
                           const startTime = new Date(event.start).toLocaleTimeString(lang === 'fr' ? 'fr-FR' : 'es-ES', { hour: '2-digit', minute: '2-digit' });
                           const endTime = new Date(event.end).toLocaleTimeString(lang === 'fr' ? 'fr-FR' : 'es-ES', { hour: '2-digit', minute: '2-digit' });
 
@@ -1966,13 +1995,23 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                               className={`p-4 rounded-2xl border transition-all flex flex-col justify-between gap-3 group ${
                                 isOther 
                                   ? 'bg-amber-50/50 hover:bg-amber-50/80 border-amber-200/80' 
+                                  : timeStatus.isOngoing
+                                  ? 'bg-teal-50/80 hover:bg-teal-50 border-teal-300 ring-2 ring-teal-400/40 shadow-sm'
+                                  : timeStatus.isPast
+                                  ? 'bg-[#fafafa] hover:bg-white border-black/5 opacity-85 hover:opacity-100'
                                   : 'bg-emerald-50/50 hover:bg-emerald-50/90 border-emerald-200/60'
                               }`}
                             >
                               <div className="flex items-start justify-between gap-3">
                                 <div className="flex items-start gap-3">
                                   <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 mt-0.5 font-bold text-xs ${
-                                    isOther ? 'bg-amber-100 text-amber-900' : 'bg-emerald-100 text-emerald-800'
+                                    isOther 
+                                      ? 'bg-amber-100 text-amber-900' 
+                                      : timeStatus.isOngoing
+                                      ? 'bg-teal-600 text-white shadow-xs'
+                                      : timeStatus.isPast
+                                      ? 'bg-gray-100 text-gray-500'
+                                      : 'bg-emerald-100 text-emerald-800'
                                   }`}>
                                     {isOther ? <Lock size={15} /> : <Clock size={16} />}
                                   </div>
@@ -1981,13 +2020,34 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                       <h4 className="text-xs font-bold text-gray-900 leading-tight">
                                         {getEventDisplayName(event)}
                                       </h4>
-                                      {isOther && (
+                                      {isOther ? (
                                         <span className="text-[9px] font-bold px-1.5 py-0.2 rounded-md bg-amber-200/80 text-amber-900 border border-amber-300">
                                           {getEventTypeLabel(event.eventType)}
                                         </span>
+                                      ) : timeStatus.isOngoing ? (
+                                        <span className="text-[9px] font-bold px-2 py-0.5 rounded-md bg-teal-600 text-white animate-pulse flex items-center gap-1 shadow-xs">
+                                          <span className="w-1.5 h-1.5 rounded-full bg-white"></span>
+                                          {lang === 'fr' ? 'En cours' : lang === 'es' ? 'En curso' : 'In progress'}
+                                        </span>
+                                      ) : timeStatus.isPast ? (
+                                        <span className="text-[9px] font-bold px-1.5 py-0.2 rounded-md bg-gray-200 text-gray-700">
+                                          {lang === 'fr' ? 'Terminé' : lang === 'es' ? 'Terminada' : 'Completed'}
+                                        </span>
+                                      ) : (
+                                        <span className="text-[9px] font-bold px-1.5 py-0.2 rounded-md bg-emerald-600 text-white">
+                                          {lang === 'fr' ? 'À venir' : lang === 'es' ? 'Próxima' : 'Upcoming'}
+                                        </span>
                                       )}
                                     </div>
-                                    <p className={`text-[11px] font-semibold mt-1 ${isOther ? 'text-amber-800' : 'text-emerald-800'}`}>
+                                    <p className={`text-[11px] font-semibold mt-1 ${
+                                      isOther 
+                                        ? 'text-amber-800' 
+                                        : timeStatus.isOngoing
+                                        ? 'text-teal-900 font-bold'
+                                        : timeStatus.isPast
+                                        ? 'text-gray-500'
+                                        : 'text-emerald-800'
+                                    }`}>
                                       {startTime} - {endTime}
                                     </p>
                                     {event.description && (
@@ -2670,7 +2730,10 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                           <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
                             {patientAppointments.map(ev => {
                               const evDate = new Date(ev.start);
-                              const isUpcoming = evDate.getTime() >= new Date().setHours(0, 0, 0, 0);
+                              const timeStatus = getAppointmentTimeStatus(ev);
+                              const isOngoing = timeStatus.isOngoing;
+                              const isUpcoming = timeStatus.isUpcoming;
+                              const isPast = timeStatus.isPast;
                               const dateStr = evDate.toLocaleDateString(lang === 'fr' ? 'fr-FR' : lang === 'es' ? 'es-ES' : 'en-US', {
                                 weekday: 'short',
                                 day: 'numeric',
@@ -2709,20 +2772,31 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                 <div 
                                   key={ev.id}
                                   className={`p-3.5 rounded-2xl border transition-all flex flex-col justify-between gap-2.5 ${
-                                    isUpcoming 
+                                    isOngoing
+                                      ? 'bg-teal-50/80 border-teal-300 ring-2 ring-teal-400/40 shadow-xs'
+                                      : isUpcoming 
                                       ? 'bg-emerald-50/50 border-emerald-200/80 hover:bg-emerald-50' 
                                       : 'bg-[#fafafa] border-black/5 hover:bg-white'
                                   }`}
                                 >
                                   <div className="flex items-start justify-between gap-2">
                                     <div className="space-y-1.5 flex-1 min-w-0">
-                                      {/* Badges row: Past/Upcoming + Note Notification + Payment Notification */}
+                                      {/* Badges row: Past/Ongoing/Upcoming + Note Notification + Payment Notification */}
                                       <div className="flex items-center gap-1.5 flex-wrap">
-                                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${
-                                          isUpcoming ? 'bg-emerald-600 text-white' : 'bg-gray-200 text-gray-700'
-                                        }`}>
-                                          {isUpcoming ? (lang === 'fr' ? 'À venir' : 'Upcoming') : (lang === 'fr' ? 'Passé' : 'Past')}
-                                        </span>
+                                        {isOngoing ? (
+                                          <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-md bg-teal-600 text-white animate-pulse flex items-center gap-1 shadow-xs">
+                                            <span className="w-1.5 h-1.5 rounded-full bg-white"></span>
+                                            {lang === 'fr' ? 'En cours' : lang === 'es' ? 'En curso' : 'In progress'}
+                                          </span>
+                                        ) : isUpcoming ? (
+                                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-emerald-600 text-white">
+                                            {lang === 'fr' ? 'À venir' : lang === 'es' ? 'Próxima' : 'Upcoming'}
+                                          </span>
+                                        ) : (
+                                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-gray-200 text-gray-700">
+                                            {lang === 'fr' ? 'Passé' : lang === 'es' ? 'Pasada' : 'Past'}
+                                          </span>
+                                        )}
                                         <span className="text-xs font-bold text-gray-900">{dateStr}</span>
 
                                         {/* Note Status Notification Badge */}
@@ -2736,13 +2810,21 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                             <FileCheck size={11} className="text-sky-700" />
                                             <span>{lang === 'fr' ? '✓ Note rédigée' : lang === 'es' ? '✓ Nota redactada' : '✓ Note added'}</span>
                                           </button>
-                                        ) : !isUpcoming ? (
+                                        ) : isPast ? (
                                           <span 
                                             className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium bg-amber-50 text-amber-700 border border-amber-200/80"
-                                            title={lang === 'fr' ? "Aucune note rédigée pour ce rendez-vous" : "Sin nota"}
+                                            title={lang === 'fr' ? "Rendez-vous passé sans note rédigée" : "Sin nota"}
                                           >
                                             <FileText size={10} className="text-amber-500" />
                                             <span>{lang === 'fr' ? 'Note en attente' : lang === 'es' ? 'Nota pendiente' : 'Note pending'}</span>
+                                          </span>
+                                        ) : isOngoing ? (
+                                          <span 
+                                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium bg-teal-50 text-teal-800 border border-teal-200"
+                                            title={lang === 'fr' ? "Consultation actuellement en cours" : "Consulta en curso"}
+                                          >
+                                            <FileText size={10} className="text-teal-600" />
+                                            <span>{lang === 'fr' ? 'En consultation' : lang === 'es' ? 'En consulta' : 'In session'}</span>
                                           </span>
                                         ) : null}
 
@@ -4363,6 +4445,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                         {slotEvents.length > 0 ? (
                                           slotEvents.map(ev => {
                                             const isOther = ev.eventType && ev.eventType !== 'appointment';
+                                            const timeStatus = getAppointmentTimeStatus(ev);
                                             const startStr = new Date(ev.start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
                                             const endStr = new Date(ev.end).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
@@ -4373,12 +4456,22 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                                 className={`p-4 rounded-2xl border shadow-xs transition-all cursor-pointer flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 group/dev ${
                                                   isOther 
                                                     ? 'bg-amber-50/60 border-amber-200/90 hover:border-amber-400 hover:shadow-sm' 
+                                                    : isToday && timeStatus.isOngoing
+                                                    ? 'bg-teal-50/90 border-teal-300 ring-2 ring-teal-400/50 shadow-sm'
+                                                    : isToday && timeStatus.isPast
+                                                    ? 'bg-[#fafafa] border-black/10 hover:bg-white hover:border-gray-300'
                                                     : 'bg-white border-emerald-200/90 hover:border-emerald-400 hover:shadow-sm'
                                                 }`}
                                               >
                                                 <div className="flex items-start gap-3">
                                                   <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 mt-0.5 ${
-                                                    isOther ? 'bg-amber-100 text-amber-900 border border-amber-300/80' : 'bg-emerald-100 text-emerald-800'
+                                                    isOther 
+                                                      ? 'bg-amber-100 text-amber-900 border border-amber-300/80' 
+                                                      : isToday && timeStatus.isOngoing
+                                                      ? 'bg-teal-600 text-white shadow-xs'
+                                                      : isToday && timeStatus.isPast
+                                                      ? 'bg-gray-100 text-gray-500'
+                                                      : 'bg-emerald-100 text-emerald-800'
                                                   }`}>
                                                     {isOther ? <Lock size={18} /> : <CalendarIcon size={18} />}
                                                   </div>
@@ -4387,9 +4480,27 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                                       <h5 className="text-sm font-bold text-gray-900 leading-tight">
                                                         {getEventDisplayName(ev)}
                                                       </h5>
+                                                      {isToday && !isOther && (
+                                                        timeStatus.isOngoing ? (
+                                                          <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-md bg-teal-600 text-white animate-pulse flex items-center gap-1 shadow-xs">
+                                                            <span className="w-1.5 h-1.5 rounded-full bg-white"></span>
+                                                            {lang === 'fr' ? 'En cours' : lang === 'es' ? 'En curso' : 'In progress'}
+                                                          </span>
+                                                        ) : timeStatus.isPast ? (
+                                                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-gray-200 text-gray-700">
+                                                            {lang === 'fr' ? 'Passé' : lang === 'es' ? 'Terminada' : 'Past'}
+                                                          </span>
+                                                        ) : (
+                                                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-emerald-600 text-white">
+                                                            {lang === 'fr' ? 'À venir' : lang === 'es' ? 'Próxima' : 'Upcoming'}
+                                                          </span>
+                                                        )
+                                                      )}
                                                       <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md border ${
                                                         isOther 
                                                           ? 'bg-amber-100 text-amber-900 border-amber-300' 
+                                                          : isToday && timeStatus.isOngoing
+                                                          ? 'bg-teal-100 text-teal-900 border-teal-300'
                                                           : 'bg-emerald-100 text-emerald-800 border-emerald-200'
                                                       }`}>
                                                         {startStr} - {endStr}
