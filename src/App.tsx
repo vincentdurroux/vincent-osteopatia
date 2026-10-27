@@ -869,14 +869,36 @@ export default function App() {
 
   return (
     <LanguageContext.Provider value={{ lang, setLang, t: translations[lang] || translations.fr }}>
-      <div className="min-h-screen">
-        <Navbar onSecretAdmin={() => setIsPasscodeOpen(true)} />
-        <Hero onOpenBooking={() => setIsBookingModalOpen(true)} />
-        <Services />
-        <About />
-        <Location />
-        <Footer />
-        <BookingModal isOpen={isBookingModalOpen} onClose={() => setIsBookingModalOpen(false)} />
+      <div className="min-h-screen bg-[#fdfdfb]">
+        <AnimatePresence mode="wait">
+          {isAdminOpen ? (
+            <motion.div
+              key="admin"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="min-h-screen"
+            >
+              <AdminDashboard onClose={() => setIsAdminOpen(false)} />
+            </motion.div>
+          ) : (
+            <motion.div
+              key="public"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+            >
+              <Navbar onSecretAdmin={() => setIsPasscodeOpen(true)} />
+              <Hero onOpenBooking={() => setIsBookingModalOpen(true)} />
+              <Services />
+              <About />
+              <Location />
+              <Footer />
+              <BookingModal isOpen={isBookingModalOpen} onClose={() => setIsBookingModalOpen(false)} />
+            </motion.div>
+          )}
+        </AnimatePresence>
+
         <PasscodeModal 
           isOpen={isPasscodeOpen} 
           onClose={() => setIsPasscodeOpen(false)} 
@@ -885,21 +907,6 @@ export default function App() {
             setIsAdminOpen(true);
           }} 
         />
-        
-        {/* Full screen Espace Cabinet admin overlay */}
-        <AnimatePresence>
-          {isAdminOpen && (
-            <motion.div
-              initial={{ opacity: 0, y: 30 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: 30 }}
-              transition={{ duration: 0.4, ease: 'easeInOut' }}
-              className="fixed inset-0 z-[120]"
-            >
-              <AdminDashboard onClose={() => setIsAdminOpen(false)} />
-            </motion.div>
-          )}
-        </AnimatePresence>
       </div>
     </LanguageContext.Provider>
   );
