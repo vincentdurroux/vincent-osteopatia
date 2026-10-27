@@ -1322,6 +1322,12 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
 
   // Direct Redirection to Clinical Notes from an Appointment
   const handleGoToNotes = (event: { id?: string; clientId?: string; clientName?: string; summary?: string; start?: string; description?: string; eventType?: EventType }) => {
+    setSelectedDayModalDate(null);
+    setIsEditEventOpen(false);
+    setEditingEvent(null);
+    setIsAddEventOpen(false);
+    setIsAddClientOpen(false);
+
     // 1. Try finding client by explicit clientId
     let targetClient = event.clientId ? clients.find(c => c.id === event.clientId) : undefined;
 
@@ -2650,14 +2656,8 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                       </div>
                     </div>
 
-                    {/* Patient Notes Summary Banner & Quick Add */}
-                    <div className="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-black/5">
-                      <div className="flex items-center gap-2">
-                        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-primary/10 text-primary border border-primary/20">
-                          <FileText size={13} />
-                          <span>{clientNotes.length} {lang === 'fr' ? (clientNotes.length > 1 ? 'notes au dossier' : 'note au dossier') : lang === 'es' ? 'notas en expediente' : 'notes on file'}</span>
-                        </span>
-                      </div>
+                    {/* Patient Quick Add Note Button */}
+                    <div className="flex items-center justify-end pt-3 border-t border-black/5">
                       <button
                         type="button"
                         onClick={() => {
@@ -2776,6 +2776,10 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                       ? 'bg-teal-50/80 border-teal-300 ring-2 ring-teal-400/40 shadow-xs'
                                       : isUpcoming 
                                       ? 'bg-emerald-50/50 border-emerald-200/80 hover:bg-emerald-50' 
+                                      : hasNote
+                                      ? 'bg-sky-50/90 border-sky-200 hover:bg-sky-50 shadow-xs'
+                                      : isPast
+                                      ? 'bg-amber-50/90 border-amber-200 hover:bg-amber-50 shadow-xs'
                                       : 'bg-[#fafafa] border-black/5 hover:bg-white'
                                   }`}
                                 >
