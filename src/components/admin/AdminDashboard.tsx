@@ -143,9 +143,10 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
   const [clients, setClients] = useState<Client[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [events, setEvents] = useState<CalendarEvent[]>([]);
+  const [allNotes, setAllNotes] = useState<ClientNote[]>([]);
   
   // Calendar View Mode: 'month' (Month grid), 'week' (Weekly columns), 'day' (Daily timeline)
-  const [calendarViewMode, setCalendarViewMode] = useState<'month' | 'week' | 'day'>('month');
+  const [calendarViewMode, setCalendarViewMode] = useState<'month' | 'week' | 'day'>('week');
   const [currentCalendarDate, setCurrentCalendarDate] = useState(new Date());
   const [currentTime, setCurrentTime] = useState<Date>(new Date());
   const [isSyncing, setIsSyncing] = useState(false);
@@ -176,8 +177,29 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
     eventId: '',
   });
 
-  // Keep note drafts in sync per patient when switching clients
-  const noteDraftsRef = useRef<Record<string, typeof newNote>>({});
+  // Persistent Clinical Note Draft Storage (saved in localStorage across page leaves/refreshes)
+  const NOTE_DRAFTS_STORAGE_KEY = 'vincent_osteo_note_drafts_v2';
+
+  const getStoredDrafts = (): Record<string, {
+    anamnese: string;
+    treatment: string;
+    category: ClientNote['category'];
+    date: string;
+    motif: string;
+    eventId?: string;
+    updatedAt: number;
+  }> => {
+    if (typeof window === 'undefined') return {};
+    try {
+      const raw = localStorage.getItem(NOTE_DRAFTS_STORAGE_KEY);
+      return raw ? JSON.parse(raw) : {};
+    } catch {
+      return {};
+    }
+  };
+
+  const [draftsMap, setDraftsMap] = useState(getStoredDrafts);
+  const [activeDraftNotice, setActiveDraftNotice] = useState<boolean>(false);
   const prevClientIdRef = useRef<string | null>(null);
   const newNoteRef = useRef(newNote);
 
@@ -186,20 +208,102 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
     newNoteRef.current = newNote;
   }, [newNote]);
 
+  const saveDraftToStorage = (clientId: string, draft: Partial<typeof newNote> | null) => {
+    if (typeof window === 'undefined' || !clientId) return;
+    try {
+      const current = getStoredDrafts();
+      if (!draft || (!draft.anamnese?.trim() && !draft.treatment?.trim() && !draft.motif?.trim())) {
+        delete current[clientId];
+      } else {
+        current[clientId] = {
+          anamnese: draft.anamnese || '',
+          treatment: draft.treatment || '',
+          category: draft.category || 'treatment',
+          date: draft.date || new Date().toISOString().split('T')[0],
+          motif: draft.motif || '',
+          eventId: draft.eventId || '',
+          updatedAt: Date.now(),
+        };
+      }
+      localStorage.setItem(NOTE_DRAFTS_STORAGE_KEY, JSON.stringify(current));
+      setDraftsMap({ ...current });
+    } catch (e) {
+      console.error('Failed to persist draft:', e);
+    }
+  };
+
+  // Immediate field update + automatic draft saving
+  const handleUpdateNoteField = (fields: Partial<typeof newNote>) => {
+    setNewNote(prev => {
+      const updated = { ...prev, ...fields };
+      newNoteRef.current = updated;
+      if (selectedClient?.id) {
+        saveDraftToStorage(selectedClient.id, updated);
+        if (updated.anamnese.trim() || updated.treatment.trim() || updated.motif.trim()) {
+          setActiveDraftNotice(true);
+        }
+      }
+      return updated;
+    });
+  };
+
+  // Discard draft for current client
+  const handleDiscardDraft = () => {
+    if (!selectedClient?.id) return;
+    saveDraftToStorage(selectedClient.id, null);
+    setNewNote({
+      anamnese: '',
+      treatment: '',
+      category: 'treatment',
+      date: new Date().toISOString().split('T')[0],
+      motif: '',
+      eventId: '',
+    });
+    setActiveDraftNotice(false);
+  };
+
+  // Save draft on window beforeunload or pagehide
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      if (selectedClient?.id && (newNoteRef.current.anamnese.trim() || newNoteRef.current.treatment.trim() || newNoteRef.current.motif.trim())) {
+        saveDraftToStorage(selectedClient.id, newNoteRef.current);
+      }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    window.addEventListener('pagehide', handleBeforeUnload);
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+      window.removeEventListener('pagehide', handleBeforeUnload);
+      if (selectedClient?.id && (newNoteRef.current.anamnese.trim() || newNoteRef.current.treatment.trim() || newNoteRef.current.motif.trim())) {
+        saveDraftToStorage(selectedClient.id, newNoteRef.current);
+      }
+    };
+  }, [selectedClient?.id]);
+
+  // Synchronize drafts when client selection changes
   useEffect(() => {
     const prevClientId = prevClientIdRef.current;
     const currentClientId = selectedClient?.id || null;
 
-    // 1. Save the draft of the previous patient
-    if (prevClientId) {
-      noteDraftsRef.current[prevClientId] = { ...newNoteRef.current };
+    // 1. Save the draft of the previous patient if not empty
+    if (prevClientId && (newNoteRef.current.anamnese.trim() || newNoteRef.current.treatment.trim() || newNoteRef.current.motif.trim())) {
+      saveDraftToStorage(prevClientId, newNoteRef.current);
     }
 
-    // 2. Load the draft of the newly selected patient or reset
+    // 2. Load draft of the newly selected patient from localStorage
     if (currentClientId) {
-      const draft = noteDraftsRef.current[currentClientId];
-      if (draft) {
-        setNewNote(draft);
+      const stored = getStoredDrafts();
+      const draft = stored[currentClientId];
+      if (draft && (draft.anamnese || draft.treatment || draft.motif)) {
+        setNewNote({
+          anamnese: draft.anamnese || '',
+          treatment: draft.treatment || '',
+          category: draft.category || 'treatment',
+          date: draft.date || new Date().toISOString().split('T')[0],
+          motif: draft.motif || '',
+          eventId: draft.eventId || '',
+        });
+        setActiveDraftNotice(true);
       } else {
         setNewNote({
           anamnese: '',
@@ -209,6 +313,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
           motif: '',
           eventId: '',
         });
+        setActiveDraftNotice(false);
       }
     } else {
       setNewNote({
@@ -219,6 +324,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
         motif: '',
         eventId: '',
       });
+      setActiveDraftNotice(false);
     }
 
     prevClientIdRef.current = currentClientId;
@@ -450,9 +556,12 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
   const loadData = async () => {
     try {
       setIsSyncing(true);
-      const allClients = await api.getClients();
-      const allInvoices = await api.getInvoices();
-      const allEvents = await api.getLocalEvents();
+      const [allClients, allInvoices, allEvents, fetchedNotes] = await Promise.all([
+        api.getClients(),
+        api.getInvoices(),
+        api.getLocalEvents(),
+        api.getAllNotes(),
+      ]);
       
       const clientMap = new Map(allClients.map(c => [c.id, c.name]));
       const enrichedEvents = allEvents.map(ev => {
@@ -467,6 +576,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
       });
 
       setClients(allClients);
+      setAllNotes(fetchedNotes);
       const enrichedInvoices = allInvoices.map(inv => {
         let name = inv.clientName;
         if ((!name || name.trim() === '') && inv.clientId && clientMap.has(inv.clientId)) {
@@ -677,9 +787,11 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
         eventId: newNote.eventId || undefined,
       });
       setClientNotes(prev => [created, ...prev]);
+      setAllNotes(prev => [created, ...prev]);
       if (selectedClient?.id) {
-        delete noteDraftsRef.current[selectedClient.id];
+        saveDraftToStorage(selectedClient.id, null);
       }
+      setActiveDraftNotice(false);
       setNewNote({
         anamnese: '',
         treatment: '',
@@ -713,6 +825,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
         try {
           await api.deleteClientNote(noteId);
           setClientNotes(prev => prev.filter(n => n.id !== noteId));
+          setAllNotes(prev => prev.filter(n => n.id !== noteId));
         } catch (err) {
           console.error('Failed to delete note:', err);
         }
@@ -1136,6 +1249,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
       });
 
       setClientNotes(prev => prev.map(n => n.id === noteId ? updated : n));
+      setAllNotes(prev => prev.map(n => n.id === noteId ? updated : n));
       setEditingNoteId(null);
       setEditingNoteAnamnese('');
       setEditingNoteTreatment('');
@@ -2403,6 +2517,12 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                   <span>Note</span>
                                 </span>
                               )}
+                              {draftsMap[c.id] && (
+                                <span className="inline-flex items-center gap-0.5 text-amber-800 bg-amber-100/90 border border-amber-300/60 px-1.5 py-0.2 rounded-full text-[9px] font-semibold shrink-0" title={lang === 'fr' ? "Brouillon de consultation en cours" : "Draft in progress"}>
+                                  <StickyNote size={9} className="text-amber-700" />
+                                  <span>{lang === 'fr' ? "Brouillon" : "Draft"}</span>
+                                </span>
+                              )}
                             </p>
                             <div className="flex items-center gap-1.5 text-[10px] text-gray-500 truncate mt-0.5">
                               {c.dni && (
@@ -3031,6 +3151,35 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                         <FileCheck size={16} /> {lang === 'fr' ? "Nouvelle Consultation / Note" : lang === 'es' ? "Nueva Consulta / Nota" : "New Consultation / Note"}
                       </h4>
 
+                      {/* Draft auto-save indicator & discard button */}
+                      {activeDraftNotice && (newNote.anamnese.trim() || newNote.treatment.trim() || newNote.motif.trim()) && (
+                        <div className="mb-4 p-3 rounded-2xl bg-amber-50/90 border border-amber-200/90 flex items-center justify-between gap-3 text-xs text-amber-900 shadow-2xs">
+                          <div className="flex items-center gap-2">
+                            <StickyNote size={15} className="text-amber-700 shrink-0" />
+                            <div>
+                              <p className="font-bold text-amber-950">
+                                {lang === 'fr' ? "Brouillon automatique sauvegardé" : lang === 'es' ? "Borrador guardado automáticamente" : "Auto-saved draft preserved"}
+                              </p>
+                              <p className="text-[10px] text-amber-800">
+                                {lang === 'fr' 
+                                  ? "Votre saisie est conservée si vous quittez la page ou fermez votre navigateur." 
+                                  : lang === 'es'
+                                  ? "Su texto se conserva si sale de la página o cierra el navegador."
+                                  : "Your draft is kept safe if you navigate away or close your browser."}
+                              </p>
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={handleDiscardDraft}
+                            className="text-[10px] font-bold text-rose-700 hover:text-rose-900 hover:bg-rose-100/70 px-2 py-1 rounded-lg transition-colors cursor-pointer shrink-0"
+                            title={lang === 'fr' ? "Effacer ce brouillon et réinitialiser" : "Discard"}
+                          >
+                            {lang === 'fr' ? "Effacer le brouillon" : lang === 'es' ? "Borrar borrador" : "Discard"}
+                          </button>
+                        </div>
+                      )}
+
                       {newNote.eventId && (
                         <div className="mb-4 p-2.5 rounded-xl bg-sky-50 border border-sky-200/80 flex items-center justify-between gap-2 text-xs text-sky-900">
                           <div className="flex items-center gap-1.5 truncate">
@@ -3041,7 +3190,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                           </div>
                           <button
                             type="button"
-                            onClick={() => setNewNote(prev => ({ ...prev, eventId: '' }))}
+                            onClick={() => handleUpdateNoteField({ eventId: '' })}
                             className="text-sky-600 hover:text-sky-900 p-0.5 rounded hover:bg-sky-100 transition-colors cursor-pointer"
                             title={lang === 'fr' ? "Dissocier du rendez-vous" : "Desvincular"}
                           >
@@ -3058,7 +3207,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                             </label>
                             <select
                               value={newNote.category}
-                              onChange={(e) => setNewNote(prev => ({ ...prev, category: e.target.value as ClientNote['category'] }))}
+                              onChange={(e) => handleUpdateNoteField({ category: e.target.value as ClientNote['category'] })}
                               className="w-full p-2 bg-[#f4f4ec] rounded-xl border border-black/5 text-xs focus:outline-none focus:ring-1 focus:ring-primary focus:bg-white transition-all font-medium"
                             >
                               <option value="treatment">{lang === 'fr' ? "Traitement / Ostéopathie" : lang === 'es' ? "Tratamiento / Osteopatía" : "Treatment / Osteopathy"}</option>
@@ -3076,7 +3225,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                               type="date"
                               required
                               value={newNote.date}
-                              onChange={(e) => setNewNote(prev => ({ ...prev, date: e.target.value }))}
+                              onChange={(e) => handleUpdateNoteField({ date: e.target.value })}
                               className="w-full p-2 bg-[#f4f4ec] rounded-xl border border-black/5 text-xs focus:outline-none focus:ring-1 focus:ring-primary focus:bg-white transition-all font-medium"
                             />
                           </div>
@@ -3089,7 +3238,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                           <input
                             type="text"
                             value={newNote.motif}
-                            onChange={(e) => setNewNote(prev => ({ ...prev, motif: e.target.value }))}
+                            onChange={(e) => handleUpdateNoteField({ motif: e.target.value })}
                             placeholder={lang === 'fr' ? "ex: Lombalgie, Note de suivi, Bilan..." : lang === 'es' ? "ej: Cervicalgia, Nota de seguimiento..." : "e.g., Back pain, Follow-up note..."}
                             className="w-full p-2.5 bg-[#f4f4ec] rounded-xl border border-black/5 text-xs focus:outline-none focus:ring-1 focus:ring-primary focus:bg-white transition-all"
                           />
@@ -3101,7 +3250,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                           </label>
                           <textarea
                             value={newNote.anamnese}
-                            onChange={(e) => setNewNote(prev => ({ ...prev, anamnese: e.target.value }))}
+                            onChange={(e) => handleUpdateNoteField({ anamnese: e.target.value })}
                             rows={4}
                             placeholder={lang === 'fr' ? "Saisissez les symptômes, observations ou notes sur le patient..." : lang === 'es' ? "Escriba los síntomas, observaciones o notas..." : "Enter symptoms, observations or notes..."}
                             className="w-full p-3 bg-[#f4f4ec] rounded-2xl border border-black/5 text-xs focus:outline-none focus:ring-1 focus:ring-primary focus:bg-white transition-all resize-none leading-relaxed"
@@ -3114,7 +3263,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                           </label>
                           <textarea
                             value={newNote.treatment}
-                            onChange={(e) => setNewNote(prev => ({ ...prev, treatment: e.target.value }))}
+                            onChange={(e) => handleUpdateNoteField({ treatment: e.target.value })}
                             rows={3}
                             placeholder={lang === 'fr' ? "ex: Libération sacrée, mobilisations, étirements..." : lang === 'es' ? "ej: Liberación sacra, movilizaciones..." : "e.g., Sacral release, mobilizations..."}
                             className="w-full p-3 bg-[#f4f4ec] rounded-2xl border border-black/5 text-xs focus:outline-none focus:ring-1 focus:ring-primary focus:bg-white transition-all resize-none leading-relaxed"
@@ -3815,45 +3964,64 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
         {activeTab === 'calendar' && (
           <div className="space-y-6 flex-1">
             
-            {/* Header / Config Bar */}
-            <div className="bg-white p-6 rounded-3xl border border-black/5 shadow-sm flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
+            {/* Jane.app Style Header Bar */}
+            <div className="bg-white p-5 sm:p-6 rounded-3xl border border-slate-200/90 shadow-sm flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
               <div>
                 <div className="flex items-center gap-3">
-                  <h3 className="text-xl font-bold font-serif text-primary flex items-center gap-2">
-                    <CalendarIcon className="text-primary" size={22} />
-                    {lang === 'fr' ? 'Agenda du Cabinet' : lang === 'es' ? 'Agenda de la Clínica' : 'Clinic Calendar'}
-                  </h3>
+                  <div className="w-10 h-10 rounded-2xl bg-teal-50 text-[#0e9f8e] flex items-center justify-center border border-teal-100 shadow-2xs">
+                    <CalendarIcon size={22} />
+                  </div>
+                  <div>
+                    <h3 className="text-xl font-bold font-serif text-slate-900 flex items-center gap-2">
+                      {lang === 'fr' ? 'Agenda du Cabinet' : lang === 'es' ? 'Agenda de la Clínica' : 'Clinic Schedule'}
+                      <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-teal-50 text-[#0e9f8e] border border-teal-200/80">
+                        Jane.app
+                      </span>
+                    </h3>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      {lang === 'fr' 
+                        ? "Planning des consultations · Statuts de notes et facturation en temps réel" 
+                        : lang === 'es' 
+                          ? "Planificación de consultas · Estados de notas y facturación en tiempo real" 
+                          : "Appointment schedule · Real-time notes and billing status"}
+                    </p>
+                  </div>
                 </div>
-                <p className="text-xs text-gray-500 mt-1">
-                  {lang === 'fr' 
-                    ? "Gérez l'ensemble de vos consultations et créneaux directement depuis votre application." 
-                    : lang === 'es' 
-                      ? "Gestione todas sus consultas y horarios directamente desde su aplicación." 
-                      : "Manage all your appointments and time slots directly in your application."}
-                </p>
               </div>
 
               <div className="flex flex-wrap items-center gap-2.5 w-full sm:w-auto justify-end">
+                {/* Live Real-time Status Badge */}
+                <div className="hidden sm:inline-flex items-center gap-2 px-3 py-2 bg-slate-50 border border-slate-200 rounded-2xl text-xs text-slate-700 shadow-2xs">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                  <span className="font-semibold font-mono">
+                    {currentTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </span>
+                  <span className="text-slate-400">·</span>
+                  <span className="text-[11px] text-slate-600">
+                    {lang === 'fr' ? 'En direct' : 'Live'}
+                  </span>
+                </div>
+
                 <button 
                   onClick={loadData}
                   disabled={isSyncing}
-                  className="flex items-center gap-1.5 px-3 py-2 bg-white border border-gray-200 hover:bg-gray-50 rounded-2xl transition-all text-xs font-bold text-gray-700 disabled:opacity-50 shadow-sm"
-                  title={lang === 'fr' ? "Actualiser l'agenda" : "Refresh calendar"}
+                  className="flex items-center gap-1.5 px-3 py-2 bg-white border border-slate-200 hover:bg-slate-50 rounded-2xl transition-all text-xs font-bold text-slate-700 disabled:opacity-50 shadow-2xs cursor-pointer"
+                  title={lang === 'fr' ? "Actualiser l'agenda" : "Refresh"}
                 >
-                  <RefreshCw size={14} className={isSyncing ? "animate-spin text-primary" : ""} />
+                  <RefreshCw size={14} className={isSyncing ? "animate-spin text-[#0e9f8e]" : ""} />
                   <span>{lang === 'fr' ? "Actualiser" : "Refresh"}</span>
                 </button>
 
                 <button
                   onClick={() => setIsAddEventOpen(true)}
-                  className="flex items-center gap-2 px-4 py-2.5 bg-primary text-white rounded-2xl text-xs font-bold uppercase tracking-wider hover:bg-primary/95 transition-all shadow-md shadow-primary/10"
+                  className="flex items-center gap-2 px-4 py-2.5 bg-[#0e9f8e] hover:bg-[#0c8a7b] text-white rounded-2xl text-xs font-bold uppercase tracking-wider transition-all shadow-md shadow-[#0e9f8e]/20 cursor-pointer"
                 >
                   <Plus size={16} /> {lang === 'fr' ? "Nouveau RDV" : lang === 'es' ? "Nueva Cita" : "New Appointment"}
                 </button>
               </div>
             </div>
 
-            {/* SHARED CALENDAR LOGIC & RENDER */}
+            {/* SHARED JANE.APP CALENDAR LOGIC & RENDER */}
             {(() => {
               const todayStr = (() => {
                 const now = new Date();
@@ -3949,6 +4117,26 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                 }).sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
               };
 
+              const hasAppointmentNote = (ev: CalendarEvent) => {
+                const evDateStr = ev.start ? ev.start.split('T')[0] : '';
+                return allNotes.some(n => 
+                  (n.eventId && n.eventId === ev.id) || 
+                  (ev.clientId && n.clientId === ev.clientId && n.date.split('T')[0] === evDateStr)
+                );
+              };
+
+              const getAppointmentInvoice = (ev: CalendarEvent) => {
+                const evDateStr = ev.start ? ev.start.split('T')[0] : '';
+                return invoices.find(i => 
+                  (i.eventId && i.eventId === ev.id) || 
+                  (i.noteId && i.noteId === ev.id) || 
+                  (ev.clientId && i.clientId === ev.clientId && (
+                    i.date.split('T')[0] === evDateStr || 
+                    (i.paymentDate && i.paymentDate.split('T')[0] === evDateStr)
+                  ))
+                );
+              };
+
               const handleQuickAddEvent = (dateStr: string, timeStr?: string) => {
                 const startTime = timeStr || '10:00';
                 let endTime = '11:00';
@@ -3968,20 +4156,175 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                 setIsAddEventOpen(true);
               };
 
+              // Signature Jane.app Appointment Card
+              const renderJaneCard = (ev: CalendarEvent, isCompact = false) => {
+                const isOther = ev.eventType && ev.eventType !== 'appointment';
+                const timeStatus = getAppointmentTimeStatus(ev);
+                const startStr = new Date(ev.start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                const endStr = new Date(ev.end).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                const durationMinutes = Math.round((new Date(ev.end).getTime() - new Date(ev.start).getTime()) / (60 * 1000)) || 55;
+                const hasNote = !isOther && hasAppointmentNote(ev);
+                const inv = !isOther ? getAppointmentInvoice(ev) : undefined;
+                const isPaid = inv && inv.status === 'paid';
+                const isToday = ev.start.split('T')[0] === todayStr;
+
+                return (
+                  <div
+                    key={ev.id}
+                    onClick={() => openEditEventModal(ev)}
+                    className={`rounded-xl border transition-all cursor-pointer p-3 relative group/card border-l-4 shadow-[0_1px_3px_rgba(0,0,0,0.06)] hover:shadow-md ${
+                      isOther 
+                        ? 'bg-amber-50/70 border-amber-200/90 border-l-amber-500 hover:border-amber-400' 
+                        : isToday && timeStatus.isOngoing
+                        ? 'bg-teal-50/90 border-teal-300/90 border-l-[#0e9f8e] ring-2 ring-teal-400/40 shadow-sm'
+                        : hasNote
+                        ? 'bg-sky-50/60 border-sky-200/80 border-l-[#0e9f8e] hover:border-[#0e9f8e]'
+                        : 'bg-white border-slate-200/90 border-l-[#0e9f8e] hover:border-[#0e9f8e]'
+                    }`}
+                  >
+                    {/* Top Row: Patient Name & Actions */}
+                    <div className="flex items-start justify-between gap-1.5 mb-1">
+                      <h5 className={`font-bold text-xs sm:text-[13px] leading-tight truncate ${isOther ? 'text-amber-950' : 'text-slate-900'}`}>
+                        {getEventDisplayName(ev)}
+                      </h5>
+                      
+                      {/* Hover Quick Action Buttons */}
+                      <div className="opacity-0 group-hover/card:opacity-100 transition-opacity flex items-center gap-1 shrink-0">
+                        {!isOther && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleGoToNotes(ev);
+                            }}
+                            className="p-1 text-[#0e9f8e] hover:bg-[#0e9f8e]/10 rounded transition-colors"
+                            title={lang === 'fr' ? "Fiche patient & Notes" : "Patient File"}
+                          >
+                            <FileCheck size={12} />
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            openEditEventModal(ev);
+                          }}
+                          className="p-1 text-slate-500 hover:bg-slate-100 rounded transition-colors"
+                          title={lang === 'fr' ? "Modifier" : "Edit"}
+                        >
+                          <Pencil size={11} />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDeleteEvent(ev.id);
+                          }}
+                          className="p-1 text-rose-500 hover:bg-rose-50 rounded transition-colors"
+                          title={lang === 'fr' ? "Supprimer" : "Delete"}
+                        >
+                          <Trash2 size={11} />
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Sub row: Time & Duration */}
+                    <div className="flex items-center gap-1.5 text-[11px] text-slate-500 mb-1.5">
+                      <span className="font-semibold text-slate-700 font-mono">
+                        {startStr} - {endStr}
+                      </span>
+                      <span>·</span>
+                      <span>{durationMinutes} min</span>
+                    </div>
+
+                    {/* Treatment title */}
+                    {!isOther ? (
+                      <p className="text-[11px] text-slate-600 truncate mb-2 font-medium">
+                        {ev.summary && ev.summary !== getEventDisplayName(ev) ? ev.summary : "Sesión de osteopatía"}
+                      </p>
+                    ) : (
+                      <span className="inline-block text-[10px] font-semibold text-amber-900 bg-amber-100/90 border border-amber-300/70 px-1.5 py-0.2 rounded mb-2">
+                        {getEventTypeLabel(ev.eventType)}
+                      </span>
+                    )}
+
+                    {/* Bottom Jane.app Status Pills */}
+                    {!isOther && (
+                      <div className="flex items-center gap-1.5 flex-wrap pt-1.5 border-t border-slate-100">
+                        {/* Clinical Note badge */}
+                        {hasNote ? (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-teal-800 bg-teal-50 border border-teal-200/90 px-1.5 py-0.5 rounded-md" title="Note clinique au dossier rédigée">
+                            <CheckCircle2 size={11} className="text-[#0e9f8e]" />
+                            <span>{lang === 'fr' ? 'Note rédigée' : lang === 'es' ? 'Nota hecha' : 'Note done'}</span>
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-amber-800 bg-amber-50 border border-amber-200/80 px-1.5 py-0.5 rounded-md" title="En attente de rédaction de note clinique">
+                            <Clock size={11} className="text-amber-600" />
+                            <span>{lang === 'fr' ? 'Attente note' : lang === 'es' ? 'Nota pend.' : 'Note pend.'}</span>
+                          </span>
+                        )}
+
+                        {/* Payment status badge */}
+                        {isPaid ? (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-800 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded-md" title="Paiement enregistré">
+                            <CheckCircle2 size={11} className="text-emerald-600" />
+                            <span>{lang === 'fr' ? `Payé (${inv.amount} €)` : `Pagado (${inv.amount} €)`}</span>
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-medium text-slate-500 bg-slate-100 border border-slate-200 px-1.5 py-0.5 rounded-md" title="Paiement non encaissé">
+                            <CreditCard size={11} className="text-slate-400" />
+                            <span>{lang === 'fr' ? 'Non réglé' : lang === 'es' ? 'No cobrado' : 'Unpaid'}</span>
+                          </span>
+                        )}
+
+                        {/* Live appointment status (if today) */}
+                        {isToday && (
+                          timeStatus.isOngoing ? (
+                            <span className="text-[10px] font-extrabold px-1.5 py-0.5 rounded-md bg-[#0e9f8e] text-white animate-pulse inline-flex items-center gap-1 shadow-xs ml-auto">
+                              <span className="w-1.5 h-1.5 rounded-full bg-white"></span>
+                              {lang === 'fr' ? 'En cours' : 'Live'}
+                            </span>
+                          ) : timeStatus.isPast ? (
+                            <span className="text-[10px] font-semibold text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded-md ml-auto">
+                              {lang === 'fr' ? 'Passé' : 'Past'}
+                            </span>
+                          ) : null
+                        )}
+                      </div>
+                    )}
+
+                    {/* Direct Fiche Jump Button */}
+                    {!isOther && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleGoToNotes(ev);
+                        }}
+                        className="mt-2 w-full py-1 px-2 rounded-lg text-[10px] font-bold text-[#0e9f8e] hover:text-white hover:bg-[#0e9f8e] bg-[#0e9f8e]/5 border border-[#0e9f8e]/20 transition-all flex items-center justify-center gap-1 cursor-pointer"
+                      >
+                        <FileText size={11} />
+                        <span>{lang === 'fr' ? "Fiche patient & Notes" : "Patient File & Notes"}</span>
+                      </button>
+                    )}
+                  </div>
+                );
+              };
+
               return (
-                <div className="bg-white p-6 rounded-3xl border border-black/5 shadow-sm space-y-6">
+                <div className="bg-white p-5 sm:p-6 rounded-3xl border border-slate-200/90 shadow-sm space-y-6">
                   
-                  {/* Navigator Header */}
-                  <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pb-4 border-b border-black/5">
+                  {/* Navigator Header (Jane.app style) */}
+                  <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pb-4 border-b border-slate-100">
                     <div className="flex items-center gap-3 sm:gap-4 flex-wrap">
-                      <h4 className="text-xl font-bold font-serif text-gray-800 capitalize">
+                      <h4 className="text-lg sm:text-xl font-bold font-serif text-slate-900 capitalize">
                         {getCalendarHeaderTitle()}
                       </h4>
                       
-                      <div className="flex items-center gap-1 bg-[#f4f4ec] p-1 rounded-xl">
+                      <div className="flex items-center gap-1 bg-slate-100/90 p-1 rounded-xl border border-slate-200/80">
                         <button
                           onClick={handleCalendarPrev}
-                          className="p-1.5 hover:bg-white rounded-lg text-gray-700 transition-all"
+                          className="p-1.5 hover:bg-white rounded-lg text-slate-700 transition-all cursor-pointer"
                           title={lang === 'fr' ? "Précédent" : "Previous"}
                         >
                           <ChevronLeft size={16} />
@@ -3989,28 +4332,28 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                         
                         <button
                           onClick={() => setCurrentCalendarDate(new Date())}
-                          className="px-2.5 py-1 text-xs font-bold text-gray-700 hover:bg-white rounded-lg transition-all"
+                          className="px-3 py-1 text-xs font-bold text-slate-700 hover:bg-white rounded-lg transition-all shadow-2xs cursor-pointer"
                         >
                           {lang === 'fr' ? "Aujourd'hui" : lang === 'es' ? "Hoy" : "Today"}
                         </button>
 
                         <button
                           onClick={handleCalendarNext}
-                          className="p-1.5 hover:bg-white rounded-lg text-gray-700 transition-all"
+                          className="p-1.5 hover:bg-white rounded-lg text-slate-700 transition-all cursor-pointer"
                           title={lang === 'fr' ? "Suivant" : "Next"}
                         >
                           <ChevronRight size={16} />
                         </button>
                       </div>
 
-                      {/* View Switcher: Month / Week / Day */}
-                      <div className="flex items-center bg-[#f4f4ec] p-1 rounded-xl border border-black/5">
+                      {/* View Switcher Segmented Control (Jane.app style) */}
+                      <div className="flex items-center bg-slate-100/90 p-1 rounded-xl border border-slate-200/80">
                         <button
                           onClick={() => setCalendarViewMode('month')}
-                          className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold transition-all ${
+                          className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
                             calendarViewMode === 'month' 
-                              ? 'bg-white text-primary shadow-xs' 
-                              : 'text-gray-600 hover:text-gray-900'
+                              ? 'bg-white text-[#0e9f8e] shadow-xs' 
+                              : 'text-slate-600 hover:text-slate-900'
                           }`}
                         >
                           <CalendarIcon size={14} />
@@ -4018,10 +4361,10 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                         </button>
                         <button
                           onClick={() => setCalendarViewMode('week')}
-                          className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold transition-all ${
+                          className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
                             calendarViewMode === 'week' 
-                              ? 'bg-white text-primary shadow-xs' 
-                              : 'text-gray-600 hover:text-gray-900'
+                              ? 'bg-white text-[#0e9f8e] shadow-xs' 
+                              : 'text-slate-600 hover:text-slate-900'
                           }`}
                         >
                           <Columns3 size={14} />
@@ -4029,10 +4372,10 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                         </button>
                         <button
                           onClick={() => setCalendarViewMode('day')}
-                          className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold transition-all ${
+                          className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
                             calendarViewMode === 'day' 
-                              ? 'bg-white text-primary shadow-xs' 
-                              : 'text-gray-600 hover:text-gray-900'
+                              ? 'bg-white text-[#0e9f8e] shadow-xs' 
+                              : 'text-slate-600 hover:text-slate-900'
                           }`}
                         >
                           <Clock size={14} />
@@ -4041,24 +4384,297 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-3 text-xs text-gray-500">
-                      <span className="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
+                    <div className="flex items-center gap-3 text-xs text-slate-500">
+                      <span className="w-2.5 h-2.5 rounded-full bg-[#0e9f8e]"></span>
                       <span>
                         {calendarViewMode === 'month' 
-                          ? (lang === 'fr' ? "Cliquez sur un jour pour voir les détails, ou sur + pour créer un RDV" : "Click on a day to see details or + to add an appointment")
+                          ? (lang === 'fr' ? "Cliquez sur une date pour ouvrir la vue Jane.app de la journée" : "Click on a day to see Jane.app schedule")
                           : calendarViewMode === 'week'
-                          ? (lang === 'fr' ? "Cliquez sur un créneau pour ajouter ou modifier un RDV" : "Click on a slot to add or edit an appointment")
-                          : (lang === 'fr' ? "Planning détaillé de la journée avec accès direct aux notes" : "Detailed daily schedule with direct note access")}
+                          ? (lang === 'fr' ? "Cliquez sur un créneau ou un rendez-vous pour gérer les notes" : "Click on a slot or appointment to manage notes")
+                          : (lang === 'fr' ? "Planning journalier avec accès direct aux dossiers médicaux" : "Daily schedule with direct patient file access")}
                       </span>
                     </div>
                   </div>
 
-                  {/* VIEW 1: MONTH VIEW */}
+                  {/* VIEW 1: JANE.APP WEEK VIEW (Default & Primary) */}
+                  {calendarViewMode === 'week' && (
+                    <div className="w-full overflow-x-auto">
+                      <div className="min-w-[920px]">
+                        <div className="grid grid-cols-7 gap-3">
+                          {getWeekDates(currentCalendarDate).map((dayItem, dayIdx) => {
+                            const dayEvents = getEventsForDate(dayItem.dateString);
+
+                            return (
+                              <div
+                                key={dayIdx}
+                                className={`flex flex-col rounded-2xl border transition-all ${
+                                  dayItem.isToday
+                                    ? 'bg-teal-50/15 border-teal-300/80 shadow-xs ring-1 ring-teal-200/60'
+                                    : 'bg-[#fafafa] border-slate-200/80 hover:border-slate-300'
+                                }`}
+                              >
+                                {/* Jane.app Week Day Column Header */}
+                                <div className="p-3 border-b border-slate-200/70 flex items-center justify-between gap-1">
+                                  <div>
+                                    <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">
+                                      {dayItem.dayName}
+                                    </span>
+                                    <div className="flex items-center gap-1.5 mt-1">
+                                      <button
+                                        onClick={() => {
+                                          setCurrentCalendarDate(dayItem.date);
+                                          setCalendarViewMode('day');
+                                        }}
+                                        className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold transition-all hover:scale-105 cursor-pointer ${
+                                          dayItem.isToday
+                                            ? 'bg-[#0e9f8e] text-white shadow-xs ring-2 ring-[#0e9f8e]/30'
+                                            : 'text-slate-800 hover:bg-slate-200/60'
+                                        }`}
+                                        title={lang === 'fr' ? "Basculer sur la vue Jour" : "Switch to Day View"}
+                                      >
+                                        {dayItem.dayNumber}
+                                      </button>
+                                      {(() => {
+                                        const dayApptsCount = dayEvents.filter(ev => !ev.eventType || ev.eventType === 'appointment').length;
+                                        return dayApptsCount > 0 ? (
+                                          <span className="text-[10px] font-bold text-[#0e9f8e] bg-teal-50 border border-teal-200/80 px-1.5 py-0.2 rounded-full">
+                                            {dayApptsCount}
+                                          </span>
+                                        ) : null;
+                                      })()}
+                                    </div>
+                                  </div>
+
+                                  <button
+                                    onClick={() => handleQuickAddEvent(dayItem.dateString)}
+                                    className="p-1.5 rounded-xl text-[#0e9f8e] hover:bg-teal-50 transition-colors cursor-pointer"
+                                    title={lang === 'fr' ? `Ajouter un RDV le ${dayItem.dayName} ${dayItem.dayNumber}` : "Add appointment"}
+                                  >
+                                    <Plus size={15} />
+                                  </button>
+                                </div>
+
+                                {/* Jane.app Week Day Column Content */}
+                                <div className="p-2 space-y-2.5 flex-1 min-h-[380px] flex flex-col justify-between">
+                                  <div className="space-y-2.5">
+                                    {dayEvents.map((ev) => renderJaneCard(ev))}
+
+                                    {dayEvents.length === 0 && (
+                                      <div className="py-12 text-center">
+                                        <p className="text-[11px] text-slate-400 font-medium">
+                                          {lang === 'fr' ? "Aucun RDV" : lang === 'es' ? "Sin citas" : "No appointments"}
+                                        </p>
+                                      </div>
+                                    )}
+                                  </div>
+
+                                  {/* Quick add footer button */}
+                                  <button
+                                    onClick={() => handleQuickAddEvent(dayItem.dateString)}
+                                    className="w-full py-2 px-2 mt-2 rounded-xl text-[11px] font-bold text-[#0e9f8e] hover:text-white hover:bg-[#0e9f8e] bg-teal-50/50 border border-dashed border-[#0e9f8e]/30 transition-all flex items-center justify-center gap-1 cursor-pointer"
+                                  >
+                                    <Plus size={12} />
+                                    <span>{lang === 'fr' ? "Ajouter un créneau" : lang === 'es' ? "Añadir horario" : "Add slot"}</span>
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* VIEW 2: JANE.APP DAY VIEW */}
+                  {calendarViewMode === 'day' && (
+                    <div className="space-y-6">
+                      {(() => {
+                        const currentDateStr = (() => {
+                          const y = currentCalendarDate.getFullYear();
+                          const m = String(currentCalendarDate.getMonth() + 1).padStart(2, '0');
+                          const d = String(currentCalendarDate.getDate()).padStart(2, '0');
+                          return `${y}-${m}-${d}`;
+                        })();
+
+                        const dayEvents = getEventsForDate(currentDateStr);
+                        const isToday = currentDateStr === todayStr;
+
+                        const hours = [
+                          '08:00', '09:00', '10:00', '11:00', '12:00', 
+                          '13:00', '14:00', '15:00', '16:00', '17:00', 
+                          '18:00', '19:00', '20:00'
+                        ];
+
+                        return (
+                          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                            {/* Left 2 Cols: Jane.app Timeline Schedule */}
+                            <div className="lg:col-span-2 space-y-4">
+                              {/* Day Summary Header */}
+                              <div className="p-4 rounded-2xl bg-slate-50/80 border border-slate-200/80 flex flex-wrap items-center justify-between gap-3">
+                                <div>
+                                  <div className="flex items-center gap-2">
+                                    <h4 className="text-sm font-bold text-slate-900 capitalize">
+                                      {currentCalendarDate.toLocaleDateString(lang === 'fr' ? 'fr-FR' : lang === 'es' ? 'es-ES' : 'en-US', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
+                                    </h4>
+                                    {isToday && (
+                                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-[#0e9f8e] text-white">
+                                        {lang === 'fr' ? "Aujourd'hui" : lang === 'es' ? "Hoy" : "Today"}
+                                      </span>
+                                    )}
+                                  </div>
+                                  <p className="text-xs text-slate-500 mt-0.5">
+                                    {(() => {
+                                      const dayApptsCount = dayEvents.filter(ev => !ev.eventType || ev.eventType === 'appointment').length;
+                                      return `${dayApptsCount} ${dayApptsCount <= 1 ? (lang === 'fr' ? 'consultation prévue' : 'appointment scheduled') : (lang === 'fr' ? 'consultations prévues' : 'appointments scheduled')}`;
+                                    })()}
+                                  </p>
+                                </div>
+
+                                <button
+                                  onClick={() => handleQuickAddEvent(currentDateStr)}
+                                  className="flex items-center gap-1.5 px-3 py-1.5 bg-[#0e9f8e] hover:bg-[#0c8a7b] text-white rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer"
+                                >
+                                  <Plus size={14} />
+                                  <span>{lang === 'fr' ? "Ajouter un rendez-vous ce jour" : "Add appointment today"}</span>
+                                </button>
+                              </div>
+
+                              {/* Hourly Schedule Table with Jane.app Cards */}
+                              <div className="space-y-2.5 relative">
+                                {hours.map((hourStr, hIdx) => {
+                                  const hourNum = parseInt(hourStr.split(':')[0], 10);
+                                  
+                                  // Find events that start in this hour slot
+                                  const slotEvents = dayEvents.filter(ev => {
+                                    try {
+                                      const evDate = new Date(ev.start);
+                                      return evDate.getHours() === hourNum;
+                                    } catch (e) {
+                                      return false;
+                                    }
+                                  });
+
+                                  return (
+                                    <div key={hIdx} className="flex items-start gap-3 py-1">
+                                      {/* Hour Label */}
+                                      <div className="w-14 shrink-0 text-right pt-2.5">
+                                        <span className="text-xs font-bold text-slate-500 font-mono">{hourStr}</span>
+                                      </div>
+
+                                      {/* Slot Content */}
+                                      <div className="flex-1 space-y-2.5">
+                                        {slotEvents.length > 0 ? (
+                                          slotEvents.map(ev => renderJaneCard(ev))
+                                        ) : (
+                                          <div
+                                            onClick={() => handleQuickAddEvent(currentDateStr, hourStr)}
+                                            className="h-10 rounded-xl border border-dashed border-slate-200 hover:border-[#0e9f8e]/50 hover:bg-teal-50/20 flex items-center justify-between px-3 cursor-pointer group/slot transition-all"
+                                          >
+                                            <span className="text-[11px] text-slate-400 group-hover/slot:text-[#0e9f8e] transition-colors flex items-center gap-1 font-medium">
+                                              <Plus size={12} className="opacity-0 group-hover/slot:opacity-100 transition-opacity" />
+                                              <span>{lang === 'fr' ? `Créneau libre (${hourStr})` : `Free slot (${hourStr})`}</span>
+                                            </span>
+                                            <span className="text-[10px] font-bold text-[#0e9f8e] opacity-0 group-hover/slot:opacity-100 transition-opacity">
+                                              {lang === 'fr' ? "+ Réserver" : "+ Book"}
+                                            </span>
+                                          </div>
+                                        )}
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+
+                            {/* Right 1 Col: Day Insights & Quick Actions */}
+                            <div className="space-y-6">
+                              {/* Quick summary of today's patients */}
+                              <div className="bg-slate-50/80 p-5 rounded-2xl border border-slate-200/80 space-y-3">
+                                <h4 className="text-xs font-bold uppercase tracking-wider text-[#0e9f8e] flex items-center gap-2">
+                                  <Users size={14} /> {lang === 'fr' ? "Patients du jour" : "Patients of the day"}
+                                </h4>
+                                
+                                <div className="space-y-2">
+                                  {dayEvents.filter(ev => !ev.eventType || ev.eventType === 'appointment').map(ev => {
+                                    const hasNote = hasAppointmentNote(ev);
+                                    const inv = getAppointmentInvoice(ev);
+                                    const isPaid = inv && inv.status === 'paid';
+
+                                    return (
+                                      <div 
+                                        key={ev.id}
+                                        className="p-3 rounded-xl bg-white border border-slate-200/80 flex items-center justify-between gap-2 shadow-2xs"
+                                      >
+                                        <div className="min-w-0">
+                                          <h5 className="text-xs font-bold text-slate-900 leading-tight truncate">
+                                            {getEventDisplayName(ev)}
+                                          </h5>
+                                          <div className="flex items-center gap-1.5 text-[10px] text-slate-500 mt-1">
+                                            <span>{new Date(ev.start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                                            <span>·</span>
+                                            {hasNote ? (
+                                              <span className="text-teal-700 font-semibold">{lang === 'fr' ? 'Note ✓' : 'Note ✓'}</span>
+                                            ) : (
+                                              <span className="text-amber-700 font-semibold">{lang === 'fr' ? 'Note en attente' : 'Note pending'}</span>
+                                            )}
+                                          </div>
+                                        </div>
+                                        <button
+                                          onClick={() => handleGoToNotes(ev)}
+                                          className="px-2.5 py-1.5 bg-[#0e9f8e]/10 hover:bg-[#0e9f8e] text-[#0e9f8e] hover:text-white rounded-lg text-[10px] font-bold transition-all cursor-pointer shrink-0"
+                                          title={lang === 'fr' ? "Ouvrir la fiche patient & notes" : "Patient File"}
+                                        >
+                                          {lang === 'fr' ? "Fiche" : "File"}
+                                        </button>
+                                      </div>
+                                    );
+                                  })}
+
+                                  {dayEvents.filter(ev => !ev.eventType || ev.eventType === 'appointment').length === 0 && (
+                                    <p className="text-xs text-slate-400 italic py-2">
+                                      {lang === 'fr' ? "Aucun patient prévu pour cette journée." : "No patients scheduled for this day."}
+                                    </p>
+                                  )}
+                                </div>
+                              </div>
+
+                              {/* Consultation Hours Summary */}
+                              <div className="bg-slate-50/80 p-5 rounded-2xl border border-slate-200/80 space-y-4">
+                                <div>
+                                  <h4 className="text-xs font-bold uppercase tracking-wider text-[#0e9f8e] mb-1">
+                                    {lang === 'fr' ? "Horaires du Cabinet" : lang === 'es' ? "Horarios de consulta" : "Consultation hours"}
+                                  </h4>
+                                  <p className="text-[11px] text-slate-500">
+                                    {lang === 'fr' ? "Plages d'ouverture habituelles du cabinet." : "Standard active clinic hours."}
+                                  </p>
+                                </div>
+
+                                <div className="space-y-2.5">
+                                  {[
+                                    { day: lang === 'fr' ? 'Lundi - Vendredi' : lang === 'es' ? 'Lunes - Viernes' : 'Monday - Friday', hours: '09:00 - 13:00, 16:00 - 20:00' },
+                                    { day: lang === 'fr' ? 'Samedi' : lang === 'es' ? 'Sábado' : 'Saturday', hours: '09:00 - 13:00' },
+                                    { day: lang === 'fr' ? 'Dimanche' : lang === 'es' ? 'Domingo' : 'Sunday', hours: lang === 'fr' ? 'Fermé' : lang === 'es' ? 'Cerrado' : 'Closed' },
+                                  ].map((sched, i) => (
+                                    <div key={i} className="flex justify-between items-center text-xs py-1 border-b border-slate-200/40 last:border-0">
+                                      <span className="font-bold text-slate-700">{sched.day}</span>
+                                      <span className="text-slate-500 text-[11px] font-mono">{sched.hours}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  )}
+
+                  {/* VIEW 3: JANE.APP MONTH VIEW */}
                   {calendarViewMode === 'month' && (
                     <div className="w-full overflow-x-auto">
                       <div className="min-w-[700px]">
                         {/* Days of week header */}
-                        <div className="grid grid-cols-7 gap-px mb-2 text-center text-xs font-bold text-gray-500 uppercase tracking-wider">
+                        <div className="grid grid-cols-7 gap-px mb-2 text-center text-xs font-bold text-slate-500 uppercase tracking-wider">
                           {(lang === 'fr' 
                             ? ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'] 
                             : lang === 'es' 
@@ -4125,8 +4741,8 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                     className={`min-h-[115px] p-2 rounded-2xl border transition-all cursor-pointer flex flex-col justify-between group/cell ${
                                       cell.currentMonth 
                                         ? isToday 
-                                          ? 'bg-primary/5 border-primary/40 shadow-sm' 
-                                          : 'bg-[#fafafa] border-black/5 hover:border-primary/30 hover:bg-white' 
+                                          ? 'bg-teal-50/30 border-[#0e9f8e]/50 shadow-sm' 
+                                          : 'bg-[#fafafa] border-slate-200/80 hover:border-[#0e9f8e]/40 hover:bg-white' 
                                         : 'bg-black/[0.02] border-transparent opacity-40 hover:opacity-80'
                                     }`}
                                   >
@@ -4140,8 +4756,8 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                         }}
                                         className={`text-xs font-bold rounded-full w-6 h-6 flex items-center justify-center transition-transform hover:scale-110 ${
                                           isToday 
-                                            ? 'bg-primary text-white shadow-sm' 
-                                            : 'text-gray-700 hover:bg-black/5'
+                                            ? 'bg-[#0e9f8e] text-white shadow-xs' 
+                                            : 'text-slate-700 hover:bg-black/5'
                                         }`}
                                         title={lang === 'fr' ? "Voir la journée en vue Jour" : "Switch to Day View"}
                                       >
@@ -4151,7 +4767,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                         {(() => {
                                           const dayApptsCount = dayEvents.filter(ev => !ev.eventType || ev.eventType === 'appointment').length;
                                           return dayApptsCount > 0 ? (
-                                            <span className="text-[10px] font-bold text-gray-400">
+                                            <span className="text-[10px] font-bold text-[#0e9f8e] bg-teal-50 px-1.5 py-0.2 rounded-full border border-teal-100">
                                               {dayApptsCount} {dayApptsCount === 1 ? 'rdv' : 'rdvs'}
                                             </span>
                                           ) : null;
@@ -4161,7 +4777,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                             e.stopPropagation();
                                             handleQuickAddEvent(cell.dateString);
                                           }}
-                                          className="opacity-0 group-hover/cell:opacity-100 text-primary p-0.5 rounded hover:bg-primary/10 transition-opacity" 
+                                          className="opacity-0 group-hover/cell:opacity-100 text-[#0e9f8e] p-0.5 rounded hover:bg-teal-50 transition-opacity" 
                                           title={lang === 'fr' ? "Nouveau RDV rapide" : "Quick Add RDV"}
                                         >
                                           <Plus size={12} />
@@ -4169,11 +4785,12 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                       </div>
                                     </div>
 
-                                    {/* Events snippets in cell */}
+                                    {/* Events snippets in cell (Jane.app mini strips) */}
                                     <div className="mt-1 space-y-1 overflow-hidden">
                                       {dayEvents.slice(0, 3).map((ev, evIdx) => {
                                         const isOther = ev.eventType && ev.eventType !== 'appointment';
                                         const timeStr = new Date(ev.start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                                        const hasNote = !isOther && hasAppointmentNote(ev);
 
                                         return (
                                           <div
@@ -4182,23 +4799,25 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                               e.stopPropagation();
                                               setSelectedDayModalDate(cell.dateString);
                                             }}
-                                            className={`px-2 py-1 rounded-lg text-[10px] font-bold truncate leading-tight flex items-center justify-between transition-colors shadow-2xs ${
+                                            className={`px-2 py-1 rounded-lg text-[10px] font-bold truncate leading-tight flex items-center justify-between transition-colors shadow-2xs border-l-2 ${
                                               isOther
-                                                ? 'bg-amber-100 text-amber-900 border border-amber-300/90 hover:bg-amber-200'
-                                                : 'bg-emerald-100/90 hover:bg-emerald-200 text-emerald-900 border border-emerald-300/80'
+                                                ? 'bg-amber-100/80 text-amber-900 border-amber-300 border-l-amber-600 hover:bg-amber-200/80'
+                                                : hasNote
+                                                ? 'bg-sky-50 text-sky-950 border-sky-200 border-l-[#0e9f8e] hover:bg-sky-100'
+                                                : 'bg-white hover:bg-teal-50/40 text-slate-800 border-slate-200 border-l-[#0e9f8e]'
                                             }`}
-                                            title={`${timeStr} - ${getEventDisplayName(ev)} (${lang === 'fr' ? 'Cliquer pour voir la journée' : 'Click to see day'})`}
+                                            title={`${timeStr} - ${getEventDisplayName(ev)}`}
                                           >
                                             <span className="truncate flex items-center gap-1">
                                               {isOther && <Lock size={10} className="shrink-0 text-amber-800" />}
                                               {timeStr} {getEventDisplayName(ev)}
                                             </span>
-                                            <Pencil size={10} className="shrink-0 opacity-60 hover:opacity-100 ml-1" />
+                                            {hasNote && <CheckCircle2 size={10} className="text-[#0e9f8e] shrink-0 ml-1" />}
                                           </div>
                                         );
                                       })}
                                       {dayEvents.length > 3 && (
-                                        <p className="text-[9px] font-bold text-gray-500 pl-1">
+                                        <p className="text-[9px] font-bold text-slate-500 pl-1">
                                           +{dayEvents.length - 3} {lang === 'fr' ? 'autre(s)' : 'more'}
                                         </p>
                                       )}
@@ -4210,475 +4829,6 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                           );
                         })()}
                       </div>
-                    </div>
-                  )}
-
-                  {/* VIEW 2: WEEK VIEW */}
-                  {calendarViewMode === 'week' && (
-                    <div className="w-full overflow-x-auto">
-                      <div className="min-w-[860px]">
-                        <div className="grid grid-cols-7 gap-3">
-                          {getWeekDates(currentCalendarDate).map((dayItem, dayIdx) => {
-                            const dayEvents = getEventsForDate(dayItem.dateString);
-
-                            return (
-                              <div
-                                key={dayIdx}
-                                className={`flex flex-col rounded-2xl border transition-all ${
-                                  dayItem.isToday
-                                    ? 'bg-primary/[0.03] border-primary/40 shadow-xs'
-                                    : 'bg-[#fafafa] border-black/5 hover:border-black/10'
-                                }`}
-                              >
-                                {/* Week Day Column Header */}
-                                <div className="p-3 border-b border-black/5 flex items-center justify-between gap-1">
-                                  <div>
-                                    <span className="text-[11px] font-bold text-gray-500 uppercase tracking-wider block">
-                                      {dayItem.dayName}
-                                    </span>
-                                    <div className="flex items-center gap-1.5 mt-0.5">
-                                      <button
-                                        onClick={() => {
-                                          setCurrentCalendarDate(dayItem.date);
-                                          setCalendarViewMode('day');
-                                        }}
-                                        className={`text-sm font-bold w-6 h-6 rounded-full flex items-center justify-center transition-all hover:scale-105 ${
-                                          dayItem.isToday
-                                            ? 'bg-primary text-white shadow-xs'
-                                            : 'text-gray-800 hover:bg-black/5'
-                                        }`}
-                                        title={lang === 'fr' ? "Basculer sur la vue Jour" : "Switch to Day View"}
-                                      >
-                                        {dayItem.dayNumber}
-                                      </button>
-                                      {(() => {
-                                        const dayApptsCount = dayEvents.filter(ev => !ev.eventType || ev.eventType === 'appointment').length;
-                                        return dayApptsCount > 0 ? (
-                                          <span className="text-[10px] font-bold text-emerald-700 bg-emerald-100/80 px-1.5 py-0.2 rounded-full">
-                                            {dayApptsCount}
-                                          </span>
-                                        ) : null;
-                                      })()}
-                                    </div>
-                                  </div>
-
-                                  <button
-                                    onClick={() => handleQuickAddEvent(dayItem.dateString)}
-                                    className="p-1 rounded-lg text-primary hover:bg-primary/10 transition-colors"
-                                    title={lang === 'fr' ? `Ajouter un RDV le ${dayItem.dayName} ${dayItem.dayNumber}` : "Add appointment"}
-                                  >
-                                    <Plus size={14} />
-                                  </button>
-                                </div>
-
-                                {/* Week Day Column Content */}
-                                <div className="p-2 space-y-2 flex-1 min-h-[340px] flex flex-col justify-between">
-                                  <div className="space-y-2">
-                                    {dayEvents.map((ev) => {
-                                      const isOther = ev.eventType && ev.eventType !== 'appointment';
-                                      const startStr = new Date(ev.start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-                                      const endStr = new Date(ev.end).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-
-                                      return (
-                                        <div
-                                          key={ev.id}
-                                          onClick={() => openEditEventModal(ev)}
-                                          className={`p-2.5 rounded-xl border shadow-2xs hover:shadow-sm transition-all cursor-pointer group/wev ${
-                                            isOther 
-                                              ? 'bg-amber-50/80 border-amber-200/90 hover:border-amber-400' 
-                                              : 'bg-white border-emerald-200/90 hover:border-emerald-400'
-                                          }`}
-                                        >
-                                          <div className="flex items-center justify-between gap-1 mb-1">
-                                            <span className={`text-[10px] font-extrabold px-1.5 py-0.5 rounded-md border flex items-center gap-1 ${
-                                              isOther 
-                                                ? 'text-amber-900 bg-amber-100 border-amber-300/60' 
-                                                : 'text-emerald-800 bg-emerald-50 border-emerald-200/60'
-                                            }`}>
-                                              {isOther && <Lock size={10} className="shrink-0 text-amber-800" />}
-                                              {startStr} - {endStr}
-                                            </span>
-                                            <div className="opacity-0 group-hover/wev:opacity-100 transition-opacity flex items-center gap-1">
-                                              {!isOther && (
-                                                <button
-                                                  type="button"
-                                                  onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    handleGoToNotes(ev);
-                                                  }}
-                                                  className="p-1 text-primary hover:bg-primary/10 rounded"
-                                                  title={lang === 'fr' ? "Notes cliniques" : "Clinical notes"}
-                                                >
-                                                  <FileCheck size={11} />
-                                                </button>
-                                              )}
-                                              <button
-                                                type="button"
-                                                onClick={(e) => {
-                                                  e.stopPropagation();
-                                                  handleDeleteEvent(ev.id);
-                                                }}
-                                                className="p-1 text-rose-600 hover:bg-rose-50 rounded"
-                                                title={lang === 'fr' ? "Supprimer" : "Delete"}
-                                              >
-                                                <Trash2 size={11} />
-                                              </button>
-                                            </div>
-                                          </div>
-
-                                          <h5 className={`text-xs font-bold leading-tight truncate ${isOther ? 'text-amber-950' : 'text-gray-900'}`}>
-                                            {getEventDisplayName(ev)}
-                                          </h5>
-                                          {isOther ? (
-                                            <span className="text-[9px] font-bold text-amber-800 bg-amber-100/90 px-1.5 py-0.2 rounded mt-1 inline-block border border-amber-200">
-                                              {getEventTypeLabel(ev.eventType)}
-                                            </span>
-                                          ) : (
-                                            ev.clientName && ev.summary !== ev.clientName && (
-                                              <p className="text-[10px] text-gray-500 truncate mt-0.5">{ev.summary}</p>
-                                            )
-                                          )}
-                                        </div>
-                                      );
-                                    })}
-
-                                    {dayEvents.length === 0 && (
-                                      <div className="py-8 text-center">
-                                        <p className="text-[10px] text-gray-400">
-                                          {lang === 'fr' ? "Aucun RDV" : lang === 'es' ? "Sin citas" : "No appointments"}
-                                        </p>
-                                      </div>
-                                    )}
-                                  </div>
-
-                                  {/* Quick add footer button */}
-                                  <button
-                                    onClick={() => handleQuickAddEvent(dayItem.dateString)}
-                                    className="w-full py-1.5 px-2 mt-2 rounded-xl text-[10px] font-bold text-primary/80 hover:text-primary hover:bg-primary/5 border border-dashed border-primary/20 transition-all flex items-center justify-center gap-1"
-                                  >
-                                    <Plus size={11} />
-                                    <span>{lang === 'fr' ? "Ajouter" : lang === 'es' ? "Añadir" : "Add"}</span>
-                                  </button>
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* VIEW 3: DAY VIEW */}
-                  {calendarViewMode === 'day' && (
-                    <div className="space-y-6">
-                      {(() => {
-                        const currentDateStr = (() => {
-                          const y = currentCalendarDate.getFullYear();
-                          const m = String(currentCalendarDate.getMonth() + 1).padStart(2, '0');
-                          const d = String(currentCalendarDate.getDate()).padStart(2, '0');
-                          return `${y}-${m}-${d}`;
-                        })();
-
-                        const dayEvents = getEventsForDate(currentDateStr);
-                        const isToday = currentDateStr === todayStr;
-
-                        const hours = [
-                          '08:00', '09:00', '10:00', '11:00', '12:00', 
-                          '13:00', '14:00', '15:00', '16:00', '17:00', 
-                          '18:00', '19:00', '20:00'
-                        ];
-
-                        return (
-                          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                            {/* Left 2 Cols: Timeline Schedule */}
-                            <div className="lg:col-span-2 space-y-4">
-                              {/* Day Summary Header */}
-                              <div className="p-4 rounded-2xl bg-[#fafafa] border border-black/5 flex flex-wrap items-center justify-between gap-3">
-                                <div>
-                                  <div className="flex items-center gap-2">
-                                    <h4 className="text-sm font-bold text-gray-900 capitalize">
-                                      {currentCalendarDate.toLocaleDateString(lang === 'fr' ? 'fr-FR' : lang === 'es' ? 'es-ES' : 'en-US', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
-                                    </h4>
-                                    {isToday && (
-                                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-primary text-white">
-                                        {lang === 'fr' ? "Aujourd'hui" : lang === 'es' ? "Hoy" : "Today"}
-                                      </span>
-                                    )}
-                                  </div>
-                                  <p className="text-xs text-gray-500 mt-0.5">
-                                    {(() => {
-                                      const dayApptsCount = dayEvents.filter(ev => !ev.eventType || ev.eventType === 'appointment').length;
-                                      return `${dayApptsCount} ${dayApptsCount <= 1 ? (lang === 'fr' ? 'consultation prévue' : 'appointment scheduled') : (lang === 'fr' ? 'consultations prévues' : 'appointments scheduled')}`;
-                                    })()}
-                                  </p>
-                                </div>
-
-                                <button
-                                  onClick={() => handleQuickAddEvent(currentDateStr)}
-                                  className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-white rounded-xl text-xs font-bold hover:bg-primary/95 transition-all shadow-xs"
-                                >
-                                  <Plus size={14} />
-                                  <span>{lang === 'fr' ? "Ajouter un rendez-vous ce jour" : "Add appointment today"}</span>
-                                </button>
-                              </div>
-
-                              {/* Hourly Schedule Table */}
-                              <div className="space-y-2">
-                                {hours.map((hourStr, hIdx) => {
-                                  const hourNum = parseInt(hourStr.split(':')[0], 10);
-                                  
-                                  // Find events that start in this hour slot
-                                  const slotEvents = dayEvents.filter(ev => {
-                                    try {
-                                      const evDate = new Date(ev.start);
-                                      return evDate.getHours() === hourNum;
-                                    } catch (e) {
-                                      return false;
-                                    }
-                                  });
-
-                                  return (
-                                    <div key={hIdx} className="flex items-start gap-3 py-1">
-                                      {/* Hour Label */}
-                                      <div className="w-14 shrink-0 text-right pt-2.5">
-                                        <span className="text-xs font-bold text-gray-500">{hourStr}</span>
-                                      </div>
-
-                                      {/* Slot Content */}
-                                      <div className="flex-1 space-y-2">
-                                        {slotEvents.length > 0 ? (
-                                          slotEvents.map(ev => {
-                                            const isOther = ev.eventType && ev.eventType !== 'appointment';
-                                            const timeStatus = getAppointmentTimeStatus(ev);
-                                            const startStr = new Date(ev.start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-                                            const endStr = new Date(ev.end).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-
-                                            return (
-                                              <div
-                                                key={ev.id}
-                                                onClick={() => openEditEventModal(ev)}
-                                                className={`p-4 rounded-2xl border shadow-xs transition-all cursor-pointer flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 group/dev ${
-                                                  isOther 
-                                                    ? 'bg-amber-50/60 border-amber-200/90 hover:border-amber-400 hover:shadow-sm' 
-                                                    : isToday && timeStatus.isOngoing
-                                                    ? 'bg-teal-50/90 border-teal-300 ring-2 ring-teal-400/50 shadow-sm'
-                                                    : isToday && timeStatus.isPast
-                                                    ? 'bg-[#fafafa] border-black/10 hover:bg-white hover:border-gray-300'
-                                                    : 'bg-white border-emerald-200/90 hover:border-emerald-400 hover:shadow-sm'
-                                                }`}
-                                              >
-                                                <div className="flex items-start gap-3">
-                                                  <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 mt-0.5 ${
-                                                    isOther 
-                                                      ? 'bg-amber-100 text-amber-900 border border-amber-300/80' 
-                                                      : isToday && timeStatus.isOngoing
-                                                      ? 'bg-teal-600 text-white shadow-xs'
-                                                      : isToday && timeStatus.isPast
-                                                      ? 'bg-gray-100 text-gray-500'
-                                                      : 'bg-emerald-100 text-emerald-800'
-                                                  }`}>
-                                                    {isOther ? <Lock size={18} /> : <CalendarIcon size={18} />}
-                                                  </div>
-                                                  <div>
-                                                    <div className="flex items-center gap-2 flex-wrap">
-                                                      <h5 className="text-sm font-bold text-gray-900 leading-tight">
-                                                        {getEventDisplayName(ev)}
-                                                      </h5>
-                                                      {isToday && !isOther && (
-                                                        timeStatus.isOngoing ? (
-                                                          <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-md bg-teal-600 text-white animate-pulse flex items-center gap-1 shadow-xs">
-                                                            <span className="w-1.5 h-1.5 rounded-full bg-white"></span>
-                                                            {lang === 'fr' ? 'En cours' : lang === 'es' ? 'En curso' : 'In progress'}
-                                                          </span>
-                                                        ) : timeStatus.isPast ? (
-                                                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-gray-200 text-gray-700">
-                                                            {lang === 'fr' ? 'Passé' : lang === 'es' ? 'Terminada' : 'Past'}
-                                                          </span>
-                                                        ) : (
-                                                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-emerald-600 text-white">
-                                                            {lang === 'fr' ? 'À venir' : lang === 'es' ? 'Próxima' : 'Upcoming'}
-                                                          </span>
-                                                        )
-                                                      )}
-                                                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md border ${
-                                                        isOther 
-                                                          ? 'bg-amber-100 text-amber-900 border-amber-300' 
-                                                          : isToday && timeStatus.isOngoing
-                                                          ? 'bg-teal-100 text-teal-900 border-teal-300'
-                                                          : 'bg-emerald-100 text-emerald-800 border-emerald-200'
-                                                      }`}>
-                                                        {startStr} - {endStr}
-                                                      </span>
-                                                      {!isOther && (() => {
-                                                        const evDateStr = ev.start ? ev.start.split('T')[0] : '';
-                                                        const dayAssociatedInv = invoices.find(i => (i.eventId && i.eventId === ev.id) || (i.noteId && i.noteId === ev.id) || (ev.clientId && i.clientId === ev.clientId && (i.date.split('T')[0] === evDateStr || (i.paymentDate && i.paymentDate.split('T')[0] === evDateStr))));
-                                                        if (dayAssociatedInv) {
-                                                          return (
-                                                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-900 border border-emerald-300 inline-flex items-center gap-1">
-                                                              <CheckCircle2 size={10} className="text-emerald-700" />
-                                                              <span>{dayAssociatedInv.status === 'paid' ? (lang === 'fr' ? 'Payé' : 'Pagado') : (lang === 'fr' ? 'En attente' : 'Pendiente')} ({dayAssociatedInv.amount} €)</span>
-                                                            </span>
-                                                          );
-                                                        }
-                                                        return (
-                                                          <span className="text-[10px] font-medium px-2 py-0.5 rounded-md bg-gray-100 text-gray-500 border border-gray-200 inline-flex items-center gap-1">
-                                                            <CreditCard size={10} className="text-gray-400" />
-                                                            <span>{lang === 'fr' ? 'Non réglé' : 'No cobrado'}</span>
-                                                          </span>
-                                                        );
-                                                      })()}
-                                                      {isOther && (
-                                                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-amber-200/80 text-amber-900 border border-amber-300">
-                                                          {getEventTypeLabel(ev.eventType)}
-                                                        </span>
-                                                      )}
-                                                    </div>
-                                                    <p className="text-xs text-gray-500 mt-1">
-                                                      {isOther 
-                                                        ? (ev.description || (lang === 'fr' ? 'Créneau indisponible / bloqué' : 'Blocked slot'))
-                                                        : (ev.summary !== ev.clientName ? ev.summary : (lang === 'fr' ? "Consultation d'ostéopathie" : "Osteopathy consultation"))
-                                                      }
-                                                    </p>
-                                                    {!isOther && ev.description && (
-                                                      <p className="text-[11px] text-gray-400 italic mt-1 line-clamp-1">
-                                                        {ev.description}
-                                                      </p>
-                                                    )}
-                                                  </div>
-                                                </div>
-
-                                                <div className="flex items-center gap-1.5 self-end sm:self-center">
-                                                  {!isOther && (
-                                                    <button
-                                                      type="button"
-                                                      onClick={(e) => {
-                                                        e.stopPropagation();
-                                                        handleGoToNotes(ev);
-                                                      }}
-                                                      className="flex items-center gap-1 px-3 py-1.5 bg-primary text-white hover:bg-primary/95 rounded-xl text-xs font-bold transition-all shadow-xs"
-                                                      title={lang === 'fr' ? "Rédiger des notes cliniques" : "Take notes"}
-                                                    >
-                                                      <FileCheck size={13} />
-                                                      <span>{lang === 'fr' ? "Prise de notes" : "Notes"}</span>
-                                                    </button>
-                                                  )}
-                                                  <button
-                                                    type="button"
-                                                    onClick={(e) => {
-                                                      e.stopPropagation();
-                                                      openEditEventModal(ev);
-                                                    }}
-                                                    className={`p-1.5 rounded-lg transition-all ${
-                                                      isOther ? 'text-amber-800 hover:bg-amber-100' : 'hover:bg-emerald-100 text-emerald-800'
-                                                    }`}
-                                                    title={lang === 'fr' ? "Modifier" : "Edit"}
-                                                  >
-                                                    <Pencil size={13} />
-                                                  </button>
-                                                  <button
-                                                    type="button"
-                                                    onClick={(e) => {
-                                                      e.stopPropagation();
-                                                      handleDeleteEvent(ev.id);
-                                                    }}
-                                                    className="p-1.5 hover:bg-rose-100 text-rose-600 rounded-lg transition-all"
-                                                    title={lang === 'fr' ? "Supprimer ce rendez-vous" : "Delete"}
-                                                  >
-                                                    <Trash2 size={13} />
-                                                  </button>
-                                                </div>
-                                              </div>
-                                            );
-                                          })
-                                        ) : (
-                                          <div
-                                            onClick={() => handleQuickAddEvent(currentDateStr, hourStr)}
-                                            className="h-10 rounded-xl border border-dashed border-black/10 hover:border-primary/40 hover:bg-primary/[0.02] flex items-center justify-between px-3 cursor-pointer group/slot transition-all"
-                                          >
-                                            <span className="text-[11px] text-gray-400 group-hover/slot:text-primary transition-colors flex items-center gap-1 font-medium">
-                                              <Plus size={12} className="opacity-0 group-hover/slot:opacity-100 transition-opacity" />
-                                              <span>{lang === 'fr' ? `Créneau libre (${hourStr})` : `Free slot (${hourStr})`}</span>
-                                            </span>
-                                            <span className="text-[10px] font-bold text-primary opacity-0 group-hover/slot:opacity-100 transition-opacity">
-                                              {lang === 'fr' ? "+ Planifier un RDV" : "+ Book slot"}
-                                            </span>
-                                          </div>
-                                        )}
-                                      </div>
-                                    </div>
-                                  );
-                                })}
-                              </div>
-                            </div>
-
-                            {/* Right 1 Col: Day Insights & Quick Actions */}
-                            <div className="space-y-6">
-                              {/* Quick summary of today's patients */}
-                              <div className="bg-[#fafafa] p-5 rounded-2xl border border-black/5 space-y-3">
-                                <h4 className="text-xs font-bold uppercase tracking-wider text-primary flex items-center gap-2">
-                                  <Users size={14} /> {lang === 'fr' ? "Patients du jour" : "Patients of the day"}
-                                </h4>
-                                
-                                <div className="space-y-2">
-                                  {dayEvents.filter(ev => !ev.eventType || ev.eventType === 'appointment').map(ev => (
-                                    <div 
-                                      key={ev.id}
-                                      className="p-2.5 rounded-xl bg-white border border-black/5 flex items-center justify-between gap-2 shadow-2xs"
-                                    >
-                                      <div>
-                                        <h5 className="text-xs font-bold text-gray-900 leading-tight">
-                                          {getEventDisplayName(ev)}
-                                        </h5>
-                                        <p className="text-[10px] text-gray-500 mt-0.5">
-                                          {new Date(ev.start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                                        </p>
-                                      </div>
-                                      <button
-                                        onClick={() => handleGoToNotes(ev)}
-                                        className="px-2.5 py-1 bg-primary/10 hover:bg-primary text-primary hover:text-white rounded-lg text-[10px] font-bold transition-all"
-                                        title={lang === 'fr' ? "Notes cliniques" : "Notes"}
-                                      >
-                                        {lang === 'fr' ? "Fiche" : "File"}
-                                      </button>
-                                    </div>
-                                  ))}
-
-                                  {dayEvents.filter(ev => !ev.eventType || ev.eventType === 'appointment').length === 0 && (
-                                    <p className="text-xs text-gray-400 italic py-2">
-                                      {lang === 'fr' ? "Aucun patient prévu pour cette journée." : "No patients scheduled for this day."}
-                                    </p>
-                                  )}
-                                </div>
-                              </div>
-
-                              {/* Consultation Hours Summary */}
-                              <div className="bg-[#fafafa] p-5 rounded-2xl border border-black/5 space-y-4">
-                                <div>
-                                  <h4 className="text-xs font-bold uppercase tracking-wider text-primary mb-1">
-                                    {lang === 'fr' ? "Horaires du Cabinet" : lang === 'es' ? "Horarios de consulta" : "Consultation hours"}
-                                  </h4>
-                                  <p className="text-[11px] text-gray-500">
-                                    {lang === 'fr' ? "Plages d'ouverture habituelles du cabinet." : "Standard active clinic hours."}
-                                  </p>
-                                </div>
-
-                                <div className="space-y-2.5">
-                                  {[
-                                    { day: lang === 'fr' ? 'Lundi - Vendredi' : lang === 'es' ? 'Lunes - Viernes' : 'Monday - Friday', hours: '09:00 - 13:00, 16:00 - 20:00' },
-                                    { day: lang === 'fr' ? 'Samedi' : lang === 'es' ? 'Sábado' : 'Saturday', hours: '09:00 - 13:00' },
-                                    { day: lang === 'fr' ? 'Dimanche' : lang === 'es' ? 'Domingo' : 'Sunday', hours: lang === 'fr' ? 'Fermé' : lang === 'es' ? 'Cerrado' : 'Closed' },
-                                  ].map((sched, i) => (
-                                    <div key={i} className="flex justify-between items-center text-xs py-1 border-b border-black/[0.03] last:border-0">
-                                      <span className="font-bold text-gray-700">{sched.day}</span>
-                                      <span className="text-gray-500 text-[11px]">{sched.hours}</span>
-                                    </div>
-                                  ))}
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-                        );
-                      })()}
                     </div>
                   )}
 
@@ -5697,26 +5847,32 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                     const endDate = new Date(ev.end);
                     const startTime = startDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
                     const endTime = endDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                    const evDateStr = ev.start ? ev.start.split('T')[0] : '';
+                    const hasNote = !isOther && allNotes.some(n => (n.eventId && n.eventId === ev.id) || (ev.clientId && n.clientId === ev.clientId && n.date.split('T')[0] === evDateStr));
+                    const inv = !isOther ? invoices.find(i => (i.eventId && i.eventId === ev.id) || (i.noteId && i.noteId === ev.id) || (ev.clientId && i.clientId === ev.clientId && (i.date.split('T')[0] === evDateStr || (i.paymentDate && i.paymentDate.split('T')[0] === evDateStr)))) : undefined;
+                    const isPaid = inv && inv.status === 'paid';
 
                     return (
                       <div
                         key={ev.id}
-                        className={`p-4 rounded-2xl border shadow-2xs transition-all space-y-2.5 group ${
+                        className={`p-4 rounded-2xl border shadow-2xs transition-all space-y-2.5 group border-l-4 ${
                           isOther 
-                            ? 'bg-amber-50/40 hover:bg-amber-50/80 border-amber-200/70' 
-                            : 'bg-[#fafafa] hover:bg-white border-black/5 hover:border-primary/20'
+                            ? 'bg-amber-50/50 hover:bg-amber-50/80 border-amber-200 border-l-amber-500' 
+                            : hasNote
+                            ? 'bg-sky-50/50 hover:bg-sky-50/80 border-sky-200/80 border-l-[#0e9f8e]'
+                            : 'bg-white hover:bg-slate-50 border-slate-200/80 border-l-[#0e9f8e]'
                         }`}
                       >
                         <div className="flex items-start justify-between gap-3">
                           <div className="flex items-center gap-2 flex-wrap">
                             <span className={`px-2.5 py-1 text-xs font-bold rounded-lg border shrink-0 ${
-                              isOther ? 'bg-amber-100 text-amber-900 border-amber-300' : 'bg-emerald-100 text-emerald-800 border-emerald-200/80'
+                              isOther ? 'bg-amber-100 text-amber-900 border-amber-300' : 'bg-teal-50 text-teal-800 border-teal-200/80'
                             }`}>
                               {startTime} - {endTime}
                             </span>
                             <div className="flex flex-col">
                               <div className="flex items-center gap-1.5">
-                                <span className="text-xs font-bold text-gray-900">{getEventDisplayName(ev)}</span>
+                                <span className="text-xs font-bold text-slate-900">{getEventDisplayName(ev)}</span>
                                 {isOther && (
                                   <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-amber-200/80 text-amber-900 border border-amber-300">
                                     {getEventTypeLabel(ev.eventType)}
@@ -5724,7 +5880,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                 )}
                               </div>
                               {ev.summary && ev.summary !== getEventDisplayName(ev) && (
-                                <span className="text-xs font-medium text-gray-600 group-hover:text-primary transition-colors">
+                                <span className="text-xs font-medium text-slate-600 group-hover:text-[#0e9f8e] transition-colors">
                                   {ev.summary}
                                 </span>
                               )}
@@ -5737,7 +5893,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                 onClick={() => {
                                   handleGoToNotes(ev);
                                 }}
-                                className="px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 rounded-lg text-xs font-bold transition-all border border-emerald-200 flex items-center gap-1"
+                                className="px-2.5 py-1 bg-[#0e9f8e]/10 hover:bg-[#0e9f8e] text-[#0e9f8e] hover:text-white rounded-lg text-xs font-bold transition-all border border-[#0e9f8e]/20 flex items-center gap-1 cursor-pointer"
                                 title={lang === 'fr' ? 'Fiche patient & Notes' : 'Patient Notes'}
                               >
                                 <FileText size={12} />
@@ -5746,14 +5902,14 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                             )}
                             <button
                               onClick={() => openEditEventModal(ev)}
-                              className="p-1.5 text-gray-500 hover:text-primary hover:bg-primary/5 rounded-lg transition-all"
+                              className="p-1.5 text-slate-500 hover:text-[#0e9f8e] hover:bg-teal-50 rounded-lg transition-all cursor-pointer"
                               title={lang === 'fr' ? 'Modifier' : 'Edit'}
                             >
                               <Pencil size={14} />
                             </button>
                             <button
                               onClick={() => handleDeleteEvent(ev.id)}
-                              className="p-1.5 text-gray-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-all"
+                              className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-all cursor-pointer"
                               title={lang === 'fr' ? 'Supprimer' : 'Delete'}
                             >
                               <Trash2 size={14} />
@@ -5761,8 +5917,37 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                           </div>
                         </div>
 
+                        {/* Status Badges Row in Day Modal */}
+                        {!isOther && (
+                          <div className="flex items-center gap-1.5 pt-1 border-t border-slate-100 flex-wrap">
+                            {hasNote ? (
+                              <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-teal-800 bg-teal-50 border border-teal-200/90 px-1.5 py-0.5 rounded-md">
+                                <CheckCircle2 size={11} className="text-[#0e9f8e]" />
+                                <span>{lang === 'fr' ? 'Note rédigée' : 'Note done'}</span>
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-amber-800 bg-amber-50 border border-amber-200/80 px-1.5 py-0.5 rounded-md">
+                                <Clock size={11} className="text-amber-600" />
+                                <span>{lang === 'fr' ? 'Attente note' : 'Note pending'}</span>
+                              </span>
+                            )}
+
+                            {isPaid ? (
+                              <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-800 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded-md">
+                                <CheckCircle2 size={11} className="text-emerald-600" />
+                                <span>{lang === 'fr' ? `Payé (${inv.amount} €)` : `Paid (${inv.amount} €)`}</span>
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 text-[10px] font-medium text-slate-500 bg-slate-100 border border-slate-200 px-1.5 py-0.5 rounded-md">
+                                <CreditCard size={11} className="text-slate-400" />
+                                <span>{lang === 'fr' ? 'Non réglé' : 'Unpaid'}</span>
+                              </span>
+                            )}
+                          </div>
+                        )}
+
                         {ev.description && (
-                          <p className="text-xs text-gray-600 pl-1 border-l-2 border-primary/20 leading-relaxed italic bg-white/60 p-2 rounded-r-lg">
+                          <p className="text-xs text-slate-600 pl-1 border-l-2 border-[#0e9f8e]/30 leading-relaxed italic bg-slate-50 p-2 rounded-r-lg">
                             {ev.description}
                           </p>
                         )}

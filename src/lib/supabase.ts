@@ -1439,6 +1439,21 @@ export const api = {
   // ==========================================
   // CLIENT NOTES & CLINICAL RECORDS
   // ==========================================
+  async getAllNotes(): Promise<ClientNote[]> {
+    const localNotes = loadLocal('notes', mockNotes);
+    if (isSupabaseConfigured && supabase) {
+      try {
+        const { data, error } = await supabase.from('client_notes').select('*').order('date', { ascending: false });
+        if (!error && data) {
+          return data.map(mapNoteFromDB);
+        }
+      } catch (err) {
+        console.warn('Supabase getAllNotes exception:', err);
+      }
+    }
+    return localNotes.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  },
+
   async getClientNotes(clientId: string): Promise<ClientNote[]> {
     const localNotes = loadLocal('notes', mockNotes).filter(n => n.clientId === clientId);
 
@@ -1446,18 +1461,13 @@ export const api = {
       try {
         let { data, error } = await supabase.from('client_notes').select('*').eq('client_id', clientId).order('date', { ascending: false });
         
-        if (error || !data || data.length === 0) {
-          const res = await supabase.from('client_notes').select('*').eq('clientId', clientId).order('date', { ascending: false });
-          if (!res.error && res.data) {
-            data = res.data;
-            error = null;
-          }
+        if (!error && data && data.length > 0) {
+          return data.map(mapNoteFromDB);
         }
 
-        if (!error && data) {
-          const remoteNotes = data.map(mapNoteFromDB);
-          // If Supabase is active, it is the single source of truth. No unsynced merge to avoid undead items.
-          return remoteNotes;
+        const res = await supabase.from('client_notes').select('*').eq('clientId', clientId).order('date', { ascending: false });
+        if (!res.error && res.data) {
+          return res.data.map(mapNoteFromDB);
         }
       } catch (err) {
         console.warn('Supabase getClientNotes exception:', err);
