@@ -1948,9 +1948,54 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
   return (
     <div id="admin-dashboard-layout" className="fixed inset-0 z-[80] bg-[#fdfdfb] text-gray-800 flex flex-col md:flex-row overflow-hidden print:relative print:inset-auto print:overflow-visible print:bg-white">
       
-      {/* SIDEBAR */}
-      <aside className="w-full md:w-60 bg-[#f4f4ec] border-b md:border-b-0 md:border-r border-black/5 flex flex-col justify-between shrink-0 p-4 md:p-5 print:hidden">
-        <div className="flex flex-col gap-4 md:gap-6">
+      {/* MOBILE TOP APP BAR (Native App style, md:hidden) */}
+      <header className="md:hidden bg-[#f4f4ec] border-b border-black/5 px-3.5 py-2.5 flex items-center justify-between shrink-0 shadow-2xs z-30 print:hidden">
+        <div className="flex items-center gap-2.5">
+          <div className="w-8 h-8 bg-primary rounded-full flex items-center justify-center text-white shrink-0 shadow-xs">
+            <SpineLogo size={17} />
+          </div>
+          <div className="leading-tight">
+            <span className="text-sm font-serif font-bold text-gray-900 block">Vincent Osteo</span>
+            <span className="text-[9px] uppercase tracking-widest font-bold text-primary/70">Gestion</span>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2">
+          {/* Language Selector compact */}
+          <div className="flex items-center gap-0.5 bg-white/90 p-0.5 rounded-lg border border-black/5 shadow-2xs">
+            {(['fr', 'en', 'es'] as const).map((l) => (
+              <button
+                key={l}
+                type="button"
+                onClick={() => setLang(l)}
+                className={`px-2 py-0.5 text-[9px] font-bold uppercase rounded-md transition-all ${
+                  lang === l
+                    ? 'bg-primary text-white shadow-xs'
+                    : 'text-gray-500 hover:bg-black/5'
+                }`}
+              >
+                {l}
+              </button>
+            ))}
+          </div>
+
+          {/* Back to website button */}
+          <button
+            onClick={onClose}
+            type="button"
+            className="flex items-center gap-1.5 px-2.5 py-1.5 bg-white/90 hover:bg-white border border-black/5 rounded-xl text-xs font-semibold text-gray-700 hover:text-primary transition-all shadow-2xs active:scale-95"
+            title={lang === 'fr' ? "Retour au site" : lang === 'es' ? "Volver al sitio" : "Back to website"}
+            aria-label={lang === 'fr' ? "Retour au site" : lang === 'es' ? "Volver al sitio" : "Back to website"}
+          >
+            <ArrowLeft size={13} />
+            <span className="text-[11px] font-medium hidden sm:inline">{lang === 'fr' ? "Site" : lang === 'es' ? "Sitio" : "Site"}</span>
+          </button>
+        </div>
+      </header>
+
+      {/* DESKTOP SIDEBAR (hidden on mobile, md:flex) */}
+      <aside className="hidden md:flex md:w-60 bg-[#f4f4ec] border-r border-black/5 flex-col justify-between shrink-0 p-5 print:hidden">
+        <div className="flex flex-col gap-6">
           {/* Logo Section */}
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
@@ -1985,14 +2030,14 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
           {/* Back to website button */}
           <button
             onClick={onClose}
-            className="flex items-center gap-2 px-3.5 py-2 bg-white/80 hover:bg-white border border-black/5 rounded-xl text-xs font-semibold uppercase tracking-wider text-gray-700 hover:text-primary transition-all shadow-2xs w-fit md:w-full"
+            className="flex items-center gap-2 px-3.5 py-2 bg-white/80 hover:bg-white border border-black/5 rounded-xl text-xs font-semibold uppercase tracking-wider text-gray-700 hover:text-primary transition-all shadow-2xs w-full"
           >
             <ArrowLeft size={15} />
             <span>{lang === 'fr' ? "Retour au site" : lang === 'es' ? "Volver al sitio" : "Back to website"}</span>
           </button>
 
           {/* Navigation Items */}
-          <nav className="flex flex-row md:flex-col gap-1 overflow-x-auto md:overflow-x-visible pb-1 md:pb-0 scrollbar-none">
+          <nav className="flex flex-col gap-1.5">
             {[
               { id: 'overview', label: t.admin.tabs.overview, icon: TrendingUp },
               { id: 'clients', label: t.admin.tabs.clients, icon: Users },
@@ -2005,7 +2050,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                 <button
                   key={item.id}
                   onClick={() => setActiveTab(item.id as TabType)}
-                  className={`flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl transition-all whitespace-nowrap md:w-full text-xs font-semibold uppercase tracking-wider ${
+                  className={`flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl transition-all whitespace-nowrap w-full text-xs font-semibold uppercase tracking-wider ${
                     isActive 
                       ? 'bg-primary text-white shadow-md shadow-primary/10' 
                       : 'text-gray-600 hover:bg-black/5'
@@ -2021,7 +2066,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
       </aside>
 
       {/* MAIN CONTAINER */}
-      <main className="flex-1 overflow-y-auto bg-[#fbfbfa] p-4 sm:p-8 flex flex-col print:hidden">
+      <main className="flex-1 overflow-y-auto bg-[#fbfbfa] p-3.5 sm:p-6 md:p-8 pb-24 md:pb-8 flex flex-col print:hidden">
         
         {/* TAB 1: OVERVIEW */}
         {activeTab === 'overview' && (
@@ -2485,7 +2530,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start flex-1">
             
             {/* List and Search column */}
-            <div className="bg-white p-5 sm:p-6 rounded-3xl border border-black/5 shadow-sm lg:col-span-4 xl:col-span-4 flex flex-col lg:sticky lg:top-24 max-h-[82vh] relative">
+            <div className={`bg-white p-5 sm:p-6 rounded-3xl border border-black/5 shadow-sm lg:col-span-4 xl:col-span-4 flex flex-col lg:sticky lg:top-24 max-h-[82vh] relative ${selectedClient ? 'hidden lg:flex' : 'flex'}`}>
               <div className="flex items-center justify-between mb-4 gap-2">
                 <div>
                   <div className="flex items-center gap-2">
@@ -2642,10 +2687,22 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
             </div>
 
             {/* Detailed clinical card column */}
-            <div className="lg:col-span-8 xl:col-span-8 flex flex-col">
+            <div className={`lg:col-span-8 xl:col-span-8 flex flex-col ${!selectedClient ? 'hidden lg:flex' : 'flex'}`}>
               {selectedClient ? (
                 <div className="space-y-6 flex flex-col flex-1">
                   
+                  {/* Mobile Back Button to Patient Directory */}
+                  <div className="lg:hidden">
+                    <button
+                      type="button"
+                      onClick={() => setSelectedClient(null)}
+                      className="inline-flex items-center gap-2 px-3.5 py-2 bg-white hover:bg-slate-50 text-gray-700 hover:text-primary rounded-2xl border border-black/5 text-xs font-bold shadow-2xs active:scale-95 transition-all cursor-pointer"
+                    >
+                      <ArrowLeft size={14} className="text-primary" />
+                      <span>{lang === 'fr' ? "← Liste des patients" : lang === 'es' ? "← Lista de pacientes" : "← Patient list"}</span>
+                    </button>
+                  </div>
+
                   {/* Patient Info Header card */}
                   <div className="bg-white p-5 sm:p-6 rounded-3xl border border-black/5 shadow-sm">
                     <div className="flex flex-col md:flex-row md:items-start justify-between gap-4">
@@ -4298,13 +4355,13 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                 <div className="bg-white p-5 sm:p-6 rounded-3xl border border-slate-200/90 shadow-sm space-y-6">
                   
                   {/* Navigator Header (Jane.app style) */}
-                  <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pb-4 border-b border-slate-100">
-                    <div className="flex items-center gap-3 sm:gap-4 flex-wrap">
-                      <h4 className="text-lg sm:text-xl font-bold font-serif text-slate-900 capitalize">
+                  <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-4 pb-4 border-b border-slate-100">
+                    <div className="flex items-center gap-2 sm:gap-3 flex-wrap w-full sm:w-auto">
+                      <h4 className="text-base sm:text-xl font-bold font-serif text-slate-900 capitalize shrink-0 mr-1">
                         {getCalendarHeaderTitle()}
                       </h4>
                       
-                      <div className="flex items-center gap-1 bg-slate-100/90 p-1 rounded-xl border border-slate-200/80">
+                      <div className="flex items-center gap-1 bg-slate-100/90 p-1 rounded-xl border border-slate-200/80 shrink-0">
                         <button
                           onClick={handleCalendarPrev}
                           className="p-1.5 hover:bg-white rounded-lg text-slate-700 transition-all cursor-pointer"
@@ -4315,7 +4372,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                         
                         <button
                           onClick={() => setCurrentCalendarDate(new Date())}
-                          className="px-3 py-1 text-xs font-bold text-slate-700 hover:bg-white rounded-lg transition-all shadow-2xs cursor-pointer"
+                          className="px-2.5 sm:px-3 py-1 text-xs font-bold text-slate-700 hover:bg-white rounded-lg transition-all shadow-2xs cursor-pointer"
                         >
                           {lang === 'fr' ? "Aujourd'hui" : lang === 'es' ? "Hoy" : "Today"}
                         </button>
@@ -4330,7 +4387,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                       </div>
 
                       {/* View Switcher Segmented Control (Jane.app style) */}
-                      <div className="flex items-center bg-slate-100/90 p-1 rounded-xl border border-slate-200/80">
+                      <div className="flex items-center bg-slate-100/90 p-1 rounded-xl border border-slate-200/80 shrink-0">
                         <button
                           onClick={() => setCalendarViewMode('month')}
                           className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
@@ -5594,6 +5651,49 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
         )}
 
       </main>
+
+      {/* MOBILE BOTTOM NAVIGATION BAR (md:hidden, Native App style) */}
+      <nav 
+        aria-label="Navigation mobile"
+        className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-slate-200/90 shadow-[0_-4px_20px_rgba(0,0,0,0.06)] print:hidden pb-[max(env(safe-area-inset-bottom,0px),8px)] pt-1.5 px-2 select-none"
+      >
+        <div className="flex items-center justify-around max-w-lg mx-auto">
+          {[
+            { id: 'overview', label: t.admin.tabs.overview, icon: TrendingUp },
+            { id: 'clients', label: t.admin.tabs.clients, icon: Users },
+            { id: 'calendar', label: t.admin.tabs.calendar, icon: Calendar },
+            { id: 'billing', label: t.admin.tabs.billing, icon: FileText },
+          ].map((item) => {
+            const Icon = item.icon;
+            const isActive = activeTab === item.id;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => setActiveTab(item.id as TabType)}
+                className={`flex-1 flex flex-col items-center justify-center py-1 px-1 rounded-2xl transition-all active:scale-95 touch-manipulation min-h-[48px] cursor-pointer ${
+                  isActive ? 'text-primary' : 'text-gray-400 hover:text-gray-600'
+                }`}
+              >
+                <div
+                  className={`p-1.5 rounded-xl transition-all ${
+                    isActive ? 'bg-primary/10 text-primary scale-105' : 'text-gray-400'
+                  }`}
+                >
+                  <Icon size={19} strokeWidth={isActive ? 2.5 : 2} />
+                </div>
+                <span
+                  className={`text-[10px] tracking-tight leading-none mt-0.5 truncate max-w-[72px] ${
+                    isActive ? 'font-bold text-primary' : 'font-medium text-gray-500'
+                  }`}
+                >
+                  {item.label}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </nav>
 
       {/* ==========================================
           MODALS & OVERLAYS
