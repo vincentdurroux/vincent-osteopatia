@@ -7,7 +7,7 @@ import {
   ChevronRight, Pencil, ChevronLeft, ChevronDown, LayoutGrid, List, ArrowRight,
   Copy, CheckCircle2, XCircle, AlertTriangle, Database, Server, UserPlus, User,
   Tag, BadgePercent, Percent, Sparkles, IdCard, X, Columns3, Lock, Coffee, Briefcase, Bookmark, Pin, StickyNote,
-  ArrowUpDown, ArrowUp, ArrowDown, ExternalLink
+  ArrowUpDown, ArrowUp, ArrowDown, ExternalLink, Info
 } from 'lucide-react';
 import { Client, ClientNote, Invoice, CalendarEvent, EventType } from '../../types';
 import { api, supabase, isSupabaseConfigured, SUPABASE_SQL_SETUP, capitalizeFirstName, sortInvoicesByDate, normalizeInvoiceDescription } from '../../lib/supabase';
@@ -352,6 +352,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
   
   const [isAddEventOpen, setIsAddEventOpen] = useState(false);
   const [selectedDayModalDate, setSelectedDayModalDate] = useState<string | null>(null);
+  const [selectedAppointmentForDetails, setSelectedAppointmentForDetails] = useState<CalendarEvent | null>(null);
   const [isInlineNewPatient, setIsInlineNewPatient] = useState(false);
   const [inlinePatient, setInlinePatient] = useState({ ...DEFAULT_PATIENT_FORM });
   const [returnToAppointmentAfterClientCreate, setReturnToAppointmentAfterClientCreate] = useState(false);
@@ -1344,9 +1345,11 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
   };
 
   // Event Helper Functions for display & styling
-  const getEventDisplayName = (ev: { clientName?: string; clientId?: string; summary?: string; eventType?: EventType }) => {
+  const getEventDisplayName = (ev: { clientName?: string; clientId?: string; summary?: string; description?: string; eventType?: EventType }) => {
     if (ev.eventType && ev.eventType !== 'appointment') {
-      return ev.summary || (lang === 'fr' ? 'Créneau bloqué / Autre' : lang === 'es' ? 'Horario bloqueado' : 'Blocked slot');
+      const remark = ev.description?.replace(/\[eventType:[a-z]+\]/gi, '').replace(/\[type:[a-z]+\]/gi, '').trim();
+      if (remark) return remark;
+      return ev.summary || (lang === 'fr' ? 'Créneau indisponible' : lang === 'es' ? 'Horario bloqueado' : 'Blocked slot');
     }
     if (ev.clientId) {
       const foundClient = clients.find(c => c.id === ev.clientId);
@@ -1356,6 +1359,57 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
       return ev.clientName;
     }
     return ev.summary || (lang === 'fr' ? "Rendez-vous" : lang === 'es' ? "Cita" : "Appointment");
+  };
+
+  const getEventClient = (ev: { clientId?: string; clientName?: string; summary?: string }) => {
+    if (ev.clientId) {
+      const found = clients.find(c => c.id === ev.clientId);
+      if (found) return found;
+    }
+    if (ev.clientName) {
+      const trimmed = ev.clientName.trim().toLowerCase();
+      const found = clients.find(c => c.name.toLowerCase() === trimmed);
+      if (found) return found;
+    }
+    if (ev.summary) {
+      const summaryClean = ev.summary
+        .replace(/^(consultation|rdv|rendez-vous|séance|seance|visite|osteopathie|ostéopathie)\s*[:-]?\s*/i, '')
+        .split('-')[0]
+        .trim()
+        .toLowerCase();
+      const found = clients.find(c => c.name.toLowerCase().includes(summaryClean) || summaryClean.includes(c.name.toLowerCase()));
+      if (found) return found;
+    }
+    return null;
+  };
+
+  const hasAppointmentNote = (ev: { id?: string; clientId?: string; start?: string }) => {
+    const evDateStr = ev.start ? ev.start.split('T')[0] : '';
+    return allNotes.some(n => 
+      (n.eventId && n.eventId === ev.id) || 
+      (ev.clientId && n.clientId === ev.clientId && n.date.split('T')[0] === evDateStr)
+    );
+  };
+
+  const getAppointmentInvoice = (ev: { id?: string; clientId?: string; start?: string }) => {
+    const evDateStr = ev.start ? ev.start.split('T')[0] : '';
+    return invoices.find(i => 
+      (i.eventId && i.eventId === ev.id) || 
+      (i.noteId && i.noteId === ev.id) || 
+      (ev.clientId && i.clientId === ev.clientId && (
+        i.date.split('T')[0] === evDateStr || 
+        (i.paymentDate && i.paymentDate.split('T')[0] === evDateStr)
+      ))
+    );
+  };
+
+  const getEventNote = (ev: { id?: string; clientId?: string; start?: string }) => {
+    const evDateStr = ev.start ? ev.start.split('T')[0] : '';
+    return allNotes.find(n => 
+      (n.eventId && n.eventId === ev.id) || 
+      (ev.clientId && n.clientId === ev.clientId && n.date && n.date.split('T')[0] === evDateStr) ||
+      (ev.clientId && n.clientId === ev.clientId)
+    );
   };
 
   const getEventTypeLabel = (type?: EventType) => {
@@ -3964,26 +4018,23 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
         {activeTab === 'calendar' && (
           <div className="space-y-6 flex-1">
             
-            {/* Jane.app Style Header Bar */}
+            {/* Clinic Schedule Header Bar */}
             <div className="bg-white p-5 sm:p-6 rounded-3xl border border-slate-200/90 shadow-sm flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
               <div>
                 <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-2xl bg-teal-50 text-[#0e9f8e] flex items-center justify-center border border-teal-100 shadow-2xs">
+                  <div className="w-10 h-10 rounded-2xl bg-cyan-50 text-[#009cb2] flex items-center justify-center border border-cyan-100 shadow-2xs">
                     <CalendarIcon size={22} />
                   </div>
                   <div>
                     <h3 className="text-xl font-bold font-serif text-slate-900 flex items-center gap-2">
                       {lang === 'fr' ? 'Agenda du Cabinet' : lang === 'es' ? 'Agenda de la Clínica' : 'Clinic Schedule'}
-                      <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-teal-50 text-[#0e9f8e] border border-teal-200/80">
-                        Jane.app
-                      </span>
                     </h3>
                     <p className="text-xs text-slate-500 mt-0.5">
                       {lang === 'fr' 
-                        ? "Planning des consultations · Statuts de notes et facturation en temps réel" 
+                        ? "Planning des consultations · Horaires, coordonnées et notes cliniques" 
                         : lang === 'es' 
-                          ? "Planificación de consultas · Estados de notas y facturación en tiempo real" 
-                          : "Appointment schedule · Real-time notes and billing status"}
+                          ? "Planificación de consultas · Horarios, contacto y notas clínicas" 
+                          : "Appointment schedule · Times, contact and clinical notes"}
                     </p>
                   </div>
                 </div>
@@ -4117,33 +4168,15 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                 }).sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
               };
 
-              const hasAppointmentNote = (ev: CalendarEvent) => {
-                const evDateStr = ev.start ? ev.start.split('T')[0] : '';
-                return allNotes.some(n => 
-                  (n.eventId && n.eventId === ev.id) || 
-                  (ev.clientId && n.clientId === ev.clientId && n.date.split('T')[0] === evDateStr)
-                );
-              };
-
-              const getAppointmentInvoice = (ev: CalendarEvent) => {
-                const evDateStr = ev.start ? ev.start.split('T')[0] : '';
-                return invoices.find(i => 
-                  (i.eventId && i.eventId === ev.id) || 
-                  (i.noteId && i.noteId === ev.id) || 
-                  (ev.clientId && i.clientId === ev.clientId && (
-                    i.date.split('T')[0] === evDateStr || 
-                    (i.paymentDate && i.paymentDate.split('T')[0] === evDateStr)
-                  ))
-                );
-              };
-
               const handleQuickAddEvent = (dateStr: string, timeStr?: string) => {
                 const startTime = timeStr || '10:00';
-                let endTime = '11:00';
+                let endTime = '10:55';
                 if (timeStr) {
                   const [h, m] = timeStr.split(':').map(Number);
-                  const endH = String((h + 1) % 24).padStart(2, '0');
-                  endTime = `${endH}:${String(m).padStart(2, '0')}`;
+                  const date = new Date();
+                  date.setHours(h);
+                  date.setMinutes((m || 0) + 55);
+                  endTime = `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
                 }
                 setNewEvent(prev => ({
                   ...prev,
@@ -4152,161 +4185,111 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                   endTime: endTime,
                   title: getDefaultAppointmentTitle(lang),
                   description: '',
+                  eventType: 'appointment',
                 }));
                 setIsAddEventOpen(true);
               };
 
-              // Signature Jane.app Appointment Card
-              const renderJaneCard = (ev: CalendarEvent, isCompact = false) => {
+              // Clean Medical Cyan Appointment Card (Heure, Nom Prénom, Profile Note)
+              const renderAppointmentCard = (ev: CalendarEvent) => {
                 const isOther = ev.eventType && ev.eventType !== 'appointment';
-                const timeStatus = getAppointmentTimeStatus(ev);
                 const startStr = new Date(ev.start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
                 const endStr = new Date(ev.end).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-                const durationMinutes = Math.round((new Date(ev.end).getTime() - new Date(ev.start).getTime()) / (60 * 1000)) || 55;
                 const hasNote = !isOther && hasAppointmentNote(ev);
-                const inv = !isOther ? getAppointmentInvoice(ev) : undefined;
-                const isPaid = inv && inv.status === 'paid';
-                const isToday = ev.start.split('T')[0] === todayStr;
+                const client = !isOther ? getEventClient(ev) : null;
+                const profileNote = client?.profileNote?.trim();
+                const cleanRemark = ev.description?.replace(/\[eventType:[a-z]+\]/gi, '').replace(/\[type:[a-z]+\]/gi, '').trim();
+
+                if (isOther) {
+                  // Si il y a une remarque pour les slots bloqués, privilégier la remarque plutôt que le slot title
+                  const displayLabel = cleanRemark || ev.summary || (lang === 'fr' ? 'Créneau indisponible' : 'Bloqueado');
+                  return (
+                    <div
+                      key={ev.id}
+                      onClick={() => setSelectedAppointmentForDetails(ev)}
+                      className="rounded-lg p-2 bg-amber-100/90 hover:bg-amber-100 border border-amber-300 text-amber-950 shadow-2xs hover:shadow-sm cursor-pointer transition-all relative group/card"
+                      title={lang === 'fr' ? "Cliquer pour voir les détails" : "Click to view details"}
+                    >
+                      <div className="flex items-center justify-between gap-1 text-[11px] font-bold">
+                        <span className="font-mono">{startStr} - {endStr}</span>
+                        <Lock size={12} className="text-amber-700 shrink-0" />
+                      </div>
+                      <p className="text-xs font-semibold text-amber-900 truncate mt-0.5">
+                        {displayLabel}
+                      </p>
+                      {cleanRemark && ev.summary && cleanRemark !== ev.summary && (
+                        <p className="text-[10px] text-amber-800/80 truncate font-normal mt-0.5">
+                          {ev.summary}
+                        </p>
+                      )}
+                    </div>
+                  );
+                }
 
                 return (
                   <div
                     key={ev.id}
-                    onClick={() => openEditEventModal(ev)}
-                    className={`rounded-xl border transition-all cursor-pointer p-3 relative group/card border-l-4 shadow-[0_1px_3px_rgba(0,0,0,0.06)] hover:shadow-md ${
-                      isOther 
-                        ? 'bg-amber-50/70 border-amber-200/90 border-l-amber-500 hover:border-amber-400' 
-                        : isToday && timeStatus.isOngoing
-                        ? 'bg-teal-50/90 border-teal-300/90 border-l-[#0e9f8e] ring-2 ring-teal-400/40 shadow-sm'
-                        : hasNote
-                        ? 'bg-sky-50/60 border-sky-200/80 border-l-[#0e9f8e] hover:border-[#0e9f8e]'
-                        : 'bg-white border-slate-200/90 border-l-[#0e9f8e] hover:border-[#0e9f8e]'
-                    }`}
+                    onClick={() => setSelectedAppointmentForDetails(ev)}
+                    className="rounded-lg p-2 bg-[#38c9d8] hover:bg-[#2fc0cf] border border-[#20b4c5] text-[#063840] shadow-2xs hover:shadow-md cursor-pointer transition-all relative group/card select-none"
+                    title={lang === 'fr' ? "Cliquer pour voir les détails du rendez-vous" : "Click to view appointment details"}
                   >
-                    {/* Top Row: Patient Name & Actions */}
-                    <div className="flex items-start justify-between gap-1.5 mb-1">
-                      <h5 className={`font-bold text-xs sm:text-[13px] leading-tight truncate ${isOther ? 'text-amber-950' : 'text-slate-900'}`}>
-                        {getEventDisplayName(ev)}
-                      </h5>
-                      
-                      {/* Hover Quick Action Buttons */}
-                      <div className="opacity-0 group-hover/card:opacity-100 transition-opacity flex items-center gap-1 shrink-0">
-                        {!isOther && (
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleGoToNotes(ev);
-                            }}
-                            className="p-1 text-[#0e9f8e] hover:bg-[#0e9f8e]/10 rounded transition-colors"
-                            title={lang === 'fr' ? "Fiche patient & Notes" : "Patient File"}
-                          >
-                            <FileCheck size={12} />
-                          </button>
-                        )}
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            openEditEventModal(ev);
-                          }}
-                          className="p-1 text-slate-500 hover:bg-slate-100 rounded transition-colors"
-                          title={lang === 'fr' ? "Modifier" : "Edit"}
-                        >
-                          <Pencil size={11} />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleDeleteEvent(ev.id);
-                          }}
-                          className="p-1 text-rose-500 hover:bg-rose-50 rounded transition-colors"
-                          title={lang === 'fr' ? "Supprimer" : "Delete"}
-                        >
-                          <Trash2 size={11} />
-                        </button>
+                    {/* Top row: Heure - Nom Prénom & Note cloud icon */}
+                    <div className="flex items-start justify-between gap-1.5">
+                      <div className="min-w-0 flex-1">
+                        <div className="text-xs sm:text-[13px] font-bold text-[#063840] leading-tight flex items-baseline gap-1.5 flex-wrap">
+                          <span className="font-mono text-[11px] font-semibold text-[#063840]/80 shrink-0">
+                            {startStr} - {endStr}
+                          </span>
+                          <span className="truncate">{getEventDisplayName(ev)}</span>
+                        </div>
                       </div>
+
+                      {/* Note indicator in top-right (like the white cloud icon in the schedule) */}
+                      {hasNote && (
+                        <span
+                          className="shrink-0 w-5 h-5 rounded-md bg-white/45 text-[#063840] flex items-center justify-center shadow-2xs"
+                          title={lang === 'fr' ? "Note clinique enregistrée" : "Clinical note recorded"}
+                        >
+                          <FileText size={11} className="text-[#063840]" />
+                        </span>
+                      )}
                     </div>
 
-                    {/* Sub row: Time & Duration */}
-                    <div className="flex items-center gap-1.5 text-[11px] text-slate-500 mb-1.5">
-                      <span className="font-semibold text-slate-700 font-mono">
-                        {startStr} - {endStr}
-                      </span>
-                      <span>·</span>
-                      <span>{durationMinutes} min</span>
-                    </div>
-
-                    {/* Treatment title */}
-                    {!isOther ? (
-                      <p className="text-[11px] text-slate-600 truncate mb-2 font-medium">
-                        {ev.summary && ev.summary !== getEventDisplayName(ev) ? ev.summary : "Sesión de osteopatía"}
-                      </p>
-                    ) : (
-                      <span className="inline-block text-[10px] font-semibold text-amber-900 bg-amber-100/90 border border-amber-300/70 px-1.5 py-0.2 rounded mb-2">
-                        {getEventTypeLabel(ev.eventType)}
-                      </span>
-                    )}
-
-                    {/* Bottom Jane.app Status Pills */}
-                    {!isOther && (
-                      <div className="flex items-center gap-1.5 flex-wrap pt-1.5 border-t border-slate-100">
-                        {/* Clinical Note badge */}
-                        {hasNote ? (
-                          <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-teal-800 bg-teal-50 border border-teal-200/90 px-1.5 py-0.5 rounded-md" title="Note clinique au dossier rédigée">
-                            <CheckCircle2 size={11} className="text-[#0e9f8e]" />
-                            <span>{lang === 'fr' ? 'Note rédigée' : lang === 'es' ? 'Nota hecha' : 'Note done'}</span>
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-amber-800 bg-amber-50 border border-amber-200/80 px-1.5 py-0.5 rounded-md" title="En attente de rédaction de note clinique">
-                            <Clock size={11} className="text-amber-600" />
-                            <span>{lang === 'fr' ? 'Attente note' : lang === 'es' ? 'Nota pend.' : 'Note pend.'}</span>
-                          </span>
-                        )}
-
-                        {/* Payment status badge */}
-                        {isPaid ? (
-                          <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-800 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded-md" title="Paiement enregistré">
-                            <CheckCircle2 size={11} className="text-emerald-600" />
-                            <span>{lang === 'fr' ? `Payé (${inv.amount} €)` : `Pagado (${inv.amount} €)`}</span>
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1 text-[10px] font-medium text-slate-500 bg-slate-100 border border-slate-200 px-1.5 py-0.5 rounded-md" title="Paiement non encaissé">
-                            <CreditCard size={11} className="text-slate-400" />
-                            <span>{lang === 'fr' ? 'Non réglé' : lang === 'es' ? 'No cobrado' : 'Unpaid'}</span>
-                          </span>
-                        )}
-
-                        {/* Live appointment status (if today) */}
-                        {isToday && (
-                          timeStatus.isOngoing ? (
-                            <span className="text-[10px] font-extrabold px-1.5 py-0.5 rounded-md bg-[#0e9f8e] text-white animate-pulse inline-flex items-center gap-1 shadow-xs ml-auto">
-                              <span className="w-1.5 h-1.5 rounded-full bg-white"></span>
-                              {lang === 'fr' ? 'En cours' : 'Live'}
-                            </span>
-                          ) : timeStatus.isPast ? (
-                            <span className="text-[10px] font-semibold text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded-md ml-auto">
-                              {lang === 'fr' ? 'Passé' : 'Past'}
-                            </span>
-                          ) : null
-                        )}
+                    {/* Profile Note si il y en a une */}
+                    {profileNote && (
+                      <div className="mt-1 p-1 px-1.5 rounded-md bg-white/60 border border-white/50 text-[10px] text-[#063840] flex items-start gap-1 leading-snug">
+                        <Info size={10} className="shrink-0 mt-0.5 opacity-80 text-[#063840]" />
+                        <span className="line-clamp-2 italic font-medium">
+                          {profileNote}
+                        </span>
                       </div>
                     )}
 
-                    {/* Direct Fiche Jump Button */}
-                    {!isOther && (
+                    {/* Hover action buttons (Edit & Delete) */}
+                    <div className="absolute top-1.5 right-1.5 opacity-0 group-hover/card:opacity-100 transition-opacity flex items-center gap-1 bg-white/85 backdrop-blur-xs px-1 py-0.5 rounded shadow-2xs">
                       <button
                         type="button"
                         onClick={(e) => {
                           e.stopPropagation();
-                          handleGoToNotes(ev);
+                          openEditEventModal(ev);
                         }}
-                        className="mt-2 w-full py-1 px-2 rounded-lg text-[10px] font-bold text-[#0e9f8e] hover:text-white hover:bg-[#0e9f8e] bg-[#0e9f8e]/5 border border-[#0e9f8e]/20 transition-all flex items-center justify-center gap-1 cursor-pointer"
+                        className="p-1 text-slate-700 hover:text-primary rounded transition-colors"
+                        title={lang === 'fr' ? "Modifier le RDV" : "Edit"}
                       >
-                        <FileText size={11} />
-                        <span>{lang === 'fr' ? "Fiche patient & Notes" : "Patient File & Notes"}</span>
+                        <Pencil size={11} />
                       </button>
-                    )}
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDeleteEvent(ev.id);
+                        }}
+                        className="p-1 text-rose-600 hover:bg-rose-50 rounded transition-colors"
+                        title={lang === 'fr' ? "Supprimer le RDV" : "Delete"}
+                      >
+                        <Trash2 size={11} />
+                      </button>
+                    </div>
                   </div>
                 );
               };
@@ -4385,41 +4368,67 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                     </div>
 
                     <div className="flex items-center gap-3 text-xs text-slate-500">
-                      <span className="w-2.5 h-2.5 rounded-full bg-[#0e9f8e]"></span>
+                      <span className="w-2.5 h-2.5 rounded-full bg-[#009cb2]"></span>
                       <span>
                         {calendarViewMode === 'month' 
-                          ? (lang === 'fr' ? "Cliquez sur une date pour ouvrir la vue Jane.app de la journée" : "Click on a day to see Jane.app schedule")
+                          ? (lang === 'fr' ? "Cliquez sur une date pour voir les rendez-vous" : "Click on a date to see appointments")
                           : calendarViewMode === 'week'
-                          ? (lang === 'fr' ? "Cliquez sur un créneau ou un rendez-vous pour gérer les notes" : "Click on a slot or appointment to manage notes")
-                          : (lang === 'fr' ? "Planning journalier avec accès direct aux dossiers médicaux" : "Daily schedule with direct patient file access")}
+                          ? (lang === 'fr' ? "Cliquez sur un rendez-vous pour ouvrir la fiche patient et la note" : "Click on an appointment to view patient file & notes")
+                          : (lang === 'fr' ? "Planning journalier des consultations" : "Daily consultation schedule")}
                       </span>
                     </div>
                   </div>
 
-                  {/* VIEW 1: JANE.APP WEEK VIEW (Default & Primary) */}
-                  {calendarViewMode === 'week' && (
-                    <div className="w-full overflow-x-auto">
-                      <div className="min-w-[920px]">
-                        <div className="grid grid-cols-7 gap-3">
-                          {getWeekDates(currentCalendarDate).map((dayItem, dayIdx) => {
-                            const dayEvents = getEventsForDate(dayItem.dateString);
+                  {/* VIEW 1: WEEK VIEW (Hourly grid respecting real time-slot spaces) */}
+                  {calendarViewMode === 'week' && (() => {
+                    const weekDays = getWeekDates(currentCalendarDate);
+                    const allWeekEvents = weekDays.flatMap(d => getEventsForDate(d.dateString));
 
-                            return (
-                              <div
-                                key={dayIdx}
-                                className={`flex flex-col rounded-2xl border transition-all ${
-                                  dayItem.isToday
-                                    ? 'bg-teal-50/15 border-teal-300/80 shadow-xs ring-1 ring-teal-200/60'
-                                    : 'bg-[#fafafa] border-slate-200/80 hover:border-slate-300'
-                                }`}
-                              >
-                                {/* Jane.app Week Day Column Header */}
-                                <div className="p-3 border-b border-slate-200/70 flex items-center justify-between gap-1">
+                    // Default hours from 08:00 to 20:00, expanding if earlier or later appointments exist
+                    let minHour = 8;
+                    let maxHour = 20;
+                    allWeekEvents.forEach(ev => {
+                      try {
+                        const h = new Date(ev.start).getHours();
+                        if (!isNaN(h)) {
+                          if (h < minHour && h >= 6) minHour = h;
+                          if (h > maxHour && h <= 23) maxHour = h;
+                        }
+                      } catch {}
+                    });
+
+                    const hours: string[] = [];
+                    for (let h = minHour; h <= maxHour; h++) {
+                      hours.push(`${String(h).padStart(2, '0')}:00`);
+                    }
+
+                    return (
+                      <div className="w-full overflow-x-auto rounded-2xl border border-slate-200/90 bg-white shadow-2xs">
+                        <div className="min-w-[1050px]">
+                          {/* Grid Header: Time column + 7 Day Headers with Day Number & Gold Counters */}
+                          <div className="grid grid-cols-[64px_repeat(7,minmax(140px,1fr))] border-b border-slate-200 bg-slate-50/95 sticky top-0 z-10 shadow-2xs">
+                            {/* Left axis header */}
+                            <div className="p-3 border-r border-slate-200/80 flex items-center justify-center text-slate-400">
+                              <Clock size={16} />
+                            </div>
+
+                            {/* 7 Days of the Week */}
+                            {weekDays.map((dayItem, dayIdx) => {
+                              const dayEvents = getEventsForDate(dayItem.dateString);
+                              const dayApptsCount = dayEvents.filter(ev => !ev.eventType || ev.eventType === 'appointment').length;
+
+                              return (
+                                <div
+                                  key={dayIdx}
+                                  className={`p-2.5 border-r border-slate-200/80 last:border-r-0 flex items-center justify-between gap-1.5 transition-colors ${
+                                    dayItem.isToday ? 'bg-[#e0f5f7]/60' : 'bg-white/80'
+                                  }`}
+                                >
                                   <div>
                                     <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">
                                       {dayItem.dayName}
                                     </span>
-                                    <div className="flex items-center gap-1.5 mt-1">
+                                    <div className="flex items-center gap-1.5 mt-0.5">
                                       <button
                                         onClick={() => {
                                           setCurrentCalendarDate(dayItem.date);
@@ -4427,65 +4436,106 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                         }}
                                         className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold transition-all hover:scale-105 cursor-pointer ${
                                           dayItem.isToday
-                                            ? 'bg-[#0e9f8e] text-white shadow-xs ring-2 ring-[#0e9f8e]/30'
+                                            ? 'bg-[#009cb2] text-white shadow-xs ring-2 ring-[#009cb2]/30'
                                             : 'text-slate-800 hover:bg-slate-200/60'
                                         }`}
                                         title={lang === 'fr' ? "Basculer sur la vue Jour" : "Switch to Day View"}
                                       >
                                         {dayItem.dayNumber}
                                       </button>
-                                      {(() => {
-                                        const dayApptsCount = dayEvents.filter(ev => !ev.eventType || ev.eventType === 'appointment').length;
-                                        return dayApptsCount > 0 ? (
-                                          <span className="text-[10px] font-bold text-[#0e9f8e] bg-teal-50 border border-teal-200/80 px-1.5 py-0.2 rounded-full">
-                                            {dayApptsCount}
-                                          </span>
-                                        ) : null;
-                                      })()}
+                                      {dayApptsCount > 0 && (
+                                        <span 
+                                          className="w-5 h-5 rounded-full bg-[#f59e0b] text-white font-bold text-[10px] flex items-center justify-center shadow-2xs shrink-0" 
+                                          title={`${dayApptsCount} RDV`}
+                                        >
+                                          {dayApptsCount}
+                                        </span>
+                                      )}
                                     </div>
                                   </div>
 
                                   <button
                                     onClick={() => handleQuickAddEvent(dayItem.dateString)}
-                                    className="p-1.5 rounded-xl text-[#0e9f8e] hover:bg-teal-50 transition-colors cursor-pointer"
+                                    className="p-1.5 rounded-xl text-[#009cb2] hover:bg-cyan-100/70 transition-colors cursor-pointer"
                                     title={lang === 'fr' ? `Ajouter un RDV le ${dayItem.dayName} ${dayItem.dayNumber}` : "Add appointment"}
                                   >
                                     <Plus size={15} />
                                   </button>
                                 </div>
+                              );
+                            })}
+                          </div>
 
-                                {/* Jane.app Week Day Column Content */}
-                                <div className="p-2 space-y-2.5 flex-1 min-h-[380px] flex flex-col justify-between">
-                                  <div className="space-y-2.5">
-                                    {dayEvents.map((ev) => renderJaneCard(ev))}
+                          {/* Hourly Slot Rows (respecting intervals between appointments) */}
+                          <div className="divide-y divide-slate-200/70">
+                            {hours.map((hourStr, hIdx) => {
+                              const hourNum = parseInt(hourStr.split(':')[0], 10);
 
-                                    {dayEvents.length === 0 && (
-                                      <div className="py-12 text-center">
-                                        <p className="text-[11px] text-slate-400 font-medium">
-                                          {lang === 'fr' ? "Aucun RDV" : lang === 'es' ? "Sin citas" : "No appointments"}
-                                        </p>
-                                      </div>
-                                    )}
+                              return (
+                                <div
+                                  key={hIdx}
+                                  className="grid grid-cols-[64px_repeat(7,minmax(140px,1fr))] min-h-[66px]"
+                                >
+                                  {/* Left Hour Label */}
+                                  <div className="py-2.5 pr-2.5 text-right font-mono text-[11px] font-bold text-slate-400 select-none bg-slate-50/50 border-r border-slate-200/80">
+                                    {hourStr}
                                   </div>
 
-                                  {/* Quick add footer button */}
-                                  <button
-                                    onClick={() => handleQuickAddEvent(dayItem.dateString)}
-                                    className="w-full py-2 px-2 mt-2 rounded-xl text-[11px] font-bold text-[#0e9f8e] hover:text-white hover:bg-[#0e9f8e] bg-teal-50/50 border border-dashed border-[#0e9f8e]/30 transition-all flex items-center justify-center gap-1 cursor-pointer"
-                                  >
-                                    <Plus size={12} />
-                                    <span>{lang === 'fr' ? "Ajouter un créneau" : lang === 'es' ? "Añadir horario" : "Add slot"}</span>
-                                  </button>
+                                  {/* 7 Columns for this hour */}
+                                  {weekDays.map((dayItem, dayIdx) => {
+                                    const dayEvents = getEventsForDate(dayItem.dateString);
+                                    const slotEvents = dayEvents.filter(ev => {
+                                      try {
+                                        const evDate = new Date(ev.start);
+                                        return evDate.getHours() === hourNum;
+                                      } catch {
+                                        return false;
+                                      }
+                                    });
+
+                                    return (
+                                      <div
+                                        key={dayIdx}
+                                        className={`p-1 border-r border-slate-200/60 last:border-r-0 relative group/slot transition-colors flex flex-col justify-start ${
+                                          dayItem.isToday ? 'bg-[#e0f5f7]/20' : 'bg-white'
+                                        }`}
+                                      >
+                                        {slotEvents.length > 0 ? (
+                                          <div className="space-y-1 w-full">
+                                            {slotEvents.map(ev => renderAppointmentCard(ev))}
+                                            <button
+                                              type="button"
+                                              onClick={() => handleQuickAddEvent(dayItem.dateString, hourStr)}
+                                              className="w-full py-0.5 text-[9px] font-bold text-[#009cb2] hover:bg-cyan-50/80 rounded border border-dashed border-[#009cb2]/30 transition-all flex items-center justify-center gap-1 opacity-0 group-hover/slot:opacity-100 cursor-pointer"
+                                              title={lang === 'fr' ? `Ajouter un autre RDV dans l'heure (${hourStr})` : `Add another appointment at ${hourStr}`}
+                                            >
+                                              <Plus size={10} />
+                                              <span>{lang === 'fr' ? `+ RDV (${hourStr})` : `+ Add`}</span>
+                                            </button>
+                                          </div>
+                                        ) : (
+                                          <button
+                                            type="button"
+                                            onClick={() => handleQuickAddEvent(dayItem.dateString, hourStr)}
+                                            className="w-full h-full min-h-[58px] rounded-lg border border-dashed border-transparent hover:border-[#009cb2]/40 hover:bg-[#009cb2]/5 flex items-center justify-center text-[#009cb2] opacity-0 group-hover/slot:opacity-100 transition-all cursor-pointer"
+                                            title={lang === 'fr' ? `Ajouter à ${hourStr}` : `Add at ${hourStr}`}
+                                          >
+                                            <Plus size={14} className="stroke-[2.5]" />
+                                          </button>
+                                        )}
+                                      </div>
+                                    );
+                                  })}
                                 </div>
-                              </div>
-                            );
-                          })}
+                              );
+                            })}
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  )}
+                    );
+                  })()}
 
-                  {/* VIEW 2: JANE.APP DAY VIEW */}
+                  {/* VIEW 2: DAY VIEW (Matching screenshot organization & practitioner column) */}
                   {calendarViewMode === 'day' && (
                     <div className="space-y-6">
                       {(() => {
@@ -4498,6 +4548,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
 
                         const dayEvents = getEventsForDate(currentDateStr);
                         const isToday = currentDateStr === todayStr;
+                        const dayApptsCount = dayEvents.filter(ev => !ev.eventType || ev.eventType === 'appointment').length;
 
                         const hours = [
                           '08:00', '09:00', '10:00', '11:00', '12:00', 
@@ -4507,40 +4558,46 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
 
                         return (
                           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                            {/* Left 2 Cols: Jane.app Timeline Schedule */}
+                            {/* Left 2 Cols: Schedule Grid inspired by uploaded image */}
                             <div className="lg:col-span-2 space-y-4">
-                              {/* Day Summary Header */}
-                              <div className="p-4 rounded-2xl bg-slate-50/80 border border-slate-200/80 flex flex-wrap items-center justify-between gap-3">
-                                <div>
-                                  <div className="flex items-center gap-2">
-                                    <h4 className="text-sm font-bold text-slate-900 capitalize">
-                                      {currentCalendarDate.toLocaleDateString(lang === 'fr' ? 'fr-FR' : lang === 'es' ? 'es-ES' : 'en-US', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
-                                    </h4>
-                                    {isToday && (
-                                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-[#0e9f8e] text-white">
-                                        {lang === 'fr' ? "Aujourd'hui" : lang === 'es' ? "Hoy" : "Today"}
-                                      </span>
-                                    )}
+                              {/* Practitioner Header Column (like Dr. Cam Coleman [4] Room 1 in screenshot) */}
+                              <div className="p-3.5 rounded-2xl bg-white border border-slate-200/90 shadow-2xs flex items-center justify-between gap-3">
+                                <div className="flex items-center gap-3">
+                                  {/* Doctor Avatar */}
+                                  <div className="w-10 h-10 rounded-full bg-cyan-100 border-2 border-[#38c9d8] flex items-center justify-center text-[#00838f] font-bold text-xs shadow-2xs shrink-0 overflow-hidden">
+                                    <User size={20} className="text-[#00838f]" />
                                   </div>
-                                  <p className="text-xs text-slate-500 mt-0.5">
-                                    {(() => {
-                                      const dayApptsCount = dayEvents.filter(ev => !ev.eventType || ev.eventType === 'appointment').length;
-                                      return `${dayApptsCount} ${dayApptsCount <= 1 ? (lang === 'fr' ? 'consultation prévue' : 'appointment scheduled') : (lang === 'fr' ? 'consultations prévues' : 'appointments scheduled')}`;
-                                    })()}
-                                  </p>
+                                  <div>
+                                    <div className="flex items-center gap-2">
+                                      <h4 className="text-sm font-bold text-[#009cb2]">
+                                        Vincent Durroux
+                                      </h4>
+                                      <span className="w-5 h-5 rounded-full bg-[#f59e0b] text-white font-bold text-[11px] flex items-center justify-center shadow-2xs">
+                                        {dayApptsCount}
+                                      </span>
+                                    </div>
+                                    <div className="flex items-center gap-2 mt-0.5">
+                                      <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-[#38c9d8]/20 text-[#006064] border border-[#38c9d8]/40">
+                                        {lang === 'fr' ? 'Cabinet Principal' : 'Main Clinic'}
+                                      </span>
+                                      <span className="text-[11px] text-slate-500 capitalize">
+                                        {currentCalendarDate.toLocaleDateString(lang === 'fr' ? 'fr-FR' : lang === 'es' ? 'es-ES' : 'en-US', { weekday: 'long', day: 'numeric', month: 'short' })}
+                                      </span>
+                                    </div>
+                                  </div>
                                 </div>
 
                                 <button
                                   onClick={() => handleQuickAddEvent(currentDateStr)}
-                                  className="flex items-center gap-1.5 px-3 py-1.5 bg-[#0e9f8e] hover:bg-[#0c8a7b] text-white rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer"
+                                  className="flex items-center gap-1.5 px-3 py-1.5 bg-[#009cb2] hover:bg-[#00838f] text-white rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer"
                                 >
                                   <Plus size={14} />
-                                  <span>{lang === 'fr' ? "Ajouter un rendez-vous ce jour" : "Add appointment today"}</span>
+                                  <span className="hidden sm:inline">{lang === 'fr' ? "Nouveau RDV" : "New Appt"}</span>
                                 </button>
                               </div>
 
-                              {/* Hourly Schedule Table with Jane.app Cards */}
-                              <div className="space-y-2.5 relative">
+                              {/* Hourly Schedule Table with Aqua Mint Column Background */}
+                              <div className="rounded-2xl border border-slate-200 bg-[#e0f5f7]/30 p-3 sm:p-4 space-y-2 relative">
                                 {hours.map((hourStr, hIdx) => {
                                   const hourNum = parseInt(hourStr.split(':')[0], 10);
                                   
@@ -4555,26 +4612,37 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                   });
 
                                   return (
-                                    <div key={hIdx} className="flex items-start gap-3 py-1">
-                                      {/* Hour Label */}
-                                      <div className="w-14 shrink-0 text-right pt-2.5">
+                                    <div key={hIdx} className="flex items-start gap-3 py-1 border-b border-cyan-100/60 last:border-0">
+                                      {/* Hour Label (left axis like screenshot) */}
+                                      <div className="w-14 shrink-0 text-right pt-2">
                                         <span className="text-xs font-bold text-slate-500 font-mono">{hourStr}</span>
                                       </div>
 
                                       {/* Slot Content */}
-                                      <div className="flex-1 space-y-2.5">
+                                      <div className="flex-1 space-y-2">
                                         {slotEvents.length > 0 ? (
-                                          slotEvents.map(ev => renderJaneCard(ev))
+                                          <div className="space-y-1.5">
+                                            {slotEvents.map(ev => renderAppointmentCard(ev))}
+                                            <button
+                                              type="button"
+                                              onClick={() => handleQuickAddEvent(currentDateStr, hourStr)}
+                                              className="w-full py-1 text-[11px] font-bold text-[#009cb2] hover:bg-white/80 rounded-lg border border-dashed border-cyan-300/60 transition-all flex items-center justify-center gap-1.5 opacity-60 hover:opacity-100 cursor-pointer"
+                                              title={lang === 'fr' ? `Ajouter un autre RDV dans ce créneau (${hourStr})` : `Add another appointment (${hourStr})`}
+                                            >
+                                              <Plus size={12} />
+                                              <span>{lang === 'fr' ? `+ Ajouter un autre rendez-vous dans ce créneau (${hourStr})` : `+ Add another appointment (${hourStr})`}</span>
+                                            </button>
+                                          </div>
                                         ) : (
                                           <div
                                             onClick={() => handleQuickAddEvent(currentDateStr, hourStr)}
-                                            className="h-10 rounded-xl border border-dashed border-slate-200 hover:border-[#0e9f8e]/50 hover:bg-teal-50/20 flex items-center justify-between px-3 cursor-pointer group/slot transition-all"
+                                            className="h-9 rounded-lg border border-dashed border-cyan-300/60 hover:border-[#009cb2] hover:bg-white/70 flex items-center justify-between px-3 cursor-pointer group/slot transition-all bg-white/30"
                                           >
-                                            <span className="text-[11px] text-slate-400 group-hover/slot:text-[#0e9f8e] transition-colors flex items-center gap-1 font-medium">
+                                            <span className="text-[11px] text-cyan-900/60 group-hover/slot:text-[#009cb2] transition-colors flex items-center gap-1 font-medium">
                                               <Plus size={12} className="opacity-0 group-hover/slot:opacity-100 transition-opacity" />
                                               <span>{lang === 'fr' ? `Créneau libre (${hourStr})` : `Free slot (${hourStr})`}</span>
                                             </span>
-                                            <span className="text-[10px] font-bold text-[#0e9f8e] opacity-0 group-hover/slot:opacity-100 transition-opacity">
+                                            <span className="text-[10px] font-bold text-[#009cb2] opacity-0 group-hover/slot:opacity-100 transition-opacity">
                                               {lang === 'fr' ? "+ Réserver" : "+ Book"}
                                             </span>
                                           </div>
@@ -4586,42 +4654,45 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                               </div>
                             </div>
 
-                            {/* Right 1 Col: Day Insights & Quick Actions */}
+                            {/* Right 1 Col: Day Insights & Patients List */}
                             <div className="space-y-6">
                               {/* Quick summary of today's patients */}
                               <div className="bg-slate-50/80 p-5 rounded-2xl border border-slate-200/80 space-y-3">
-                                <h4 className="text-xs font-bold uppercase tracking-wider text-[#0e9f8e] flex items-center gap-2">
+                                <h4 className="text-xs font-bold uppercase tracking-wider text-[#009cb2] flex items-center gap-2">
                                   <Users size={14} /> {lang === 'fr' ? "Patients du jour" : "Patients of the day"}
                                 </h4>
                                 
                                 <div className="space-y-2">
                                   {dayEvents.filter(ev => !ev.eventType || ev.eventType === 'appointment').map(ev => {
-                                    const hasNote = hasAppointmentNote(ev);
-                                    const inv = getAppointmentInvoice(ev);
-                                    const isPaid = inv && inv.status === 'paid';
+                                    const client = getEventClient(ev);
+                                    const profileNote = client?.profileNote?.trim();
 
                                     return (
                                       <div 
                                         key={ev.id}
-                                        className="p-3 rounded-xl bg-white border border-slate-200/80 flex items-center justify-between gap-2 shadow-2xs"
+                                        onClick={() => setSelectedAppointmentForDetails(ev)}
+                                        className="p-3 rounded-xl bg-white border border-slate-200/80 flex items-center justify-between gap-2 shadow-2xs hover:border-[#009cb2] transition-all cursor-pointer"
                                       >
                                         <div className="min-w-0">
                                           <h5 className="text-xs font-bold text-slate-900 leading-tight truncate">
                                             {getEventDisplayName(ev)}
                                           </h5>
                                           <div className="flex items-center gap-1.5 text-[10px] text-slate-500 mt-1">
-                                            <span>{new Date(ev.start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                                            <span>·</span>
-                                            {hasNote ? (
-                                              <span className="text-teal-700 font-semibold">{lang === 'fr' ? 'Note ✓' : 'Note ✓'}</span>
-                                            ) : (
-                                              <span className="text-amber-700 font-semibold">{lang === 'fr' ? 'Note en attente' : 'Note pending'}</span>
+                                            <span className="font-mono">{new Date(ev.start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                                            {profileNote && (
+                                              <>
+                                                <span>·</span>
+                                                <span className="text-amber-800 font-medium italic truncate max-w-[150px]">{profileNote}</span>
+                                              </>
                                             )}
                                           </div>
                                         </div>
                                         <button
-                                          onClick={() => handleGoToNotes(ev)}
-                                          className="px-2.5 py-1.5 bg-[#0e9f8e]/10 hover:bg-[#0e9f8e] text-[#0e9f8e] hover:text-white rounded-lg text-[10px] font-bold transition-all cursor-pointer shrink-0"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            handleGoToNotes(ev);
+                                          }}
+                                          className="px-2.5 py-1.5 bg-cyan-50 hover:bg-[#009cb2] text-[#009cb2] hover:text-white rounded-lg text-[10px] font-bold transition-all cursor-pointer shrink-0"
                                           title={lang === 'fr' ? "Ouvrir la fiche patient & notes" : "Patient File"}
                                         >
                                           {lang === 'fr' ? "Fiche" : "File"}
@@ -4641,7 +4712,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                               {/* Consultation Hours Summary */}
                               <div className="bg-slate-50/80 p-5 rounded-2xl border border-slate-200/80 space-y-4">
                                 <div>
-                                  <h4 className="text-xs font-bold uppercase tracking-wider text-[#0e9f8e] mb-1">
+                                  <h4 className="text-xs font-bold uppercase tracking-wider text-[#009cb2] mb-1">
                                     {lang === 'fr' ? "Horaires du Cabinet" : lang === 'es' ? "Horarios de consulta" : "Consultation hours"}
                                   </h4>
                                   <p className="text-[11px] text-slate-500">
@@ -4669,7 +4740,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                     </div>
                   )}
 
-                  {/* VIEW 3: JANE.APP MONTH VIEW */}
+                  {/* VIEW 3: MONTH VIEW */}
                   {calendarViewMode === 'month' && (
                     <div className="w-full overflow-x-auto">
                       <div className="min-w-[700px]">
@@ -4785,7 +4856,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                       </div>
                                     </div>
 
-                                    {/* Events snippets in cell (Jane.app mini strips) */}
+                                    {/* Events snippets in cell (mini cyan cards) */}
                                     <div className="mt-1 space-y-1 overflow-hidden">
                                       {dayEvents.slice(0, 3).map((ev, evIdx) => {
                                         const isOther = ev.eventType && ev.eventType !== 'appointment';
@@ -4797,22 +4868,20 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                             key={evIdx}
                                             onClick={(e) => {
                                               e.stopPropagation();
-                                              setSelectedDayModalDate(cell.dateString);
+                                              setSelectedAppointmentForDetails(ev);
                                             }}
-                                            className={`px-2 py-1 rounded-lg text-[10px] font-bold truncate leading-tight flex items-center justify-between transition-colors shadow-2xs border-l-2 ${
+                                            className={`px-1.5 py-0.5 rounded text-[10px] font-bold truncate leading-tight flex items-center justify-between transition-colors shadow-2xs ${
                                               isOther
-                                                ? 'bg-amber-100/80 text-amber-900 border-amber-300 border-l-amber-600 hover:bg-amber-200/80'
-                                                : hasNote
-                                                ? 'bg-sky-50 text-sky-950 border-sky-200 border-l-[#0e9f8e] hover:bg-sky-100'
-                                                : 'bg-white hover:bg-teal-50/40 text-slate-800 border-slate-200 border-l-[#0e9f8e]'
+                                                ? 'bg-amber-100 text-amber-950 border border-amber-300'
+                                                : 'bg-[#38c9d8] hover:bg-[#2fc0cf] text-[#063840] border border-[#20b4c5]'
                                             }`}
                                             title={`${timeStr} - ${getEventDisplayName(ev)}`}
                                           >
                                             <span className="truncate flex items-center gap-1">
                                               {isOther && <Lock size={10} className="shrink-0 text-amber-800" />}
-                                              {timeStr} {getEventDisplayName(ev)}
+                                              <span className="font-mono text-[9px] opacity-80">{timeStr}</span> {getEventDisplayName(ev)}
                                             </span>
-                                            {hasNote && <CheckCircle2 size={10} className="text-[#0e9f8e] shrink-0 ml-1" />}
+                                            {hasNote && <FileText size={10} className="text-[#063840] shrink-0 ml-1" />}
                                           </div>
                                         );
                                       })}
@@ -5849,39 +5918,36 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                     const endTime = endDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
                     const evDateStr = ev.start ? ev.start.split('T')[0] : '';
                     const hasNote = !isOther && allNotes.some(n => (n.eventId && n.eventId === ev.id) || (ev.clientId && n.clientId === ev.clientId && n.date.split('T')[0] === evDateStr));
-                    const inv = !isOther ? invoices.find(i => (i.eventId && i.eventId === ev.id) || (i.noteId && i.noteId === ev.id) || (ev.clientId && i.clientId === ev.clientId && (i.date.split('T')[0] === evDateStr || (i.paymentDate && i.paymentDate.split('T')[0] === evDateStr)))) : undefined;
-                    const isPaid = inv && inv.status === 'paid';
+                    const note = !isOther ? allNotes.find(n => (n.eventId && n.eventId === ev.id) || (ev.clientId && n.clientId === ev.clientId && n.date.split('T')[0] === evDateStr) || (ev.clientId && n.clientId === ev.clientId)) : undefined;
+                    const client = !isOther ? (ev.clientId ? clients.find(c => c.id === ev.clientId) : (ev.clientName ? clients.find(c => c.name.toLowerCase() === ev.clientName?.toLowerCase()) : undefined)) : undefined;
+                    const clientPhone = client?.phone || '';
 
                     return (
                       <div
                         key={ev.id}
-                        className={`p-4 rounded-2xl border shadow-2xs transition-all space-y-2.5 group border-l-4 ${
+                        className={`p-3.5 rounded-2xl border shadow-2xs transition-all space-y-2 group ${
                           isOther 
-                            ? 'bg-amber-50/50 hover:bg-amber-50/80 border-amber-200 border-l-amber-500' 
-                            : hasNote
-                            ? 'bg-sky-50/50 hover:bg-sky-50/80 border-sky-200/80 border-l-[#0e9f8e]'
-                            : 'bg-white hover:bg-slate-50 border-slate-200/80 border-l-[#0e9f8e]'
+                            ? 'bg-amber-50 border-amber-200 text-amber-950' 
+                            : 'bg-[#38c9d8]/15 hover:bg-[#38c9d8]/25 border-[#20b4c5]/50'
                         }`}
                       >
                         <div className="flex items-start justify-between gap-3">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span className={`px-2.5 py-1 text-xs font-bold rounded-lg border shrink-0 ${
-                              isOther ? 'bg-amber-100 text-amber-900 border-amber-300' : 'bg-teal-50 text-teal-800 border-teal-200/80'
+                          <div className="flex items-center gap-2 flex-wrap min-w-0">
+                            <span className={`px-2 py-0.5 text-xs font-bold rounded-lg border shrink-0 ${
+                              isOther ? 'bg-amber-100 text-amber-900 border-amber-300' : 'bg-white text-[#009cb2] border-[#20b4c5]/60'
                             }`}>
                               {startTime} - {endTime}
                             </span>
-                            <div className="flex flex-col">
-                              <div className="flex items-center gap-1.5">
-                                <span className="text-xs font-bold text-slate-900">{getEventDisplayName(ev)}</span>
-                                {isOther && (
-                                  <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-amber-200/80 text-amber-900 border border-amber-300">
-                                    {getEventTypeLabel(ev.eventType)}
-                                  </span>
-                                )}
-                              </div>
-                              {ev.summary && ev.summary !== getEventDisplayName(ev) && (
-                                <span className="text-xs font-medium text-slate-600 group-hover:text-[#0e9f8e] transition-colors">
-                                  {ev.summary}
+                            <div className="flex items-center gap-1.5 min-w-0">
+                              <span className="text-xs font-bold text-slate-900 truncate">{getEventDisplayName(ev)}</span>
+                              {isOther && (
+                                <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-amber-200/80 text-amber-900 border border-amber-300">
+                                  {getEventTypeLabel(ev.eventType)}
+                                </span>
+                              )}
+                              {hasNote && (
+                                <span className="w-5 h-5 rounded-md bg-white text-[#009cb2] flex items-center justify-center shadow-2xs shrink-0" title="Note clinique au dossier">
+                                  <FileText size={11} />
                                 </span>
                               )}
                             </div>
@@ -5893,7 +5959,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                 onClick={() => {
                                   handleGoToNotes(ev);
                                 }}
-                                className="px-2.5 py-1 bg-[#0e9f8e]/10 hover:bg-[#0e9f8e] text-[#0e9f8e] hover:text-white rounded-lg text-xs font-bold transition-all border border-[#0e9f8e]/20 flex items-center gap-1 cursor-pointer"
+                                className="px-2.5 py-1 bg-[#009cb2] hover:bg-[#00838f] text-white rounded-lg text-xs font-bold transition-all flex items-center gap-1 cursor-pointer shadow-2xs"
                                 title={lang === 'fr' ? 'Fiche patient & Notes' : 'Patient Notes'}
                               >
                                 <FileText size={12} />
@@ -5902,7 +5968,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                             )}
                             <button
                               onClick={() => openEditEventModal(ev)}
-                              className="p-1.5 text-slate-500 hover:text-[#0e9f8e] hover:bg-teal-50 rounded-lg transition-all cursor-pointer"
+                              className="p-1.5 text-slate-500 hover:text-[#009cb2] hover:bg-white rounded-lg transition-all cursor-pointer"
                               title={lang === 'fr' ? 'Modifier' : 'Edit'}
                             >
                               <Pencil size={14} />
@@ -5917,39 +5983,14 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                           </div>
                         </div>
 
-                        {/* Status Badges Row in Day Modal */}
-                        {!isOther && (
-                          <div className="flex items-center gap-1.5 pt-1 border-t border-slate-100 flex-wrap">
-                            {hasNote ? (
-                              <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-teal-800 bg-teal-50 border border-teal-200/90 px-1.5 py-0.5 rounded-md">
-                                <CheckCircle2 size={11} className="text-[#0e9f8e]" />
-                                <span>{lang === 'fr' ? 'Note rédigée' : 'Note done'}</span>
-                              </span>
-                            ) : (
-                              <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-amber-800 bg-amber-50 border border-amber-200/80 px-1.5 py-0.5 rounded-md">
-                                <Clock size={11} className="text-amber-600" />
-                                <span>{lang === 'fr' ? 'Attente note' : 'Note pending'}</span>
-                              </span>
-                            )}
-
-                            {isPaid ? (
-                              <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-800 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded-md">
-                                <CheckCircle2 size={11} className="text-emerald-600" />
-                                <span>{lang === 'fr' ? `Payé (${inv.amount} €)` : `Paid (${inv.amount} €)`}</span>
-                              </span>
-                            ) : (
-                              <span className="inline-flex items-center gap-1 text-[10px] font-medium text-slate-500 bg-slate-100 border border-slate-200 px-1.5 py-0.5 rounded-md">
-                                <CreditCard size={11} className="text-slate-400" />
-                                <span>{lang === 'fr' ? 'Non réglé' : 'Unpaid'}</span>
-                              </span>
-                            )}
+                        {/* Profile Note si il y en a une */}
+                        {client?.profileNote && (
+                          <div className="p-2 rounded-xl bg-white border border-[#20b4c5]/40 text-xs text-slate-800 flex items-start gap-1.5 shadow-2xs">
+                            <Info size={12} className="text-[#009cb2] shrink-0 mt-0.5" />
+                            <p className="text-[11px] leading-snug font-medium italic text-slate-700">
+                              {client.profileNote}
+                            </p>
                           </div>
-                        )}
-
-                        {ev.description && (
-                          <p className="text-xs text-slate-600 pl-1 border-l-2 border-[#0e9f8e]/30 leading-relaxed italic bg-slate-50 p-2 rounded-r-lg">
-                            {ev.description}
-                          </p>
                         )}
                       </div>
                     );
@@ -6349,19 +6390,48 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                       </label>
                       <input
                         type="time"
+                        step="60"
                         required
                         value={newEvent.startTime}
                         onChange={(e) => {
                           const startTime = e.target.value;
+                          if (!startTime) return;
                           const [hours, minutes] = startTime.split(':').map(Number);
                           const date = new Date();
                           date.setHours(hours);
-                          date.setMinutes(minutes + (newEvent.eventType === 'appointment' ? 55 : 30));
+                          date.setMinutes((minutes || 0) + (newEvent.eventType === 'appointment' ? 55 : 30));
                           const endTime = `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
                           setNewEvent(prev => ({ ...prev, startTime, endTime }));
                         }}
-                        className="w-full p-2.5 bg-secondary rounded-xl border border-black/5 text-xs focus:outline-none focus:ring-1 focus:ring-primary focus:bg-white transition-all"
+                        className="w-full p-2.5 bg-secondary rounded-xl border border-black/5 text-xs font-mono font-bold focus:outline-none focus:ring-1 focus:ring-primary focus:bg-white transition-all"
                       />
+                      {/* Minute presets :00, :15, :30, :45 */}
+                      <div className="flex items-center gap-1 mt-1.5 flex-wrap">
+                        {['00', '15', '30', '45'].map(min => {
+                          const currentH = newEvent.startTime ? newEvent.startTime.split(':')[0] : '10';
+                          const isSel = newEvent.startTime?.split(':')[1] === min;
+                          return (
+                            <button
+                              key={min}
+                              type="button"
+                              onClick={() => {
+                                const startTime = `${currentH}:${min}`;
+                                const [h, m] = [parseInt(currentH, 10), parseInt(min, 10)];
+                                const date = new Date();
+                                date.setHours(h);
+                                date.setMinutes((m || 0) + (newEvent.eventType === 'appointment' ? 55 : 30));
+                                const endTime = `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+                                setNewEvent(prev => ({ ...prev, startTime, endTime }));
+                              }}
+                              className={`px-1.5 py-0.5 rounded text-[10px] font-mono font-bold transition-all cursor-pointer ${
+                                isSel ? 'bg-[#009cb2] text-white shadow-2xs' : 'bg-slate-100 hover:bg-slate-200 text-slate-600'
+                              }`}
+                            >
+                              :{min}
+                            </button>
+                          );
+                        })}
+                      </div>
                     </div>
                     <div>
                       <label className="text-[10px] uppercase tracking-wider font-bold text-gray-400 block mb-1">
@@ -6369,11 +6439,38 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                       </label>
                       <input
                         type="time"
+                        step="60"
                         required
                         value={newEvent.endTime}
                         onChange={(e) => setNewEvent(prev => ({ ...prev, endTime: e.target.value }))}
-                        className="w-full p-2.5 bg-secondary rounded-xl border border-black/5 text-xs focus:outline-none focus:ring-1 focus:ring-primary focus:bg-white transition-all"
+                        className="w-full p-2.5 bg-secondary rounded-xl border border-black/5 text-xs font-mono font-bold focus:outline-none focus:ring-1 focus:ring-primary focus:bg-white transition-all"
                       />
+                      {/* Duration presets */}
+                      <div className="flex items-center gap-1 mt-1.5 flex-wrap">
+                        {[
+                          { label: '30m', mins: 30 },
+                          { label: '45m', mins: 45 },
+                          { label: '55m', mins: 55 },
+                          { label: '1h', mins: 60 },
+                        ].map(d => (
+                          <button
+                            key={d.label}
+                            type="button"
+                            onClick={() => {
+                              if (!newEvent.startTime) return;
+                              const [h, m] = newEvent.startTime.split(':').map(Number);
+                              const date = new Date();
+                              date.setHours(h);
+                              date.setMinutes((m || 0) + d.mins);
+                              const endTime = `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+                              setNewEvent(prev => ({ ...prev, endTime }));
+                            }}
+                            className="px-1.5 py-0.5 rounded text-[10px] font-mono font-medium bg-slate-100 hover:bg-slate-200 text-slate-600 transition-all cursor-pointer"
+                          >
+                            {d.label}
+                          </button>
+                        ))}
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -6415,6 +6512,288 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
             </motion.div>
           </div>
         )}
+      </AnimatePresence>
+
+      {/* MODAL: APPOINTMENT DETAILS (Détails du rendez-vous & Suppression sécurisée) */}
+      <AnimatePresence>
+        {selectedAppointmentForDetails && (() => {
+          const ev = selectedAppointmentForDetails;
+          const isOther = ev.eventType && ev.eventType !== 'appointment';
+          const client = !isOther ? getEventClient(ev) : null;
+          const cleanRemark = ev.description?.replace(/\[eventType:[a-z]+\]/gi, '').replace(/\[type:[a-z]+\]/gi, '').trim();
+          const profileNote = client?.profileNote?.trim();
+          
+          const startDate = new Date(ev.start);
+          const endDate = new Date(ev.end);
+          const dateFormatted = !isNaN(startDate.getTime())
+            ? startDate.toLocaleDateString(lang === 'fr' ? 'fr-FR' : lang === 'es' ? 'es-ES' : 'en-US', {
+                weekday: 'long',
+                day: 'numeric',
+                month: 'long',
+                year: 'numeric'
+              })
+            : '';
+          const startStr = !isNaN(startDate.getTime())
+            ? startDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+            : '';
+          const endStr = !isNaN(endDate.getTime())
+            ? endDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+            : '';
+          const durationMinutes = !isNaN(startDate.getTime()) && !isNaN(endDate.getTime())
+            ? Math.max(0, Math.round((endDate.getTime() - startDate.getTime()) / 60000))
+            : 55;
+
+          const eventDisplayName = isOther
+            ? (cleanRemark || ev.summary || (lang === 'fr' ? 'Créneau indisponible' : 'Bloqueado'))
+            : getEventDisplayName(ev);
+
+          const hasNote = !isOther && hasAppointmentNote(ev);
+          const existingInvoice = !isOther ? getAppointmentInvoice(ev) : null;
+
+          return (
+            <div 
+              className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs overflow-y-auto"
+              onClick={() => setSelectedAppointmentForDetails(null)}
+            >
+              <motion.div
+                initial={{ opacity: 0, scale: 0.95, y: 10 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.95, y: 10 }}
+                className="relative w-full max-w-lg bg-white rounded-3xl shadow-2xl p-6 sm:p-7 z-10 border border-slate-200 text-left my-auto"
+                onClick={(e) => e.stopPropagation()}
+              >
+                {/* Header */}
+                <div className="flex items-start justify-between gap-3 pb-4 border-b border-slate-100">
+                  <div className="flex items-center gap-3">
+                    <div className={`w-11 h-11 rounded-2xl flex items-center justify-center shrink-0 ${
+                      isOther ? 'bg-amber-100 text-amber-800' : 'bg-[#38c9d8]/20 text-[#00838f]'
+                    }`}>
+                      {isOther ? <Lock size={20} /> : <CalendarIcon size={20} />}
+                    </div>
+                    <div>
+                      <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full inline-block mb-1 ${
+                        isOther ? 'bg-amber-100 text-amber-900 border border-amber-300' : 'bg-cyan-100 text-cyan-900 border border-cyan-300'
+                      }`}>
+                        {isOther 
+                          ? (lang === 'fr' ? 'Créneau bloqué / Indisponible' : 'Horario bloqueado') 
+                          : (lang === 'fr' ? 'Rendez-vous Patient' : 'Cita de Paciente')}
+                      </span>
+                      <h3 className="text-lg sm:text-xl font-bold font-serif text-slate-900 leading-tight">
+                        {eventDisplayName}
+                      </h3>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => setSelectedAppointmentForDetails(null)}
+                    className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-xl transition-all cursor-pointer"
+                  >
+                    <X size={18} />
+                  </button>
+                </div>
+
+                {/* Body Content */}
+                <div className="py-4 space-y-4">
+                  {/* Time & Date Box */}
+                  <div className="p-3.5 rounded-2xl bg-[#e0f5f7]/40 border border-[#38c9d8]/40 flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-3">
+                      <Clock size={18} className="text-[#00838f] shrink-0" />
+                      <div>
+                        <p className="text-xs font-bold text-[#063840] capitalize">
+                          {dateFormatted}
+                        </p>
+                        <p className="text-sm font-mono font-extrabold text-[#00838f]">
+                          {startStr} - {endStr} <span className="text-xs font-normal text-slate-500 font-sans">({durationMinutes} min)</span>
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Blocked Slot Remark / Description (Prioritized) */}
+                  {isOther && (
+                    <div className="p-4 rounded-2xl bg-amber-50 border border-amber-200 space-y-1">
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-amber-800 block">
+                        {lang === 'fr' ? 'Remarque / Motif du créneau' : 'Motivo / Nota'}
+                      </span>
+                      <p className="text-sm font-semibold text-amber-950">
+                        {cleanRemark || ev.summary || (lang === 'fr' ? "Aucun motif spécifié" : "No reason specified")}
+                      </p>
+                      {cleanRemark && ev.summary && cleanRemark !== ev.summary && (
+                        <p className="text-xs text-amber-800/80 pt-1 border-t border-amber-200/60 mt-1">
+                          <span className="font-semibold">{lang === 'fr' ? 'Titre initial :' : 'Título:'}</span> {ev.summary}
+                        </p>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Patient Info Card (for appointments) */}
+                  {!isOther && (
+                    <div className="space-y-3">
+                      {client ? (
+                        <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200/80 space-y-2.5">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              <User size={15} className="text-[#009cb2]" />
+                              <h4 className="text-xs font-bold text-slate-900">{client.name}</h4>
+                            </div>
+                            {client.dni && (
+                              <span className="font-mono text-[10px] text-slate-500 bg-white px-2 py-0.5 rounded border border-slate-200">
+                                {client.dni}
+                              </span>
+                            )}
+                          </div>
+
+                          {/* Contacts: Phone & Email */}
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs pt-1">
+                            {client.phone ? (
+                              <div className="flex items-center gap-2">
+                                <Phone size={13} className="text-slate-400 shrink-0" />
+                                <a href={`tel:${client.phone}`} className="font-mono text-slate-700 hover:text-[#009cb2] underline font-medium">
+                                  {client.phone}
+                                </a>
+                              </div>
+                            ) : null}
+                            {client.email ? (
+                              <div className="flex items-center gap-2">
+                                <Mail size={13} className="text-slate-400 shrink-0" />
+                                <a href={`mailto:${client.email}`} className="text-slate-700 hover:text-[#009cb2] truncate underline font-medium">
+                                  {client.email}
+                                </a>
+                              </div>
+                            ) : null}
+                          </div>
+
+                          {/* Profile Note if available */}
+                          {profileNote && (
+                            <div className="p-2.5 rounded-xl bg-amber-50/80 border border-amber-200/90 text-amber-950 text-xs flex items-start gap-2">
+                              <Info size={14} className="text-amber-700 shrink-0 mt-0.5" />
+                              <div>
+                                <span className="text-[10px] font-bold uppercase tracking-wider text-amber-800 block">
+                                  {lang === 'fr' ? 'Remarque profil patient' : 'Nota de perfil'}
+                                </span>
+                                <p className="italic font-medium text-amber-900 mt-0.5">{profileNote}</p>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Bono Pack Status */}
+                          {client.hasBono && (
+                            <div className="p-2 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-900 text-xs flex items-center justify-between">
+                              <span className="font-bold flex items-center gap-1.5">
+                                <Sparkles size={12} className="text-emerald-600" />
+                                {client.bonoType || 'Bono'}
+                              </span>
+                              <span className="text-[11px] font-bold text-emerald-700">
+                                {client.bonoSessionsRemaining ?? 0} {lang === 'fr' ? 'séances restantes' : 'sesiones restantes'}
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="p-3 rounded-2xl bg-slate-50 border border-slate-200 text-xs text-slate-600">
+                          <p className="font-semibold">{ev.summary || (lang === 'fr' ? "Rendez-vous" : "Cita")}</p>
+                          {cleanRemark && <p className="text-slate-500 mt-1 italic">{cleanRemark}</p>}
+                        </div>
+                      )}
+
+                      {/* Status badges row: Note clinique & Facture */}
+                      <div className="grid grid-cols-2 gap-2 text-xs">
+                        <div className={`p-2.5 rounded-xl border flex items-center gap-2 ${
+                          hasNote ? 'bg-emerald-50/80 border-emerald-200 text-emerald-900' : 'bg-slate-50 border-slate-200 text-slate-600'
+                        }`}>
+                          <FileText size={14} className={hasNote ? 'text-emerald-700' : 'text-slate-400'} />
+                          <span className="truncate text-[11px] font-semibold">
+                            {hasNote ? (lang === 'fr' ? '✓ Note clinique' : '✓ Nota guardada') : (lang === 'fr' ? 'Sans note clinique' : 'Sin nota')}
+                          </span>
+                        </div>
+
+                        <div className={`p-2.5 rounded-xl border flex items-center gap-2 ${
+                          existingInvoice ? 'bg-cyan-50/80 border-cyan-200 text-cyan-900' : 'bg-slate-50 border-slate-200 text-slate-600'
+                        }`}>
+                          <CreditCard size={14} className={existingInvoice ? 'text-[#009cb2]' : 'text-slate-400'} />
+                          <span className="truncate text-[11px] font-semibold">
+                            {existingInvoice ? `${existingInvoice.amount} € (${existingInvoice.status === 'paid' ? (lang === 'fr' ? 'Payé' : 'Pagado') : (lang === 'fr' ? 'En attente' : 'Pendiente')})` : (lang === 'fr' ? 'Non facturé' : 'No facturado')}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Actions Footer */}
+                <div className="pt-4 border-t border-slate-100 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5">
+                  {/* Delete button (with confirmation) */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const eventToDeleteId = ev.id;
+                      const eventTitle = isOther
+                        ? (cleanRemark || ev.summary || (lang === 'fr' ? 'Créneau bloqué' : 'Horario bloqueado'))
+                        : getEventDisplayName(ev);
+
+                      setSelectedAppointmentForDetails(null);
+                      setConfirmDialog({
+                        isOpen: true,
+                        title: lang === 'fr' ? 'Supprimer le rendez-vous' : lang === 'es' ? 'Eliminar cita' : 'Delete appointment',
+                        message: lang === 'fr'
+                          ? `Êtes-vous certain de vouloir supprimer définitivement le rendez-vous "${eventTitle}" ? Cette action est irréversible.`
+                          : `¿Está seguro de que desea eliminar definitivamente la cita "${eventTitle}"?`,
+                        confirmText: lang === 'fr' ? 'Supprimer définitivement' : 'Eliminar',
+                        cancelText: lang === 'fr' ? 'Annuler' : 'Cancelar',
+                        isDangerous: true,
+                        onConfirm: async () => {
+                          try {
+                            await api.deleteLocalEvent(eventToDeleteId);
+                            setEvents(prev => prev.filter(e => e.id !== eventToDeleteId));
+                          } catch (err: any) {
+                            console.error('Failed to delete appointment:', err);
+                          }
+                        },
+                      });
+                    }}
+                    className="px-3.5 py-2.5 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                    title={lang === 'fr' ? "Supprimer ce rendez-vous" : "Delete appointment"}
+                  >
+                    <Trash2 size={14} />
+                    <span>{lang === 'fr' ? "Supprimer le RDV" : "Eliminar cita"}</span>
+                  </button>
+
+                  <div className="flex items-center gap-2 justify-end flex-1">
+                    {/* Edit button */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedAppointmentForDetails(null);
+                        openEditEventModal(ev);
+                      }}
+                      className="px-3.5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                    >
+                      <Pencil size={13} />
+                      <span>{lang === 'fr' ? "Modifier" : "Editar"}</span>
+                    </button>
+
+                    {/* Patient File & Notes button (for appointments) */}
+                    {!isOther && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedAppointmentForDetails(null);
+                          handleGoToNotes(ev);
+                        }}
+                        className="px-4 py-2.5 bg-[#009cb2] hover:bg-[#00838f] text-white rounded-xl text-xs font-bold transition-all shadow-xs flex items-center justify-center gap-1.5 cursor-pointer"
+                      >
+                        <FileText size={14} />
+                        <span>{lang === 'fr' ? "Fiche & Notes" : "Ficha y Notas"}</span>
+                        <ArrowRight size={13} />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </motion.div>
+            </div>
+          );
+        })()}
       </AnimatePresence>
 
       {/* MODAL: EDIT EVENT */}
@@ -6621,11 +7000,39 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                       </label>
                       <input
                         type="time"
+                        step="60"
                         required
                         value={editingEvent.startTime}
                         onChange={(e) => setEditingEvent(prev => prev ? { ...prev, startTime: e.target.value } : null)}
-                        className="w-full p-2.5 bg-secondary rounded-xl border border-black/5 text-xs focus:outline-none focus:ring-1 focus:ring-primary focus:bg-white transition-all"
+                        className="w-full p-2.5 bg-secondary rounded-xl border border-black/5 text-xs font-mono font-bold focus:outline-none focus:ring-1 focus:ring-primary focus:bg-white transition-all"
                       />
+                      {/* Minute presets :00, :15, :30, :45 */}
+                      <div className="flex items-center gap-1 mt-1.5 flex-wrap">
+                        {['00', '15', '30', '45'].map(min => {
+                          const currentH = editingEvent?.startTime ? editingEvent.startTime.split(':')[0] : '10';
+                          const isSel = editingEvent?.startTime?.split(':')[1] === min;
+                          return (
+                            <button
+                              key={min}
+                              type="button"
+                              onClick={() => {
+                                const startTime = `${currentH}:${min}`;
+                                const [h, m] = [parseInt(currentH, 10), parseInt(min, 10)];
+                                const date = new Date();
+                                date.setHours(h);
+                                date.setMinutes((m || 0) + (editingEvent?.eventType === 'appointment' ? 55 : 30));
+                                const endTime = `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+                                setEditingEvent(prev => prev ? ({ ...prev, startTime, endTime }) : null);
+                              }}
+                              className={`px-1.5 py-0.5 rounded text-[10px] font-mono font-bold transition-all cursor-pointer ${
+                                isSel ? 'bg-[#009cb2] text-white shadow-2xs' : 'bg-slate-100 hover:bg-slate-200 text-slate-600'
+                              }`}
+                            >
+                              :{min}
+                            </button>
+                          );
+                        })}
+                      </div>
                     </div>
                     <div>
                       <label className="text-[10px] uppercase tracking-wider font-bold text-gray-400 block mb-1">
@@ -6633,11 +7040,38 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                       </label>
                       <input
                         type="time"
+                        step="60"
                         required
                         value={editingEvent.endTime}
                         onChange={(e) => setEditingEvent(prev => prev ? { ...prev, endTime: e.target.value } : null)}
-                        className="w-full p-2.5 bg-secondary rounded-xl border border-black/5 text-xs focus:outline-none focus:ring-1 focus:ring-primary focus:bg-white transition-all"
+                        className="w-full p-2.5 bg-secondary rounded-xl border border-black/5 text-xs font-mono font-bold focus:outline-none focus:ring-1 focus:ring-primary focus:bg-white transition-all"
                       />
+                      {/* Duration presets */}
+                      <div className="flex items-center gap-1 mt-1.5 flex-wrap">
+                        {[
+                          { label: '30m', mins: 30 },
+                          { label: '45m', mins: 45 },
+                          { label: '55m', mins: 55 },
+                          { label: '1h', mins: 60 },
+                        ].map(d => (
+                          <button
+                            key={d.label}
+                            type="button"
+                            onClick={() => {
+                              if (!editingEvent?.startTime) return;
+                              const [h, m] = editingEvent.startTime.split(':').map(Number);
+                              const date = new Date();
+                              date.setHours(h);
+                              date.setMinutes((m || 0) + d.mins);
+                              const endTime = `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+                              setEditingEvent(prev => prev ? ({ ...prev, endTime }) : null);
+                            }}
+                            className="px-1.5 py-0.5 rounded text-[10px] font-mono font-medium bg-slate-100 hover:bg-slate-200 text-slate-600 transition-all cursor-pointer"
+                          >
+                            {d.label}
+                          </button>
+                        ))}
+                      </div>
                     </div>
                   </div>
                 </div>
