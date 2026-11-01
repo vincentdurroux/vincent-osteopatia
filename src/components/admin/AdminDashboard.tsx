@@ -4373,7 +4373,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                         {calendarViewMode === 'month' 
                           ? (lang === 'fr' ? "Cliquez sur une date pour voir les rendez-vous" : "Click on a date to see appointments")
                           : calendarViewMode === 'week'
-                          ? (lang === 'fr' ? "Cliquez sur un rendez-vous pour ouvrir la fiche patient et la note" : "Click on an appointment to view patient file & notes")
+                          ? (lang === 'fr' ? "Cliquez sur un rendez-vous pour voir les détails et le gérer" : "Click on an appointment to view details and manage")
                           : (lang === 'fr' ? "Planning journalier des consultations" : "Daily consultation schedule")}
                       </span>
                     </div>
@@ -4407,8 +4407,8 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                         <div className="min-w-[1050px]">
                           {/* Grid Header: Time column + 7 Day Headers with Day Number & Gold Counters */}
                           <div className="grid grid-cols-[64px_repeat(7,minmax(140px,1fr))] border-b border-slate-200 bg-slate-50/95 sticky top-0 z-10 shadow-2xs">
-                            {/* Left axis header */}
-                            <div className="p-3 border-r border-slate-200/80 flex items-center justify-center text-slate-400">
+                            {/* Left axis header - Sticky on horizontal scroll for tablet and mobile */}
+                            <div className="p-3 border-r border-slate-200/80 flex items-center justify-center text-slate-500 sticky left-0 z-30 bg-slate-50 w-[64px] min-w-[64px] shrink-0 shadow-[2px_0_6px_-2px_rgba(0,0,0,0.08)]">
                               <Clock size={16} />
                             </div>
 
@@ -4476,8 +4476,8 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                   key={hIdx}
                                   className="grid grid-cols-[64px_repeat(7,minmax(140px,1fr))] min-h-[66px]"
                                 >
-                                  {/* Left Hour Label */}
-                                  <div className="py-2.5 pr-2.5 text-right font-mono text-[11px] font-bold text-slate-400 select-none bg-slate-50/50 border-r border-slate-200/80">
+                                  {/* Left Hour Label - Sticky on horizontal scroll for tablet and mobile */}
+                                  <div className="py-2.5 pr-2.5 text-right font-mono text-[11px] font-bold text-slate-500 select-none bg-slate-50 border-r border-slate-200/80 sticky left-0 z-20 w-[64px] min-w-[64px] shrink-0 shadow-[2px_0_6px_-2px_rgba(0,0,0,0.08)]">
                                     {hourStr}
                                   </div>
 
