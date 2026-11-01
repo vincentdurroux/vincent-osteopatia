@@ -157,6 +157,28 @@ const Navbar = ({ onSecretAdmin }: { onSecretAdmin?: () => void }) => {
     }
   };
 
+  const scrollToSection = (e: React.MouseEvent<HTMLAnchorElement>, targetId: string) => {
+    e.preventDefault();
+    setIsMenuOpen(false);
+    const id = targetId.replace('#', '');
+    if (!id) {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
+    setTimeout(() => {
+      const element = document.getElementById(id);
+      if (element) {
+        const navbarHeight = 80;
+        const elementPosition = element.offsetTop;
+        const offsetPosition = elementPosition - navbarHeight;
+        window.scrollTo({
+          top: Math.max(0, offsetPosition),
+          behavior: 'smooth',
+        });
+      }
+    }, 30);
+  };
+
   return (
     <nav className="fixed top-0 left-0 right-0 z-50 bg-[#f5f5f0]/90 backdrop-blur-md border-b border-black/5">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 h-20 flex items-center justify-between">
@@ -173,10 +195,10 @@ const Navbar = ({ onSecretAdmin }: { onSecretAdmin?: () => void }) => {
 
         {/* Desktop Menu */}
         <div className="hidden lg:flex items-center gap-8 text-sm font-medium uppercase tracking-widest text-primary/80">
-          <a href="#services" className="hover:text-primary transition-colors">{t.nav.services}</a>
-          <a href="#about" className="hover:text-primary transition-colors">{t.nav.about}</a>
-          <a href="#location" className="hover:text-primary transition-colors">{t.nav.clinic}</a>
-          <a href="#contact" className="hover:text-primary transition-colors">{t.nav.contact}</a>
+          <a href="#services" onClick={(e) => scrollToSection(e, 'services')} className="hover:text-primary transition-colors">{t.nav.services}</a>
+          <a href="#about" onClick={(e) => scrollToSection(e, 'about')} className="hover:text-primary transition-colors">{t.nav.about}</a>
+          <a href="#location" onClick={(e) => scrollToSection(e, 'location')} className="hover:text-primary transition-colors">{t.nav.clinic}</a>
+          <a href="#contact" onClick={(e) => scrollToSection(e, 'contact')} className="hover:text-primary transition-colors">{t.nav.contact}</a>
         </div>
 
         <div className="flex items-center gap-2 sm:gap-4">
@@ -208,10 +230,10 @@ const Navbar = ({ onSecretAdmin }: { onSecretAdmin?: () => void }) => {
             className="lg:hidden bg-white border-b border-black/5 overflow-hidden"
           >
             <div className="flex flex-col p-6 gap-6 text-sm font-medium uppercase tracking-widest text-primary/80">
-              <a href="#services" onClick={() => setIsMenuOpen(false)} className="hover:text-primary transition-colors">{t.nav.services}</a>
-              <a href="#about" onClick={() => setIsMenuOpen(false)} className="hover:text-primary transition-colors">{t.nav.about}</a>
-              <a href="#location" onClick={() => setIsMenuOpen(false)} className="hover:text-primary transition-colors">{t.nav.clinic}</a>
-              <a href="#contact" onClick={() => setIsMenuOpen(false)} className="hover:text-primary transition-colors">{t.nav.contact}</a>
+              <a href="#services" onClick={(e) => scrollToSection(e, 'services')} className="hover:text-primary transition-colors">{t.nav.services}</a>
+              <a href="#about" onClick={(e) => scrollToSection(e, 'about')} className="hover:text-primary transition-colors">{t.nav.about}</a>
+              <a href="#location" onClick={(e) => scrollToSection(e, 'location')} className="hover:text-primary transition-colors">{t.nav.clinic}</a>
+              <a href="#contact" onClick={(e) => scrollToSection(e, 'contact')} className="hover:text-primary transition-colors">{t.nav.contact}</a>
               <a 
                 href="https://wa.me/34614159462"
                 target="_blank"
@@ -265,7 +287,7 @@ const Hero = ({ onOpenBooking }: { onOpenBooking: () => void }) => {
         >
           <div className="relative">
             <img 
-              src="/palm-tree.JPG" 
+              src="/palm-tree.webp" 
               alt="Vincent Osteopatía" 
               className="w-64 h-64 xl:w-80 xl:h-80 rounded-full object-cover shadow-2xl border-4 border-white"
               referrerPolicy="no-referrer"
@@ -477,7 +499,7 @@ const About = () => {
           >
             <div className="aspect-[4/5] w-full max-w-[220px] sm:max-w-[280px] rounded-[30px] lg:rounded-[40px] overflow-hidden shadow-2xl relative">
               <img 
-                src="/photo-vincent.jpg" 
+                src="/photo-vincent.webp" 
                 alt="Vincent - Osteopath" 
                 className="w-full h-full object-cover"
                 referrerPolicy="no-referrer"
@@ -511,7 +533,7 @@ const Location = () => {
               className="aspect-[3/4] rounded-[20px] sm:rounded-[30px] overflow-hidden shadow-xl"
             >
               <img 
-                src="/cabinet-exterieur.png" 
+                src="/cabinet-exterieur.webp" 
                 alt="Cabinet Exterior" 
                 className="w-full h-full object-cover cursor-pointer"
                 referrerPolicy="no-referrer"
@@ -526,7 +548,7 @@ const Location = () => {
               className="aspect-[3/4] rounded-[20px] sm:rounded-[30px] overflow-hidden shadow-xl mt-8 sm:mt-12"
             >
               <img 
-                src="/cabinet-interieur.png" 
+                src="/cabinet-interieur.webp" 
                 alt="Cabinet Interior" 
                 className="w-full h-full object-cover cursor-pointer"
                 referrerPolicy="no-referrer"
@@ -582,6 +604,22 @@ const Location = () => {
 
 const Footer = () => {
   const { t } = useTranslation();
+
+  const scrollToSection = (e: React.MouseEvent<HTMLAnchorElement>, targetId: string) => {
+    e.preventDefault();
+    const id = targetId.replace('#', '');
+    const element = document.getElementById(id);
+    if (element) {
+      const navbarHeight = 80;
+      const elementPosition = element.getBoundingClientRect().top + window.scrollY;
+      const offsetPosition = elementPosition - navbarHeight;
+      window.scrollTo({
+        top: offsetPosition,
+        behavior: 'smooth',
+      });
+    }
+  };
+
   return (
     <footer id="contact" className="bg-primary text-white py-20 px-6">
       <div className="max-w-7xl mx-auto grid md:grid-cols-3 gap-12">
@@ -599,9 +637,9 @@ const Footer = () => {
         <div>
           <h4 className="text-sm uppercase tracking-widest font-semibold mb-6 text-white/40">{t.footer.links}</h4>
           <ul className="space-y-4 text-lg font-serif">
-            <li><a href="#" className="hover:text-accent transition-colors">{t.nav.about}</a></li>
-            <li><a href="#services" className="hover:text-accent transition-colors">{t.nav.services}</a></li>
-            <li><a href="#location" className="hover:text-accent transition-colors">{t.nav.clinic}</a></li>
+            <li><a href="#about" onClick={(e) => scrollToSection(e, 'about')} className="hover:text-accent transition-colors">{t.nav.about}</a></li>
+            <li><a href="#services" onClick={(e) => scrollToSection(e, 'services')} className="hover:text-accent transition-colors">{t.nav.services}</a></li>
+            <li><a href="#location" onClick={(e) => scrollToSection(e, 'location')} className="hover:text-accent transition-colors">{t.nav.clinic}</a></li>
           </ul>
         </div>
         <div>

@@ -159,8 +159,17 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
     return () => clearInterval(clockInterval);
   }, []);
   
+  // Ref to main scroll container to scroll to top when changing tabs
+  const mainContentRef = useRef<HTMLElement | null>(null);
+
   // Modals & Selected states
   const [selectedClient, setSelectedClient] = useState<Client | null>(null);
+
+  useEffect(() => {
+    if (mainContentRef.current) {
+      mainContentRef.current.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  }, [activeTab, selectedClient]);
   const [clientNotes, setClientNotes] = useState<ClientNote[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   
@@ -2066,7 +2075,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
       </aside>
 
       {/* MAIN CONTAINER */}
-      <main className="flex-1 overflow-y-auto bg-[#fbfbfa] p-3.5 sm:p-6 md:p-8 pb-24 md:pb-8 flex flex-col print:hidden">
+      <main ref={mainContentRef} className="flex-1 overflow-y-auto bg-[#fbfbfa] p-3.5 sm:p-6 md:p-8 pb-24 md:pb-8 flex flex-col print:hidden">
         
         {/* TAB 1: OVERVIEW */}
         {activeTab === 'overview' && (
@@ -2083,49 +2092,38 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
               </p>
             </div>
 
-            {/* Metrics cards grid */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
-              {/* Metric 1 */}
-              <div className="bg-white p-6 rounded-3xl border border-black/5 shadow-sm flex items-center justify-between">
-                <div>
-                  <p className="text-xs font-bold uppercase tracking-wider text-gray-400">{t.admin.overview.stats.activePatients}</p>
-                  <h3 className="text-4xl font-semibold mt-1 font-serif text-primary">{totalPatientsCount}</h3>
-                  <p className="text-xs text-gray-500 mt-2">{totalPatientsCount} {t.admin.clients.totalPatients}</p>
+            {/* Metrics cards grid (Single row & compact) */}
+            <div className="grid grid-cols-3 gap-2.5 sm:gap-4">
+              {/* Metric 1: Patients actifs */}
+              <div className="bg-white p-3 sm:p-4 rounded-2xl sm:rounded-3xl border border-black/5 shadow-2xs flex items-center justify-between gap-2">
+                <div className="min-w-0 flex-1">
+                  <p className="text-[10px] sm:text-xs font-bold uppercase tracking-wider text-gray-400 truncate">{t.admin.overview.stats.activePatients}</p>
+                  <h3 className="text-xl sm:text-2xl lg:text-3xl font-bold mt-0.5 font-serif text-primary leading-tight">{totalPatientsCount}</h3>
                 </div>
-                <div className="w-12 h-12 bg-primary/10 rounded-full flex items-center justify-center text-primary">
-                  <Users size={22} />
+                <div className="w-8 h-8 sm:w-10 sm:h-10 bg-primary/10 rounded-xl sm:rounded-2xl flex items-center justify-center text-primary shrink-0">
+                  <Users size={18} className="sm:w-5 sm:h-5" />
                 </div>
               </div>
               
-              {/* Metric 2 */}
-              <div className="bg-white p-6 rounded-3xl border border-black/5 shadow-sm flex items-center justify-between">
-                <div>
-                  <p className="text-xs font-bold uppercase tracking-wider text-gray-400">{t.admin.overview.stats.thisMonthSessions}</p>
-                  <h3 className="text-4xl font-semibold mt-1 font-serif text-primary">{totalSessionsThisMonth}</h3>
-                  <p className="text-xs text-gray-500 mt-2">
-                    {lang === 'fr' 
-                      ? `Séances réalisées en ${new Date().toLocaleDateString('fr-FR', { month: 'long' })}` 
-                      : lang === 'es' 
-                        ? `Sesiones realizadas en ${new Date().toLocaleDateString('es-ES', { month: 'long' })}` 
-                        : `Sessions completed in ${new Date().toLocaleDateString('en-US', { month: 'long' })}`}
-                  </p>
+              {/* Metric 2: Séances ce mois */}
+              <div className="bg-white p-3 sm:p-4 rounded-2xl sm:rounded-3xl border border-black/5 shadow-2xs flex items-center justify-between gap-2">
+                <div className="min-w-0 flex-1">
+                  <p className="text-[10px] sm:text-xs font-bold uppercase tracking-wider text-gray-400 truncate">{t.admin.overview.stats.thisMonthSessions}</p>
+                  <h3 className="text-xl sm:text-2xl lg:text-3xl font-bold mt-0.5 font-serif text-primary leading-tight">{totalSessionsThisMonth}</h3>
                 </div>
-                <div className="w-12 h-12 bg-primary/10 rounded-full flex items-center justify-center text-primary">
-                  <Clock size={22} />
+                <div className="w-8 h-8 sm:w-10 sm:h-10 bg-primary/10 rounded-xl sm:rounded-2xl flex items-center justify-center text-primary shrink-0">
+                  <Clock size={18} className="sm:w-5 sm:h-5" />
                 </div>
               </div>
 
-              {/* Metric 3 */}
-              <div className="bg-white p-6 rounded-3xl border border-black/5 shadow-sm flex items-center justify-between">
-                <div>
-                  <p className="text-xs font-bold uppercase tracking-wider text-gray-400">{t.admin.overview.stats.monthlyIncome}</p>
-                  <h3 className="text-4xl font-semibold mt-1 font-serif text-primary">{totalRevenueThisMonth} €</h3>
-                  <p className="text-xs text-emerald-600 mt-2 font-medium flex items-center gap-1">
-                    <span>{lang === 'fr' ? "Objectif mensuel de cabinet actif" : lang === 'es' ? "Objetivo mensual de clínica activa" : "Monthly active clinic target"}</span>
-                  </p>
+              {/* Metric 3: Chiffre d'affaires ce mois */}
+              <div className="bg-white p-3 sm:p-4 rounded-2xl sm:rounded-3xl border border-black/5 shadow-2xs flex items-center justify-between gap-2">
+                <div className="min-w-0 flex-1">
+                  <p className="text-[10px] sm:text-xs font-bold uppercase tracking-wider text-gray-400 truncate">{t.admin.overview.stats.monthlyIncome}</p>
+                  <h3 className="text-xl sm:text-2xl lg:text-3xl font-bold mt-0.5 font-serif text-primary leading-tight">{totalRevenueThisMonth} €</h3>
                 </div>
-                <div className="w-12 h-12 bg-emerald-50 rounded-full flex items-center justify-center text-emerald-600">
-                  <TrendingUp size={22} />
+                <div className="w-8 h-8 sm:w-10 sm:h-10 bg-emerald-50 rounded-xl sm:rounded-2xl flex items-center justify-center text-emerald-600 shrink-0">
+                  <TrendingUp size={18} className="sm:w-5 sm:h-5" />
                 </div>
               </div>
             </div>
@@ -2422,104 +2420,38 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
               );
             })()}
 
-            {/* Financial Performance Chart & Activity Column */}
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              
-              {/* Performance Chart Column */}
-              <div className="bg-white p-6 rounded-3xl border border-black/5 shadow-sm lg:col-span-2 flex flex-col justify-between">
-                <div>
-                  <h3 className="text-lg font-bold font-serif text-primary mb-1">{t.admin.overview.revenueChart}</h3>
-                  <p className="text-xs text-gray-500 mb-6">
-                    {lang === 'fr' 
-                      ? `Récapitulatif financier et volume de consultations par mois pour l'année en cours (${new Date().getFullYear()}).` 
-                      : lang === 'es' 
-                        ? `Resumen financiero y volumen de consultas por mes para el año en curso (${new Date().getFullYear()}).` 
-                        : `Financial summary and volume of consultations per month for the current year (${new Date().getFullYear()}).`}
-                  </p>
-                </div>
-                
-                <div className="h-64 w-full">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                      <defs>
-                        <linearGradient id="revenueGrad" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="#415a44" stopOpacity={0.2}/>
-                          <stop offset="95%" stopColor="#415a44" stopOpacity={0}/>
-                        </linearGradient>
-                      </defs>
-                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
-                      <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#888' }} />
-                      <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#888' }} />
-                      <Tooltip 
-                        contentStyle={{ backgroundColor: '#fff', border: 'none', borderRadius: '16px', boxShadow: '0 10px 25px rgba(0,0,0,0.05)' }} 
-                        labelClassName="font-serif font-bold text-primary"
-                      />
-                      <Area type="monotone" dataKey="Montant" stroke="#415a44" strokeWidth={2} fillOpacity={1} fill="url(#revenueGrad)" name="Revenu (€)" />
-                    </AreaChart>
-                  </ResponsiveContainer>
-                </div>
+            {/* Financial Performance Chart (Full width) */}
+            <div className="bg-white p-6 rounded-3xl border border-black/5 shadow-sm">
+              <div>
+                <h3 className="text-lg font-bold font-serif text-primary mb-1">{t.admin.overview.revenueChart}</h3>
+                <p className="text-xs text-gray-500 mb-6">
+                  {lang === 'fr' 
+                    ? `Récapitulatif financier et volume de consultations par mois pour l'année en cours (${new Date().getFullYear()}).` 
+                    : lang === 'es' 
+                      ? `Resumen financiero y volumen de consultas por mes para el año en curso (${new Date().getFullYear()}).` 
+                      : `Financial summary and volume of consultations per month for the current year (${new Date().getFullYear()}).`}
+                </p>
               </div>
-
-              {/* Quick Actions & Recent list */}
-              <div className="bg-white p-6 rounded-3xl border border-black/5 shadow-sm flex flex-col justify-between">
-                <div>
-                  <h3 className="text-lg font-serif font-bold text-primary mb-4">{t.admin.overview.recentActivity}</h3>
-                  <div className="space-y-3">
-                    <button 
-                      onClick={() => { setActiveTab('clients'); setIsAddClientOpen(true); }}
-                      className="w-full flex items-center justify-between p-3.5 rounded-2xl bg-[#f4f4ec] hover:bg-primary/5 border border-black/5 text-left text-xs font-bold uppercase tracking-wider transition-all"
-                    >
-                      <span className="flex items-center gap-3">
-                        <Users size={16} className="text-primary" /> {t.admin.clients.addPatient}
-                      </span>
-                      <Plus size={16} />
-                    </button>
-
-                    <button 
-                      onClick={() => { setActiveTab('calendar'); setIsAddEventOpen(true); }}
-                      className="w-full flex items-center justify-between p-3.5 rounded-2xl bg-[#f4f4ec] hover:bg-primary/5 border border-black/5 text-left text-xs font-bold uppercase tracking-wider transition-all"
-                    >
-                      <span className="flex items-center gap-3">
-                        <CalendarIcon size={16} className="text-primary" /> {t.admin.calendar.addEvent}
-                      </span>
-                      <Plus size={16} />
-                    </button>
-
-                    <button 
-                      onClick={() => { setActiveTab('billing'); setIsAddInvoiceOpen(true); }}
-                      className="w-full flex items-center justify-between p-3.5 rounded-2xl bg-[#f4f4ec] hover:bg-primary/5 border border-black/5 text-left text-xs font-bold uppercase tracking-wider transition-all"
-                    >
-                      <span className="flex items-center gap-3">
-                        <CreditCard size={16} className="text-primary" /> {t.admin.billing.addInvoice}
-                      </span>
-                      <Plus size={16} />
-                    </button>
-                  </div>
-                </div>
-
-                <div className="mt-8">
-                  <h4 className="text-xs font-bold uppercase tracking-wider text-gray-400 mb-3">{t.admin.overview.recentPatients}</h4>
-                  <div className="space-y-3">
-                    {clients.slice(0, 3).map(c => (
-                      <div 
-                        key={c.id} 
-                        onClick={() => { setSelectedClient(c); setActiveTab('clients'); }}
-                        className="flex items-center justify-between p-2 rounded-xl hover:bg-black/5 transition-colors cursor-pointer"
-                      >
-                        <div className="flex items-center gap-3 overflow-hidden">
-                          <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-primary text-xs font-bold">
-                            <User size={14} />
-                          </div>
-                          <div className="overflow-hidden">
-                            <p className="text-xs font-bold truncate">{c.name}</p>
-                            <p className="text-[10px] text-gray-500 truncate">{c.email}</p>
-                          </div>
-                        </div>
-                        <Check size={14} className="text-primary/40" />
-                      </div>
-                    ))}
-                  </div>
-                </div>
+              
+              <div className="h-64 w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                    <defs>
+                      <linearGradient id="revenueGrad" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#415a44" stopOpacity={0.2}/>
+                        <stop offset="95%" stopColor="#415a44" stopOpacity={0}/>
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
+                    <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#888' }} />
+                    <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#888' }} />
+                    <Tooltip 
+                      contentStyle={{ backgroundColor: '#fff', border: 'none', borderRadius: '16px', boxShadow: '0 10px 25px rgba(0,0,0,0.05)' }} 
+                      labelClassName="font-serif font-bold text-primary"
+                    />
+                    <Area type="monotone" dataKey="Montant" stroke="#415a44" strokeWidth={2} fillOpacity={1} fill="url(#revenueGrad)" name="Revenu (€)" />
+                  </AreaChart>
+                </ResponsiveContainer>
               </div>
             </div>
           </div>

@@ -16,6 +16,14 @@
   }
 }
 
+html {
+  scroll-behavior: smooth;
+}
+
+section[id], footer[id] {
+  scroll-margin-top: 80px;
+}
+
 body {
   font-family: var(--font-sans);
   background-color: var(--color-secondary);
