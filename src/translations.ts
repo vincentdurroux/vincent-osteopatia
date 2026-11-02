@@ -89,7 +89,7 @@ export const translations = {
         {
           author: "Elena Moreno",
           initials: "EM",
-          date: Date.now() - 14 * 24 * 60 * 60 * 1000,
+          date: "2026-10-18",
           rating: 5,
           category: "Lombalgie & Sciatique",
           text: "Praticien exceptionnel à L'Eliana. Je suis venue avec un lumbago aigu qui m'empêchait presque de marcher. Dès la première séance, Vincent a su débloquer la zone avec une douceur remarquable, sans aucun craquement forcé. Le lendemain, je n'avais plus mal. Je recommande à 100% !",
@@ -97,7 +97,7 @@ export const translations = {
         {
           author: "Jean-Christophe B.",
           initials: "JB",
-          date: Date.now() - 21 * 24 * 60 * 60 * 1000,
+          date: "2026-10-11",
           rating: 5,
           category: "Expatrié & Suivi dos",
           text: "Un vrai bonheur de trouver un ostéopathe de cette qualité à Valence / L'Eliana ! Vincent prend le temps d'écouter, d'analyser la posture globale et d'expliquer chaque geste. Cabinet immaculé, accueil très chaleureux et résultats au rendez-vous.",
@@ -105,7 +105,7 @@ export const translations = {
         {
           author: "Sophie & Bébé Liam",
           initials: "SL",
-          date: Date.now() - 30 * 24 * 60 * 60 * 1000,
+          date: "2026-10-02",
           rating: 5,
           category: "Pédiatrie & Nouveau-né",
           text: "Vincent a été formidable avec notre petit de 2 mois qui souffrait de reflux et de coliques après l'accouchement. Des gestes d'une infinie délicatesse. Notre bébé a retrouvé un sommeil paisible dès le soir même. Merci infiniment !",
@@ -113,7 +113,7 @@ export const translations = {
         {
           author: "Carlos Ramírez",
           initials: "CR",
-          date: Date.now() - 30 * 24 * 60 * 60 * 1000,
+          date: "2026-09-28",
           rating: 5,
           category: "Sportif & Récupération",
           text: "Excelente profesional. Como corredor habitual, llevaba meses arrastrando una sobrecarga en el tendón rotuliano y molestias en la cadera. El enfoque de Vincent fue súper preciso y efectivo. Pude correr la media maratón sin ninguna molestia.",
@@ -121,7 +121,7 @@ export const translations = {
         {
           author: "Marie-Claire Dupont",
           initials: "MD",
-          date: Date.now() - 60 * 24 * 60 * 60 * 1000,
+          date: "2026-09-10",
           rating: 5,
           category: "Cervicales & Migraines",
           text: "Souffrant de tensions cervicales chroniques et de maux de tête réguliers dus au travail sur écran, j'ai constaté une libération immédiate après la consultation. Vincent a des mains d'or et donne d'excellents conseils posturaux.",
@@ -129,7 +129,7 @@ export const translations = {
         {
           author: "David Palmer",
           initials: "DP",
-          date: Date.now() - 60 * 24 * 60 * 60 * 1000,
+          date: "2026-08-25",
           rating: 5,
           category: "Posture & Tensions",
           text: "Outstanding osteopath in L'Eliana! Fluent in English, French and Spanish. Very thorough assessment and gentle, highly effective hands-on technique. The clinic atmosphere is peaceful and relaxing. Highly recommended to the expat community.",
