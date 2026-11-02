@@ -522,6 +522,145 @@ const getTimeAgo = (timestamp: number | string, lang: Language) => {
   return rtf.format(seconds, 'second');
 };
 
+
+const ReviewItem = ({ review, lang, reviewsData }: { review: GoogleReview; lang: Language; reviewsData: any }) => {
+  const [isOpen, setIsOpen] = useState(false);
+  
+  return (
+    <div 
+      className="relative group h-full"
+      onClick={() => setIsOpen(true)}
+    >
+      <motion.div
+        className="bg-white rounded-2xl p-6 sm:p-7 border border-stone-200/80 shadow-2xs hover:shadow-md hover:border-primary/20 transition-all flex flex-col justify-between h-full cursor-pointer group-hover:-translate-y-1 duration-300"
+      >
+        <div className="flex-1 flex flex-col justify-between">
+          {/* Review Header: Initials, Name & Google Stars */}
+          <div className="flex items-start justify-between gap-3 mb-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-full bg-stone-100 border border-stone-200 text-stone-700 font-semibold text-xs flex items-center justify-center shrink-0">
+                {review.initials || (review.author ? review.author.substring(0, 2).toUpperCase() : 'GP')}
+              </div>
+              <div>
+                <h4 className="font-semibold text-sm text-stone-900 leading-tight">
+                  {review.author}
+                </h4>
+                <span className="text-[11px] text-stone-400 mt-0.5 block">
+                  {getTimeAgo(review.date, lang)}
+                </span>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-0.5 text-amber-400 shrink-0">
+              {[...Array(review.rating || 5)].map((_, i) => (
+                <Star key={i} size={14} className="fill-amber-400 text-amber-400" />
+              ))}
+            </div>
+          </div>
+
+          {/* Patient Comment - Truncated */}
+          <div className="my-2 flex-1 flex items-center">
+            <p className="text-xs sm:text-sm text-stone-600 leading-relaxed italic line-clamp-3">
+              « {review.text} »
+            </p>
+          </div>
+          
+          <div className="mt-2 text-[10px] text-primary font-bold uppercase tracking-wider opacity-0 group-hover:opacity-100 transition-opacity">
+            {lang === 'fr' ? 'Lire la suite' : lang === 'es' ? 'Leer más' : 'Read more'}
+          </div>
+        </div>
+
+        {/* Card Footer: Verified badge */}
+        <div className="pt-4 mt-4 border-t border-stone-100 flex items-center justify-end text-[11px]">
+          <span className="inline-flex items-center gap-1.5 text-[11px] text-emerald-700 font-medium">
+            <CheckCircle2 size={13} className="text-emerald-600" />
+            <span>{reviewsData.verifiedBadge}</span>
+          </span>
+        </div>
+      </motion.div>
+
+      <AnimatePresence>
+        {isOpen && (
+          <>
+            {/* Backdrop */}
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 bg-black/40 backdrop-blur-sm z-[60]"
+              onClick={(e) => {
+                e.stopPropagation();
+                setIsOpen(false);
+              }}
+            />
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="fixed inset-4 m-auto h-fit max-h-[85vh] w-[calc(100%-2rem)] max-w-[500px] z-[70] bg-white rounded-3xl shadow-2xl p-8 sm:p-10 border border-primary/10 flex flex-col overflow-y-auto origin-center"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex justify-between items-start mb-6">
+                <div className="flex items-center gap-4">
+                  <div className="w-12 h-12 rounded-full bg-stone-100 border border-stone-200 text-stone-700 font-bold text-sm flex items-center justify-center shrink-0">
+                    {review.initials || (review.author ? review.author.substring(0, 2).toUpperCase() : 'GP')}
+                  </div>
+                  <div>
+                    <h3 className="text-lg sm:text-xl font-serif text-primary font-bold leading-tight">{review.author}</h3>
+                    <div className="flex items-center gap-2 mt-1">
+                      <div className="flex items-center gap-0.5 text-amber-400">
+                        {[...Array(review.rating || 5)].map((_, i) => (
+                          <Star key={i} size={14} className="fill-amber-400 text-amber-400" />
+                        ))}
+                      </div>
+                      <span className="text-[11px] text-stone-400">
+                        {getTimeAgo(review.date, lang)}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+                <button 
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setIsOpen(false);
+                  }}
+                  className="p-2 hover:bg-stone-100 rounded-full transition-colors active:scale-95"
+                >
+                  <X size={20} className="text-stone-400" />
+                </button>
+              </div>
+              
+              <div className="relative">
+                <Quote size={40} className="absolute -top-4 -left-2 text-primary/5 -z-10" />
+                <p className="text-stone-700 text-base sm:text-lg leading-relaxed italic whitespace-pre-wrap">
+                  {review.text}
+                </p>
+              </div>
+
+              <div className="mt-8 pt-6 border-t border-stone-100 flex items-center justify-between">
+                <span className="inline-flex items-center gap-2 text-xs text-emerald-700 font-bold bg-emerald-50 px-3 py-1.5 rounded-full border border-emerald-100">
+                  <CheckCircle2 size={14} className="text-emerald-600" />
+                  <span>{reviewsData.verifiedBadge}</span>
+                </span>
+                
+                <a
+                  href={DEFAULT_GOOGLE_MAPS_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-stone-400 hover:text-primary transition-colors p-1"
+                  title="Voir sur Google"
+                >
+                  <GoogleIcon size={18} />
+                </a>
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+};
+
 const GoogleReviews = () => {
   const { lang, t } = useTranslation();
   const reviewsData = (t as any).reviews || translations.fr.reviews;
@@ -606,53 +745,13 @@ const GoogleReviews = () => {
         {/* Discreet Automatic Carousel with Max 2 Cards on Screen */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-stretch">
           {visibleItems.map((review: any, idx: number) => (
-            <motion.div
-              key={slideIndex + '-' + (review.id || idx)}
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.35, ease: 'easeOut' }}
-              className="bg-white rounded-2xl p-6 sm:p-7 border border-stone-200/80 shadow-2xs hover:shadow-xs hover:border-stone-300 transition-all flex flex-col justify-between h-full"
-            >
-              <div className="flex-1 flex flex-col justify-between">
-                {/* Review Header: Initials, Name & Google Stars */}
-                <div className="flex items-start justify-between gap-3 mb-4">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-full bg-stone-100 border border-stone-200 text-stone-700 font-semibold text-xs flex items-center justify-center shrink-0">
-                      {review.initials || (review.author ? review.author.substring(0, 2).toUpperCase() : 'GP')}
-                    </div>
-                    <div>
-                      <h4 className="font-semibold text-sm text-stone-900 leading-tight">
-                        {review.author}
-                      </h4>
-                      <span className="text-[11px] text-stone-400 mt-0.5 block">
-                        {getTimeAgo(review.date, lang)}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-0.5 text-amber-400 shrink-0">
-                    {[...Array(review.rating || 5)].map((_, i) => (
-                      <Star key={i} size={14} className="fill-amber-400 text-amber-400" />
-                    ))}
-                  </div>
-                </div>
-
-                {/* Patient Comment */}
-                <div className="my-2 flex-1 flex items-center">
-                  <p className="text-xs sm:text-sm text-stone-600 leading-relaxed italic">
-                    « {review.text} »
-                  </p>
-                </div>
-              </div>
-
-              {/* Card Footer: Verified badge */}
-              <div className="pt-4 mt-4 border-t border-stone-100 flex items-center justify-end text-[11px]">
-                <span className="inline-flex items-center gap-1.5 text-[11px] text-emerald-700 font-medium">
-                  <CheckCircle2 size={13} className="text-emerald-600" />
-                  <span>{reviewsData.verifiedBadge}</span>
-                </span>
-              </div>
-            </motion.div>
+            <div key={slideIndex + '-' + (review.id || idx)}>
+              <ReviewItem 
+                review={review} 
+                lang={lang} 
+                reviewsData={reviewsData} 
+              />
+            </div>
           ))}
         </div>
 

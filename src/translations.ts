@@ -76,7 +76,7 @@ export const translations = {
     },
     reviews: {
       tag: "Avis Google Pro Vérifiés",
-      title: "Ce que disent mes patients",
+      title: "Témoignages",
       subtitle: "Consultez les derniers avis vérifiés laissés sur notre fiche Google Business",
       googleRating: "5.0",
       totalReviews: "100% d'avis 5 étoiles",
@@ -405,7 +405,7 @@ export const translations = {
     },
     reviews: {
       tag: "Verified Google Pro Reviews",
-      title: "Patients say",
+      title: "Testimonials",
       subtitle: "Explore the latest reviews left by our patients on our Google Business Profile",
       googleRating: "5.0",
       totalReviews: "100% 5-star ratings",
@@ -734,7 +734,7 @@ export const translations = {
     },
     reviews: {
       tag: "Reseñas de Google Pro Verificadas",
-      title: "Lo que dicen los pacientes",
+      title: "Testimonios",
       subtitle: "Consulte las últimas opiniones verificadas en nuestra ficha de Google Business",
       googleRating: "5.0",
       totalReviews: "100% valoraciones de 5 estrellas",
