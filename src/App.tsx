@@ -570,6 +570,8 @@ const GoogleReviews = () => {
 
   const visibleItems = items.slice(slideIndex, slideIndex + 2);
 
+  if (items.length === 0) return null;
+
   return (
     <section 
       id="reviews" 

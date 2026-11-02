@@ -238,19 +238,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
     });
   };
 
-  const handleResetDefaultReviews = () => {
-    setConfirmDialog({
-      isOpen: true,
-      title: 'Reset Google reviews',
-      message: 'Reset to default Google reviews? This will restore the original patient testimonials.',
-      confirmText: 'Reset to default',
-      cancelText: 'Cancel',
-      isDangerous: false,
-      onConfirm: () => {
-        saveCustomReviewsToStorage(translations.fr.reviews.items);
-      },
-    });
-  };
+
 
   // Ref to main scroll container to scroll to top when changing tabs
   const mainContentRef = useRef<HTMLElement | null>(null);
@@ -8282,16 +8270,9 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
               <div className="flex flex-wrap items-center gap-2 shrink-0">
                 <button
                   type="button"
-                  onClick={handleResetDefaultReviews}
-                  className="px-3.5 py-2 bg-secondary hover:bg-black/5 text-gray-600 rounded-xl text-xs font-bold transition-all cursor-pointer"
-                >
-                  Reset
-                </button>
-                <button
-                  type="button"
                   onClick={() => {
                     setEditingReviewIndex(null);
-                    setReviewForm({ author: '', initials: '', date: '1 week ago', rating: 5, text: '' });
+                    setReviewForm({ author: '', initials: '', date: new Date().toISOString().split('T')[0], rating: 5, text: '' });
                     setIsAddReviewModalOpen(true);
                   }}
                   className="px-4 py-2 bg-primary hover:bg-primary/95 text-white rounded-xl text-xs font-bold uppercase tracking-wider transition-all shadow-md flex items-center gap-1.5 cursor-pointer"
