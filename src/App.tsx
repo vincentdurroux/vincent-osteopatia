@@ -187,12 +187,9 @@ const Navbar = ({ onSecretAdmin }: { onSecretAdmin?: () => void }) => {
           className="flex items-center gap-2 cursor-pointer select-none"
           title="Vincent Osteopatía"
         >
-          <img 
-            src="/logo.png" 
-            alt="Vincent Osteopatía" 
-            className="w-10 h-10 sm:w-12 sm:h-12 rounded-full object-cover shadow-xs border border-primary/20 shrink-0"
-            referrerPolicy="no-referrer"
-          />
+          <div className="w-10 h-10 sm:w-12 sm:h-12 bg-primary rounded-full flex items-center justify-center text-white shrink-0">
+            <SpineLogo size={24} className="sm:w-7 sm:h-7" />
+          </div>
           <span className="text-xl sm:text-2xl font-serif font-semibold tracking-tight whitespace-nowrap">Vincent Osteopatía</span>
         </div>
 
@@ -519,24 +516,11 @@ const getStoredGoogleReviews = () => {
   return translations.fr.reviews.items;
 };
 
-const getTimeAgo = (dateVal: number | string, lang: Language) => {
-  let ms: number;
-  if (typeof dateVal === 'string') {
-    if (dateVal.includes('-') && dateVal.length >= 10) {
-      ms = new Date(dateVal).getTime();
-    } else if (/^\d+$/.test(dateVal)) {
-      ms = Number(dateVal);
-    } else {
-      return dateVal;
-    }
-  } else {
-    ms = Number(dateVal);
-  }
-
-  if (isNaN(ms)) return String(dateVal);
+const getTimeAgo = (timestamp: number | string, lang: Language) => {
+  if (typeof timestamp === 'string') return timestamp;
   
   const now = Date.now();
-  const diff = ms - now;
+  const diff = timestamp - now;
   const rtf = new Intl.RelativeTimeFormat(lang, { numeric: 'auto' });
   
   const seconds = Math.round(diff / 1000);
@@ -580,7 +564,7 @@ const GoogleReviews = () => {
     if (isPaused || maxStartIndex === 0) return;
     const timer = setInterval(() => {
       setSlideIndex((prev) => (prev < maxStartIndex ? prev + 1 : 0));
-    }, 5000);
+    }, 10000);
     return () => clearInterval(timer);
   }, [isPaused, maxStartIndex, items.length]);
 

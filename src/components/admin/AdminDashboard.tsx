@@ -199,12 +199,12 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
 
     const authorClean = reviewForm.author.trim();
     const initialsClean = reviewForm.initials.trim() || authorClean.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2);
-    const dateClean = reviewForm.date ? reviewForm.date.trim() : new Date().toISOString().split('T')[0];
+    const dateTimestamp = reviewForm.date ? new Date(reviewForm.date).getTime() : Date.now();
     
     const newEntry = {
       author: authorClean,
       initials: initialsClean,
-      date: dateClean,
+      date: dateTimestamp,
       rating: Number(reviewForm.rating) || 5,
       text: reviewForm.text.trim(),
     };
@@ -8316,34 +8316,8 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                           <div className="min-w-0 flex-1">
                             <h4 className="font-bold text-sm text-gray-900 leading-tight truncate">{rev.author}</h4>
                             <span className="text-[11px] text-gray-400 mt-0.5 block">
-                              {(() => {
-                                if (!rev.date) return '';
-                                if (typeof rev.date === 'string' && rev.date.includes('-') && rev.date.length >= 10) {
-                                  try {
-                                    return new Date(rev.date).toLocaleDateString(lang === 'fr' ? 'fr-FR' : lang === 'es' ? 'es-ES' : 'en-GB', {
-                                      day: 'numeric',
-                                      month: 'long',
-                                      year: 'numeric'
-                                    });
-                                  } catch {
-                                    return rev.date;
-                                  }
-                                }
-                                const num = Number(rev.date);
-                                if (!isNaN(num) && num > 100000000) {
-                                  try {
-                                    return new Date(num).toLocaleDateString(lang === 'fr' ? 'fr-FR' : lang === 'es' ? 'es-ES' : 'en-GB', {
-                                      day: 'numeric',
-                                      month: 'long',
-                                      year: 'numeric'
-                                    });
-                                  } catch {
-                                    return String(rev.date);
-                                  }
-                                }
-                                return String(rev.date);
-                              })()}
-                            </span>
+                            {new Date(Number(rev.date)).toLocaleDateString(lang === 'fr' ? 'fr-FR' : 'es-ES')}
+                          </span>
                           </div>
                         </div>
                         <div className="flex items-center gap-0.5 text-amber-400 shrink-0">
@@ -8367,23 +8341,10 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                           type="button"
                           onClick={() => {
                             setEditingReviewIndex(index);
-                            let editDate = new Date().toISOString().split('T')[0];
-                            if (rev.date) {
-                              if (typeof rev.date === 'string' && rev.date.includes('-') && rev.date.length >= 10) {
-                                editDate = rev.date.substring(0, 10);
-                              } else {
-                                const num = Number(rev.date);
-                                if (!isNaN(num) && num > 100000000) {
-                                  try {
-                                    editDate = new Date(num).toISOString().split('T')[0];
-                                  } catch {}
-                                }
-                              }
-                            }
                             setReviewForm({
                               author: rev.author || '',
                               initials: rev.initials || '',
-                              date: editDate,
+                              date: (!isNaN(Number(rev.date))) ? new Date(Number(rev.date)).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
                               rating: rev.rating || 5,
                               text: rev.text || '',
                             });
