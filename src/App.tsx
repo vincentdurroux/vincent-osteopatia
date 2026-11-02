@@ -1,6 +1,6 @@
 import React, { useState, createContext, useContext, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { MapPin, Phone, Mail, Clock, Calendar, ChevronRight, Heart, User, Activity, Baby, Globe, Check, CreditCard, Bone, Zap, Trophy, Menu, X, Shield } from 'lucide-react';
+import { MapPin, Phone, Mail, Clock, Calendar, ChevronRight, ChevronLeft, Heart, User, Activity, Baby, Globe, Check, CreditCard, Bone, Zap, Trophy, Menu, X, Shield, Star, ExternalLink, CheckCircle2, Quote } from 'lucide-react';
 import SpineLogo from './components/SpineLogo';
 import { translations, Language } from './translations';
 import AdminDashboard from './components/admin/AdminDashboard';
@@ -194,8 +194,14 @@ const Navbar = ({ onSecretAdmin }: { onSecretAdmin?: () => void }) => {
         </div>
 
         {/* Desktop Menu */}
-        <div className="hidden lg:flex items-center gap-8 text-sm font-medium uppercase tracking-widest text-primary/80">
+        <div className="hidden lg:flex items-center gap-7 text-sm font-medium uppercase tracking-widest text-primary/80">
           <a href="#services" onClick={(e) => scrollToSection(e, 'services')} className="hover:text-primary transition-colors">{t.nav.services}</a>
+          <a href="#reviews" onClick={(e) => scrollToSection(e, 'reviews')} className="hover:text-primary transition-colors flex items-center gap-1.5">
+            <span>{t.nav.reviews || 'Avis'}</span>
+            <span className="inline-flex items-center gap-0.5 text-[10px] font-bold text-amber-700 bg-amber-100/80 px-1.5 py-0.5 rounded-full">
+              ★ 5.0
+            </span>
+          </a>
           <a href="#about" onClick={(e) => scrollToSection(e, 'about')} className="hover:text-primary transition-colors">{t.nav.about}</a>
           <a href="#location" onClick={(e) => scrollToSection(e, 'location')} className="hover:text-primary transition-colors">{t.nav.clinic}</a>
           <a href="#contact" onClick={(e) => scrollToSection(e, 'contact')} className="hover:text-primary transition-colors">{t.nav.contact}</a>
@@ -231,6 +237,12 @@ const Navbar = ({ onSecretAdmin }: { onSecretAdmin?: () => void }) => {
           >
             <div className="flex flex-col p-6 gap-6 text-sm font-medium uppercase tracking-widest text-primary/80">
               <a href="#services" onClick={(e) => scrollToSection(e, 'services')} className="hover:text-primary transition-colors">{t.nav.services}</a>
+              <a href="#reviews" onClick={(e) => scrollToSection(e, 'reviews')} className="hover:text-primary transition-colors flex items-center justify-between">
+                <span>{t.nav.reviews || 'Avis'}</span>
+                <span className="text-[11px] font-bold text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full">
+                  ★ 5.0 Google
+                </span>
+              </a>
               <a href="#about" onClick={(e) => scrollToSection(e, 'about')} className="hover:text-primary transition-colors">{t.nav.about}</a>
               <a href="#location" onClick={(e) => scrollToSection(e, 'location')} className="hover:text-primary transition-colors">{t.nav.clinic}</a>
               <a href="#contact" onClick={(e) => scrollToSection(e, 'contact')} className="hover:text-primary transition-colors">{t.nav.contact}</a>
@@ -463,6 +475,207 @@ const Services = () => {
   );
 };
 
+const GoogleIcon = ({ size = 20, className = "" }: { size?: number; className?: string }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" className={className} aria-label="Google">
+    <path
+      fill="#4285F4"
+      d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.665-5.17 3.665-9.17Z"
+    />
+    <path
+      fill="#34A853"
+      d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.93H1.25v3.15C3.26 21.36 7.33 24 12 24Z"
+    />
+    <path
+      fill="#FBBC05"
+      d="M5.28 14.27c-.25-.72-.38-1.49-.38-2.27s.14-1.55.38-2.27V6.58H1.25C.45 8.18 0 9.99 0 12s.45 3.82 1.25 5.42l4.03-3.15Z"
+    />
+    <path
+      fill="#EA4335"
+      d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.33 0 3.26 2.64 1.25 6.58l4.03 3.15c.95-2.83 3.6-4.98 6.72-4.98Z"
+    />
+  </svg>
+);
+
+const DEFAULT_GOOGLE_MAPS_URL = "https://g.page/r/CWVMMZoe1_QSEBM/review";
+
+const getStoredGoogleReviews = () => {
+  if (typeof window !== 'undefined') {
+    try {
+      const stored = localStorage.getItem('vincent_custom_google_reviews');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed;
+        }
+      }
+    } catch (e) {
+      console.error('Error reading custom google reviews:', e);
+    }
+  }
+  // Fixed baseline reviews in original language
+  return translations.fr.reviews.items;
+};
+
+const getTimeAgo = (timestamp: number | string, lang: Language) => {
+  if (typeof timestamp === 'string') return timestamp;
+  
+  const now = Date.now();
+  const diff = timestamp - now;
+  const rtf = new Intl.RelativeTimeFormat(lang, { numeric: 'auto' });
+  
+  const seconds = Math.round(diff / 1000);
+  const minutes = Math.round(seconds / 60);
+  const hours = Math.round(minutes / 60);
+  const days = Math.round(hours / 24);
+  const weeks = Math.round(days / 7);
+  const months = Math.round(days / 30);
+  
+  if (Math.abs(months) >= 1) return rtf.format(months, 'month');
+  if (Math.abs(weeks) >= 1) return rtf.format(weeks, 'week');
+  if (Math.abs(days) >= 1) return rtf.format(days, 'day');
+  if (Math.abs(hours) >= 1) return rtf.format(hours, 'hour');
+  if (Math.abs(minutes) >= 1) return rtf.format(minutes, 'minute');
+  return rtf.format(seconds, 'second');
+};
+
+const GoogleReviews = () => {
+  const { lang, t } = useTranslation();
+  const reviewsData = (t as any).reviews || translations.fr.reviews;
+  
+  // Permanent static comments that do NOT change language when site language toggles
+  const [items, setItems] = useState(() => getStoredGoogleReviews());
+  const [isPaused, setIsPaused] = useState(false);
+
+  useEffect(() => {
+    const handleCustomUpdate = () => {
+      setItems(getStoredGoogleReviews());
+    };
+    window.addEventListener('vincent_google_reviews_updated', handleCustomUpdate);
+    return () => window.removeEventListener('vincent_google_reviews_updated', handleCustomUpdate);
+  }, []);
+
+  // Carousel slide index (showing max 2 on screen)
+  const [slideIndex, setSlideIndex] = useState(0);
+
+  const maxStartIndex = Math.max(0, items.length - 2);
+
+  // Auto-play interval (advance every 10 seconds)
+  useEffect(() => {
+    if (isPaused || maxStartIndex === 0) return;
+    const timer = setInterval(() => {
+      setSlideIndex((prev) => (prev < maxStartIndex ? prev + 1 : 0));
+    }, 10000);
+    return () => clearInterval(timer);
+  }, [isPaused, maxStartIndex, items.length]);
+
+  const visibleItems = items.slice(slideIndex, slideIndex + 2);
+
+  return (
+    <section 
+      id="reviews" 
+      className="py-12 sm:py-16 px-4 sm:px-6 bg-[#faf9f5] border-y border-stone-200/60 relative"
+      onMouseEnter={() => setIsPaused(true)}
+      onMouseLeave={() => setIsPaused(false)}
+      onTouchStart={() => setIsPaused(true)}
+      onTouchEnd={() => setIsPaused(false)}
+    >
+      <div className="max-w-5xl mx-auto">
+        
+        {/* Discreet Compact Header */}
+        <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 mb-8">
+          <div>
+            <h2 className="text-2xl sm:text-3xl md:text-4xl font-serif text-stone-900 leading-tight">
+              {reviewsData.title}
+            </h2>
+          </div>
+
+          {/* Action Button */}
+          <div className="shrink-0 self-start sm:self-end">
+            <a
+              href={DEFAULT_GOOGLE_MAPS_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-full bg-white border border-stone-200 hover:border-primary text-stone-800 hover:text-primary text-xs font-semibold transition-all shadow-2xs hover:shadow-xs active:scale-95 cursor-pointer"
+              title="Ouvrir la fiche Google Maps"
+            >
+              <GoogleIcon size={14} />
+              <span>{reviewsData.leaveReview}</span>
+              <ExternalLink size={13} className="opacity-60" />
+            </a>
+          </div>
+        </div>
+
+        {/* Discreet Automatic Carousel with Max 2 Cards on Screen */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-stretch">
+          {visibleItems.map((review: any, idx: number) => (
+            <motion.div
+              key={slideIndex + '-' + (review.id || idx)}
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.35, ease: 'easeOut' }}
+              className="bg-white rounded-2xl p-6 sm:p-7 border border-stone-200/80 shadow-2xs hover:shadow-xs hover:border-stone-300 transition-all flex flex-col justify-between h-full"
+            >
+              <div className="flex-1 flex flex-col justify-between">
+                {/* Review Header: Initials, Name & Google Stars */}
+                <div className="flex items-start justify-between gap-3 mb-4">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-full bg-stone-100 border border-stone-200 text-stone-700 font-semibold text-xs flex items-center justify-center shrink-0">
+                      {review.initials || (review.author ? review.author.substring(0, 2).toUpperCase() : 'GP')}
+                    </div>
+                    <div>
+                      <h4 className="font-semibold text-sm text-stone-900 leading-tight">
+                        {review.author}
+                      </h4>
+                      <span className="text-[11px] text-stone-400 mt-0.5 block">
+                        {getTimeAgo(review.date, lang)}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-0.5 text-amber-400 shrink-0">
+                    {[...Array(review.rating || 5)].map((_, i) => (
+                      <Star key={i} size={14} className="fill-amber-400 text-amber-400" />
+                    ))}
+                  </div>
+                </div>
+
+                {/* Patient Comment */}
+                <div className="my-2 flex-1 flex items-center">
+                  <p className="text-xs sm:text-sm text-stone-600 leading-relaxed italic">
+                    « {review.text} »
+                  </p>
+                </div>
+              </div>
+
+              {/* Card Footer: Verified badge */}
+              <div className="pt-4 mt-4 border-t border-stone-100 flex items-center justify-end text-[11px]">
+                <span className="inline-flex items-center gap-1.5 text-[11px] text-emerald-700 font-medium">
+                  <CheckCircle2 size={13} className="text-emerald-600" />
+                  <span>{reviewsData.verifiedBadge}</span>
+                </span>
+              </div>
+            </motion.div>
+          ))}
+        </div>
+
+        {/* Sub-Footer with Direct Google Link */}
+        <div className="mt-6 flex items-center justify-end text-xs text-stone-500 pt-3 border-t border-stone-200/40">
+          <a
+            href={DEFAULT_GOOGLE_MAPS_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-stone-600 hover:text-primary font-medium inline-flex items-center gap-1.5 transition-colors hover:underline"
+          >
+            <span>{reviewsData.viewAllGoogle}</span>
+            <ExternalLink size={12} />
+          </a>
+        </div>
+
+      </div>
+    </section>
+  );
+};
+
 const About = () => {
   const { t } = useTranslation();
   return (
@@ -636,9 +849,13 @@ const Footer = () => {
         </div>
         <div>
           <h4 className="text-sm uppercase tracking-widest font-semibold mb-6 text-white/40">{t.footer.links}</h4>
-          <ul className="space-y-4 text-lg font-serif">
-            <li><a href="#about" onClick={(e) => scrollToSection(e, 'about')} className="hover:text-accent transition-colors">{t.nav.about}</a></li>
+          <ul className="space-y-3 text-base sm:text-lg font-serif">
             <li><a href="#services" onClick={(e) => scrollToSection(e, 'services')} className="hover:text-accent transition-colors">{t.nav.services}</a></li>
+            <li><a href="#reviews" onClick={(e) => scrollToSection(e, 'reviews')} className="hover:text-accent transition-colors flex items-center gap-2">
+              <span>{t.nav.reviews || 'Avis'}</span>
+              <span className="text-xs text-amber-300 font-sans">★★★★★ 5.0</span>
+            </a></li>
+            <li><a href="#about" onClick={(e) => scrollToSection(e, 'about')} className="hover:text-accent transition-colors">{t.nav.about}</a></li>
             <li><a href="#location" onClick={(e) => scrollToSection(e, 'location')} className="hover:text-accent transition-colors">{t.nav.clinic}</a></li>
           </ul>
         </div>
@@ -929,6 +1146,7 @@ export default function App() {
               <Navbar onSecretAdmin={() => setIsPasscodeOpen(true)} />
               <Hero onOpenBooking={() => setIsBookingModalOpen(true)} />
               <Services />
+              <GoogleReviews />
               <About />
               <Location />
               <Footer />

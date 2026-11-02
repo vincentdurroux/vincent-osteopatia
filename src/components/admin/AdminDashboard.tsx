@@ -7,7 +7,7 @@ import {
   ChevronRight, Pencil, ChevronLeft, ChevronDown, LayoutGrid, List, ArrowRight,
   Copy, CheckCircle2, XCircle, AlertTriangle, Database, Server, UserPlus, User,
   Tag, BadgePercent, Percent, Sparkles, IdCard, X, Columns3, Lock, Coffee, Briefcase, Bookmark, Pin, StickyNote,
-  ArrowUpDown, ArrowUp, ArrowDown, ExternalLink, Info
+  ArrowUpDown, ArrowUp, ArrowDown, ExternalLink, Info, Star
 } from 'lucide-react';
 import { Client, ClientNote, Invoice, CalendarEvent, EventType } from '../../types';
 import { api, supabase, isSupabaseConfigured, SUPABASE_SQL_SETUP, capitalizeFirstName, sortInvoicesByDate, normalizeInvoiceDescription } from '../../lib/supabase';
@@ -120,7 +120,7 @@ const formatRecapSubtitle = (recap: {
   return `${spanishMonths[mIdx]} ${yVal}`;
 };
 
-type TabType = 'overview' | 'clients' | 'calendar' | 'billing';
+type TabType = 'overview' | 'clients' | 'calendar' | 'billing' | 'reviews';
 
 const DEFAULT_PATIENT_FORM = {
   firstName: '',
@@ -159,6 +159,99 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
     return () => clearInterval(clockInterval);
   }, []);
   
+  // Google Reviews management state
+  const [customReviews, setCustomReviews] = useState<any[]>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const stored = localStorage.getItem('vincent_custom_google_reviews');
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        }
+      } catch (e) {
+        console.error('Error reading custom google reviews:', e);
+      }
+    }
+    return translations.fr.reviews.items;
+  });
+
+  const [isAddReviewModalOpen, setIsAddReviewModalOpen] = useState(false);
+  const [editingReviewIndex, setEditingReviewIndex] = useState<number | null>(null);
+  const [reviewForm, setReviewForm] = useState({
+    author: '',
+    initials: '',
+    date: 'Il y a 1 semaine',
+    rating: 5,
+    text: '',
+  });
+
+  const saveCustomReviewsToStorage = (updated: any[]) => {
+    setCustomReviews(updated);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('vincent_custom_google_reviews', JSON.stringify(updated));
+      window.dispatchEvent(new Event('vincent_google_reviews_updated'));
+    }
+  };
+
+  const handleSaveReview = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!reviewForm.author.trim() || !reviewForm.text.trim()) return;
+
+    const authorClean = reviewForm.author.trim();
+    const initialsClean = reviewForm.initials.trim() || authorClean.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2);
+    const dateTimestamp = reviewForm.date ? new Date(reviewForm.date).getTime() : Date.now();
+    
+    const newEntry = {
+      author: authorClean,
+      initials: initialsClean,
+      date: dateTimestamp,
+      rating: Number(reviewForm.rating) || 5,
+      text: reviewForm.text.trim(),
+    };
+
+    let updated: any[];
+    if (editingReviewIndex !== null && editingReviewIndex >= 0) {
+      updated = [...customReviews];
+      updated[editingReviewIndex] = newEntry;
+    } else {
+      updated = [newEntry, ...customReviews];
+    }
+
+    saveCustomReviewsToStorage(updated);
+    setIsAddReviewModalOpen(false);
+    setEditingReviewIndex(null);
+    setReviewForm({ author: '', initials: '', date: new Date().toISOString().split('T')[0], rating: 5, text: '' });
+  };
+
+  const handleDeleteReview = (index: number) => {
+    setConfirmDialog({
+      isOpen: true,
+      title: 'Delete Google review',
+      message: 'Are you sure you want to delete this Google review? It will be removed from your website homepage.',
+      confirmText: 'Delete review',
+      cancelText: 'Cancel',
+      isDangerous: true,
+      onConfirm: () => {
+        const updated = customReviews.filter((_, i) => i !== index);
+        saveCustomReviewsToStorage(updated);
+      },
+    });
+  };
+
+  const handleResetDefaultReviews = () => {
+    setConfirmDialog({
+      isOpen: true,
+      title: 'Reset Google reviews',
+      message: 'Reset to default Google reviews? This will restore the original patient testimonials.',
+      confirmText: 'Reset to default',
+      cancelText: 'Cancel',
+      isDangerous: false,
+      onConfirm: () => {
+        saveCustomReviewsToStorage(translations.fr.reviews.items);
+      },
+    });
+  };
+
   // Ref to main scroll container to scroll to top when changing tabs
   const mainContentRef = useRef<HTMLElement | null>(null);
 
@@ -1955,19 +2048,20 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
   };
 
   return (
-    <div id="admin-dashboard-layout" className="fixed inset-0 z-[80] bg-[#fdfdfb] text-gray-800 flex flex-col md:flex-row overflow-hidden print:relative print:inset-auto print:overflow-visible print:bg-white">
+    <div id="admin-dashboard-layout" className="fixed inset-0 z-[80] bg-[#fdfdfb] text-gray-800 flex flex-col md:flex-row h-screen w-screen overflow-hidden print:relative print:inset-auto print:overflow-visible print:bg-white">
       
       {/* MOBILE TOP APP BAR (Native App style, md:hidden) */}
-      <header className="md:hidden bg-[#f4f4ec] border-b border-black/5 px-3.5 py-2.5 flex items-center justify-between shrink-0 shadow-2xs z-30 print:hidden">
-        <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 bg-primary rounded-full flex items-center justify-center text-white shrink-0 shadow-xs">
-            <SpineLogo size={17} />
+      <header className="md:hidden bg-[#f4f4ec] border-b border-black/5 px-3.5 py-2.5 flex flex-col gap-2 shrink-0 shadow-2xs z-30 print:hidden">
+        <div className="w-full flex items-center justify-between">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 bg-primary rounded-full flex items-center justify-center text-white shrink-0 shadow-xs">
+              <SpineLogo size={17} />
+            </div>
+            <div className="leading-tight">
+              <span className="text-sm font-serif font-bold text-gray-900 block">Vincent Osteo</span>
+              <span className="text-[9px] uppercase tracking-widest font-bold text-primary/70">Gestion</span>
+            </div>
           </div>
-          <div className="leading-tight">
-            <span className="text-sm font-serif font-bold text-gray-900 block">Vincent Osteo</span>
-            <span className="text-[9px] uppercase tracking-widest font-bold text-primary/70">Gestion</span>
-          </div>
-        </div>
 
         <div className="flex items-center gap-2">
           {/* Language Selector compact */}
@@ -1999,6 +2093,36 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
             <ArrowLeft size={13} />
             <span className="text-[11px] font-medium hidden sm:inline">{lang === 'fr' ? "Site" : lang === 'es' ? "Sitio" : "Site"}</span>
           </button>
+        </div>
+      </div>
+
+        {/* Mobile Horizontal Navigation Tabs */}
+        <div className="w-full flex items-center gap-1 overflow-x-auto pt-1 pb-0.5 no-scrollbar border-t border-black/5">
+          {[
+            { id: 'overview', label: t.admin.tabs.overview, icon: TrendingUp },
+            { id: 'clients', label: t.admin.tabs.clients, icon: Users },
+            { id: 'calendar', label: t.admin.tabs.calendar, icon: Calendar },
+            { id: 'billing', label: t.admin.tabs.billing, icon: FileText },
+            { id: 'reviews', label: 'Google Reviews', icon: Star },
+          ].map(item => {
+            const Icon = item.icon;
+            const isActive = activeTab === item.id;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => setActiveTab(item.id as TabType)}
+                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-bold whitespace-nowrap transition-all cursor-pointer ${
+                  isActive
+                    ? 'bg-primary text-white shadow-xs'
+                    : 'bg-white/80 text-gray-600 hover:bg-white border border-black/5'
+                }`}
+              >
+                <Icon size={12} />
+                <span>{item.label}</span>
+              </button>
+            );
+          })}
         </div>
       </header>
 
@@ -2052,6 +2176,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
               { id: 'clients', label: t.admin.tabs.clients, icon: Users },
               { id: 'calendar', label: t.admin.tabs.calendar, icon: Calendar },
               { id: 'billing', label: t.admin.tabs.billing, icon: FileText },
+              { id: 'reviews', label: 'Google Reviews', icon: Star },
             ].map(item => {
               const Icon = item.icon;
               const isActive = activeTab === item.id;
@@ -2059,7 +2184,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                 <button
                   key={item.id}
                   onClick={() => setActiveTab(item.id as TabType)}
-                  className={`flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl transition-all whitespace-nowrap w-full text-xs font-semibold uppercase tracking-wider ${
+                  className={`flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl transition-all whitespace-nowrap w-full text-xs font-semibold uppercase tracking-wider cursor-pointer ${
                     isActive 
                       ? 'bg-primary text-white shadow-md shadow-primary/10' 
                       : 'text-gray-600 hover:bg-black/5'
@@ -2075,7 +2200,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
       </aside>
 
       {/* MAIN CONTAINER */}
-      <main ref={mainContentRef} className="flex-1 overflow-y-auto bg-[#fbfbfa] p-3.5 sm:p-6 md:p-8 pb-24 md:pb-8 flex flex-col print:hidden">
+      <main ref={mainContentRef} className="flex-1 overflow-y-auto bg-[#fbfbfa] p-3.5 sm:p-6 md:p-8 pb-32 md:pb-16 flex flex-col print:hidden">
         
         {/* TAB 1: OVERVIEW */}
         {activeTab === 'overview' && (
@@ -8140,6 +8265,113 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
         )}
       </AnimatePresence>
 
+        {/* TAB 5: GOOGLE REVIEWS */}
+        {activeTab === 'reviews' && (
+          <div className="flex flex-col h-full w-full pb-32">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4 mb-6 shrink-0">
+              <div>
+                <h2 className="text-2xl sm:text-3xl font-serif font-bold text-primary flex items-center gap-2">
+                  <Star className="fill-amber-400 text-amber-400 shrink-0" size={24} />
+                  <span>Google Reviews</span>
+                </h2>
+                <p className="text-xs sm:text-sm text-gray-500 mt-1">
+                  Manage real Google patient reviews displayed on your website homepage.
+                </p>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={handleResetDefaultReviews}
+                  className="px-3.5 py-2 bg-secondary hover:bg-black/5 text-gray-600 rounded-xl text-xs font-bold transition-all cursor-pointer"
+                >
+                  Reset
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditingReviewIndex(null);
+                    setReviewForm({ author: '', initials: '', date: '1 week ago', rating: 5, text: '' });
+                    setIsAddReviewModalOpen(true);
+                  }}
+                  className="px-4 py-2 bg-primary hover:bg-primary/95 text-white rounded-xl text-xs font-bold uppercase tracking-wider transition-all shadow-md flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Plus size={15} />
+                  <span>Add review</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Reviews Cards List (Scrollable Area) */}
+            <div className="flex-1 overflow-y-auto min-h-0 pr-2">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6">
+                {customReviews.map((rev: any, index: number) => (
+                  <div key={index} className="bg-white rounded-2xl p-4 sm:p-5 border border-black/5 shadow-2xs flex flex-col justify-between gap-4 relative group">
+                    <div>
+                      <div className="flex items-start justify-between gap-3 mb-3">
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <div className="w-9 h-9 rounded-full bg-primary/10 border border-primary/20 text-primary font-bold text-xs flex items-center justify-center shrink-0">
+                            {rev.initials || (rev.author ? rev.author.substring(0, 2).toUpperCase() : 'GP')}
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <h4 className="font-bold text-sm text-gray-900 leading-tight truncate">{rev.author}</h4>
+                            <span className="text-[11px] text-gray-400 mt-0.5 block">
+                            {new Date(Number(rev.date)).toLocaleDateString(lang === 'fr' ? 'fr-FR' : 'es-ES')}
+                          </span>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-0.5 text-amber-400 shrink-0">
+                          {[...Array(rev.rating || 5)].map((_, i) => (
+                            <Star key={i} size={13} className="fill-amber-400 text-amber-400" />
+                          ))}
+                        </div>
+                      </div>
+                      <p className="text-xs sm:text-sm text-gray-600 italic leading-relaxed">
+                        « {rev.text} »
+                      </p>
+                    </div>
+
+                    <div className="pt-3 border-t border-black/5 flex flex-wrap items-center justify-between gap-2">
+                      <span className="inline-flex items-center gap-1 text-[10px] text-emerald-700 font-medium">
+                        <CheckCircle2 size={12} className="text-emerald-600 shrink-0" />
+                        <span>Verified Google Review</span>
+                      </span>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditingReviewIndex(index);
+                            setReviewForm({
+                              author: rev.author || '',
+                              initials: rev.initials || '',
+                              date: (!isNaN(Number(rev.date))) ? new Date(Number(rev.date)).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
+                              rating: rev.rating || 5,
+                              text: rev.text || '',
+                            });
+                            setIsAddReviewModalOpen(true);
+                          }}
+                          className="px-2.5 py-1 text-xs text-primary hover:bg-primary/5 rounded-lg font-semibold transition-colors flex items-center gap-1 cursor-pointer"
+                        >
+                          <Pencil size={12} />
+                          <span>Edit</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteReview(index)}
+                          className="px-2.5 py-1 text-xs text-rose-600 hover:bg-rose-50 rounded-lg font-semibold transition-colors flex items-center gap-1 cursor-pointer"
+                        >
+                          <Trash2 size={12} />
+                          <span>Delete</span>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
       {/* MODAL: PRINTABLE RECEIPT / MUTUELLE REÇU */}
       <AnimatePresence>
         {selectedInvoiceForPrint && (
@@ -8525,6 +8757,123 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
           </div>
         )}
 
+
+      {/* MODAL: ADD / EDIT GOOGLE REVIEW */}
+      <AnimatePresence>
+        {isAddReviewModalOpen && (
+          <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-white rounded-3xl max-w-lg w-full p-6 shadow-2xl border border-black/10 text-left"
+            >
+              <div className="flex items-center justify-between pb-3 border-b border-black/5 mb-4">
+                <h3 className="font-serif text-lg font-bold text-gray-900 flex items-center gap-2">
+                  <Star className="fill-amber-400 text-amber-400" size={18} />
+                  <span>{editingReviewIndex !== null ? 'Edit Google Review' : 'Add Google Review'}</span>
+                </h3>
+                <button
+                  onClick={() => setIsAddReviewModalOpen(false)}
+                  className="w-7 h-7 rounded-full flex items-center justify-center text-gray-400 hover:text-gray-700 hover:bg-black/5 cursor-pointer"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+
+              <form onSubmit={handleSaveReview} className="space-y-4">
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[10px] font-bold uppercase tracking-wider text-gray-500 mb-1">
+                      Patient Name
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="e.g., Sarah Connor"
+                      value={reviewForm.author}
+                      onChange={e => setReviewForm(prev => ({ ...prev, author: e.target.value }))}
+                      className="w-full px-3 py-2 text-xs border border-stone-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold uppercase tracking-wider text-gray-500 mb-1">
+                      Initials
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="e.g., SC"
+                      maxLength={3}
+                      value={reviewForm.initials}
+                      onChange={e => setReviewForm(prev => ({ ...prev, initials: e.target.value.toUpperCase() }))}
+                      className="w-full px-3 py-2 text-xs border border-stone-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[10px] font-bold uppercase tracking-wider text-gray-500 mb-1">
+                      Review Date
+                    </label>
+                    <input
+                      type="date"
+                      required
+                      value={reviewForm.date}
+                      onChange={e => setReviewForm(prev => ({ ...prev, date: e.target.value }))}
+                      className="w-full px-3 py-2 text-xs border border-stone-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold uppercase tracking-wider text-gray-500 mb-1">
+                      Rating (Stars)
+                    </label>
+                    <select
+                      value={reviewForm.rating}
+                      onChange={e => setReviewForm(prev => ({ ...prev, rating: Number(e.target.value) }))}
+                      className="w-full px-3 py-2 text-xs border border-stone-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+                    >
+                      <option value={5}>5 Stars ★★★★★ (Recommended)</option>
+                      <option value={4}>4 Stars ★★★★☆</option>
+                      <option value={3}>3 Stars ★★★☆☆</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-bold uppercase tracking-wider text-gray-500 mb-1">
+                    Google Review Text
+                  </label>
+                  <textarea
+                    required
+                    rows={4}
+                    placeholder="Paste the exact patient review left on Google Business Profile..."
+                    value={reviewForm.text}
+                    onChange={e => setReviewForm(prev => ({ ...prev, text: e.target.value }))}
+                    className="w-full px-3 py-2 text-xs border border-stone-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+                  />
+                </div>
+
+                <div className="flex items-center justify-end gap-2 pt-2 border-t border-black/5">
+                  <button
+                    type="button"
+                    onClick={() => setIsAddReviewModalOpen(false)}
+                    className="px-4 py-2 text-xs font-semibold text-gray-600 hover:bg-black/5 rounded-xl cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-5 py-2 text-xs font-semibold text-white bg-primary hover:bg-primary/95 rounded-xl shadow-xs cursor-pointer"
+                  >
+                    {editingReviewIndex !== null ? 'Update Review' : 'Add Review'}
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
         {/* MODAL: CUSTOM IN-APP CONFIRMATION DIALOG (Guaranteed to work in iframe, Google AI Studio, and Deployed sites) */}
         {confirmDialog.isOpen && (

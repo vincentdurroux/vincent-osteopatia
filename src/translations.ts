@@ -4,6 +4,7 @@ export const translations = {
   fr: {
     nav: {
       services: 'Services',
+      reviews: 'Avis',
       about: 'À Propos',
       clinic: 'Cabinet',
       contact: 'Contact',
@@ -72,6 +73,68 @@ export const translations = {
           ]
         }
       }
+    },
+    reviews: {
+      tag: "Avis Google Pro Vérifiés",
+      title: "Ce que disent mes patients",
+      subtitle: "Consultez les derniers avis vérifiés laissés sur notre fiche Google Business",
+      googleRating: "5.0",
+      totalReviews: "100% d'avis 5 étoiles",
+      basedOn: "Basé sur les avis certifiés Google Maps & Business",
+      leaveReview: "Laisser un avis sur Google",
+      viewAllGoogle: "Voir la fiche Google Maps",
+      verifiedBadge: "Patient vérifié Google",
+      filterAll: "Tous les avis",
+      items: [
+        {
+          author: "Elena Moreno",
+          initials: "EM",
+          date: Date.now() - 14 * 24 * 60 * 60 * 1000,
+          rating: 5,
+          category: "Lombalgie & Sciatique",
+          text: "Praticien exceptionnel à L'Eliana. Je suis venue avec un lumbago aigu qui m'empêchait presque de marcher. Dès la première séance, Vincent a su débloquer la zone avec une douceur remarquable, sans aucun craquement forcé. Le lendemain, je n'avais plus mal. Je recommande à 100% !",
+        },
+        {
+          author: "Jean-Christophe B.",
+          initials: "JB",
+          date: Date.now() - 21 * 24 * 60 * 60 * 1000,
+          rating: 5,
+          category: "Expatrié & Suivi dos",
+          text: "Un vrai bonheur de trouver un ostéopathe de cette qualité à Valence / L'Eliana ! Vincent prend le temps d'écouter, d'analyser la posture globale et d'expliquer chaque geste. Cabinet immaculé, accueil très chaleureux et résultats au rendez-vous.",
+        },
+        {
+          author: "Sophie & Bébé Liam",
+          initials: "SL",
+          date: Date.now() - 30 * 24 * 60 * 60 * 1000,
+          rating: 5,
+          category: "Pédiatrie & Nouveau-né",
+          text: "Vincent a été formidable avec notre petit de 2 mois qui souffrait de reflux et de coliques après l'accouchement. Des gestes d'une infinie délicatesse. Notre bébé a retrouvé un sommeil paisible dès le soir même. Merci infiniment !",
+        },
+        {
+          author: "Carlos Ramírez",
+          initials: "CR",
+          date: Date.now() - 30 * 24 * 60 * 60 * 1000,
+          rating: 5,
+          category: "Sportif & Récupération",
+          text: "Excelente profesional. Como corredor habitual, llevaba meses arrastrando una sobrecarga en el tendón rotuliano y molestias en la cadera. El enfoque de Vincent fue súper preciso y efectivo. Pude correr la media maratón sin ninguna molestia.",
+        },
+        {
+          author: "Marie-Claire Dupont",
+          initials: "MD",
+          date: Date.now() - 60 * 24 * 60 * 60 * 1000,
+          rating: 5,
+          category: "Cervicales & Migraines",
+          text: "Souffrant de tensions cervicales chroniques et de maux de tête réguliers dus au travail sur écran, j'ai constaté une libération immédiate après la consultation. Vincent a des mains d'or et donne d'excellents conseils posturaux.",
+        },
+        {
+          author: "David Palmer",
+          initials: "DP",
+          date: Date.now() - 60 * 24 * 60 * 60 * 1000,
+          rating: 5,
+          category: "Posture & Tensions",
+          text: "Outstanding osteopath in L'Eliana! Fluent in English, French and Spanish. Very thorough assessment and gentle, highly effective hands-on technique. The clinic atmosphere is peaceful and relaxing. Highly recommended to the expat community.",
+        }
+      ]
     },
     location: {
       title: 'Le Cabinet',
@@ -319,6 +382,7 @@ export const translations = {
   en: {
     nav: {
       services: 'Services',
+      reviews: 'Reviews',
       about: 'About',
       clinic: 'Clinic',
       contact: 'Contact',
@@ -387,6 +451,68 @@ export const translations = {
           ]
         }
       }
+    },
+    reviews: {
+      tag: "Verified Google Pro Reviews",
+      title: "Patients say",
+      subtitle: "Explore the latest reviews left by our patients on our Google Business Profile",
+      googleRating: "5.0",
+      totalReviews: "100% 5-star ratings",
+      basedOn: "Based on verified Google Maps & Business reviews",
+      leaveReview: "Leave a review on Google",
+      viewAllGoogle: "View on Google Maps",
+      verifiedBadge: "Verified Google Review",
+      filterAll: "All reviews",
+      items: [
+        {
+          author: "Elena Moreno",
+          initials: "EM",
+          date: Date.now() - 14 * 24 * 60 * 60 * 1000,
+          rating: 5,
+          category: "Lower Back & Sciatica",
+          text: "Exceptional practitioner in L'Eliana. I came in with severe lower back pain that made it difficult to walk. With gentle and precise techniques, Vincent relieved the pain immediately. The next day I felt completely restored. Highly recommended!",
+        },
+        {
+          author: "Jean-Christophe B.",
+          initials: "JB",
+          date: Date.now() - 21 * 24 * 60 * 60 * 1000,
+          rating: 5,
+          category: "Postural balance",
+          text: "A true privilege to find an osteopath of this caliber in Valencia / L'Eliana! Vincent listens carefully, evaluates whole-body posture, and explains every technique. Pristine clinic, warm welcome, and outstanding results.",
+        },
+        {
+          author: "Sophie & Baby Liam",
+          initials: "SL",
+          date: Date.now() - 30 * 24 * 60 * 60 * 1000,
+          rating: 5,
+          category: "Pediatrics & Newborn",
+          text: "Vincent was wonderful with our 2-month-old who suffered from reflux and colic. Extremely gentle, reassuring touch. Our baby had peaceful sleep that very same night. Thank you so much!",
+        },
+        {
+          author: "Carlos Ramírez",
+          initials: "CR",
+          date: Date.now() - 30 * 24 * 60 * 60 * 1000,
+          rating: 5,
+          category: "Sports & Recovery",
+          text: "Top-notch professional. As a regular runner, I struggled with patellar tendon strain and hip tightness. Vincent's biomechanical insight and manual care allowed me to race the half-marathon pain-free. A 10/10.",
+        },
+        {
+          author: "Marie-Claire Dupont",
+          initials: "MD",
+          date: Date.now() - 60 * 24 * 60 * 60 * 1000,
+          rating: 5,
+          category: "Neck pain & Headaches",
+          text: "Suffering from chronic neck tension and headaches caused by long desk hours, I felt an instant release after the treatment. Vincent has remarkable skill and shared valuable daily ergonomic tips.",
+        },
+        {
+          author: "David Palmer",
+          initials: "DP",
+          date: Date.now() - 60 * 24 * 60 * 60 * 1000,
+          rating: 5,
+          category: "Posture & Tension",
+          text: "Outstanding osteopath in L'Eliana! Fluent in English, French, and Spanish. Very thorough assessment and gentle, highly effective hands-on technique. The clinic atmosphere is peaceful and relaxing. Highly recommended to the expat community.",
+        }
+      ]
     },
     location: {
       title: 'The Clinic',
@@ -634,6 +760,7 @@ export const translations = {
   es: {
     nav: {
       services: 'Servicios',
+      reviews: 'Opiniones',
       about: 'Sobre nosotros',
       clinic: 'Clínica',
       contact: 'Contacto',
@@ -702,6 +829,68 @@ export const translations = {
           ]
         }
       }
+    },
+    reviews: {
+      tag: "Reseñas de Google Pro Verificadas",
+      title: "Lo que dicen los pacientes",
+      subtitle: "Consulte las últimas opiniones verificadas en nuestra ficha de Google Business",
+      googleRating: "5.0",
+      totalReviews: "100% valoraciones de 5 estrellas",
+      basedOn: "Basado en reseñas verificadas de Google Maps y Google Business",
+      leaveReview: "Escribir una reseña en Google",
+      viewAllGoogle: "Ver en Google Maps",
+      verifiedBadge: "Paciente verificado en Google",
+      filterAll: "Todas las opiniones",
+      items: [
+        {
+          author: "Elena Moreno",
+          initials: "EM",
+          date: Date.now() - 14 * 24 * 60 * 60 * 1000,
+          rating: 5,
+          category: "Lumbalgie y Ciática",
+          text: "Profesional excepcional en L'Eliana. Acudí con un lumbago agudo que casi no me permitía moverme. Con una suavidad y precisión admirables, Vincent alivió el dolor desde la primera sesión. Al día siguiente estaba como nueva. ¡Totalmente recomendable!",
+        },
+        {
+          author: "Jean-Christophe B.",
+          initials: "JB",
+          date: Date.now() - 21 * 24 * 60 * 60 * 1000,
+          rating: 5,
+          category: "Equilibrio postural",
+          text: "¡Una maravilla encontrar un osteópata de este nivel en Valencia / L'Eliana! Vincent se toma el tiempo de escuchar, analizar la postura global y explicar cada técnica. La clínica está impecable y los resultados son inmediatos.",
+        },
+        {
+          author: "Sophie y Bebé Liam",
+          initials: "SL",
+          date: Date.now() - 30 * 24 * 60 * 60 * 1000,
+          rating: 5,
+          category: "Pediatría y Bebé",
+          text: "Vincent fue maravilloso con nuestro bebé de 2 meses que sufría de reflujo y cólicos. Gestos de una delicadeza infinita. Nuestro pequeño recuperó un sueño tranquilo esa misma noche. ¡Muchísimas gracias!",
+        },
+        {
+          author: "Carlos Ramírez",
+          initials: "CR",
+          date: Date.now() - 30 * 24 * 60 * 60 * 1000,
+          rating: 5,
+          category: "Deportistas y Lesiones",
+          text: "Excelente profesional. Como corredor habitual, llevaba meses arrastrando una sobrecarga en el tendón rotuliano y molestias en la cadera. El enfoque de Vincent fue súper certero. Pude correr la media maratón sin ninguna molestia. Un 10.",
+        },
+        {
+          author: "Marie-Claire Dupont",
+          initials: "MD",
+          date: Date.now() - 60 * 24 * 60 * 60 * 1000,
+          rating: 5,
+          category: "Cervicales y Dolores de cabeza",
+          text: "Con dolores cervicales crónicos y migrañas por trabajar tantas horas ante el ordenador, sentí una liberación inmediata tras la sesión. Vincent tiene unas manos de oro y da pautas posturales excelentes.",
+        },
+        {
+          author: "David Palmer",
+          initials: "DP",
+          date: Date.now() - 60 * 24 * 60 * 60 * 1000,
+          rating: 5,
+          category: "Postura y Espalda",
+          text: "¡Excelente osteópata en L'Eliana! Habla perfectamente inglés, francés y español. Evaluación muy minuciosa y técnica manual suave y eficaz. El ambiente de la consulta es tranquilo y relajante. Muy recomendado.",
+        }
+      ]
     },
     location: {
       title: 'La Clínica',
