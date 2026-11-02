@@ -182,6 +182,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
 
   useEffect(() => {
     loadReviewsFromAPI();
+    runDiagnostics();
   }, []);
 
   // Migration logic: if we have local reviews but Supabase is configured, push them up
@@ -645,6 +646,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
         clientNotes: false,
         invoices: false,
         calendarEvents: false,
+        googleReviews: false,
         errorSummary: err.message,
       });
     } finally {
@@ -8320,31 +8322,62 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
             </div>
 
             {isSupabaseConfigured && (
-              <div className={`mb-6 p-3 rounded-2xl border flex items-center justify-between gap-4 ${
-                customReviews.length > 0 ? 'bg-emerald-50 border-emerald-100' : 'bg-amber-50 border-amber-100'
+              <div className={`mb-6 p-4 rounded-2xl border flex flex-col sm:flex-row sm:items-center justify-between gap-4 transition-all ${
+                tableDiagnostics?.googleReviews 
+                  ? (customReviews.length > 0 ? 'bg-emerald-50 border-emerald-100' : 'bg-amber-50 border-amber-100')
+                  : 'bg-rose-50 border-rose-100'
               }`}>
-                <div className="flex items-center gap-3">
-                  <div className={`w-8 h-8 rounded-xl flex items-center justify-center ${
-                    customReviews.length > 0 ? 'bg-emerald-100 text-emerald-600' : 'bg-amber-100 text-amber-600'
+                <div className="flex items-start sm:items-center gap-3">
+                  <div className={`w-10 h-10 rounded-2xl flex items-center justify-center shrink-0 ${
+                    tableDiagnostics?.googleReviews 
+                      ? (customReviews.length > 0 ? 'bg-emerald-100 text-emerald-600' : 'bg-amber-100 text-amber-600')
+                      : 'bg-rose-100 text-rose-600'
                   }`}>
-                    <Database size={16} />
+                    {tableDiagnostics?.googleReviews ? <Database size={20} /> : <AlertTriangle size={20} />}
                   </div>
                   <div>
-                    <p className="text-xs font-bold text-gray-800">
-                      {customReviews.length > 0 ? 'Synchronisation Supabase active' : 'Base de données prête'}
+                    <p className="text-sm font-bold text-gray-800">
+                      {!tableDiagnostics?.googleReviews 
+                        ? 'Base de données non initialisée' 
+                        : customReviews.length > 0 ? 'Synchronisation Cloud active' : 'Base de données prête'}
                     </p>
-                    <p className="text-[10px] text-gray-500">
-                      {customReviews.length > 0 
-                        ? `Vos ${customReviews.length} avis sont sauvegardés en ligne et visibles par tous les visiteurs.`
-                        : "Ajoutez votre premier avis pour l'activer sur le site."}
+                    <p className="text-xs text-gray-500 mt-0.5 leading-relaxed">
+                      {!tableDiagnostics?.googleReviews 
+                        ? "La table des avis n'existe pas encore dans votre base de données Supabase." 
+                        : customReviews.length > 0 
+                          ? `Vos ${customReviews.length} avis sont sauvegardés en ligne et visibles par tous vos patients.`
+                          : "Ajoutez votre premier avis pour le synchroniser sur votre site internet."}
                     </p>
                   </div>
                 </div>
-                {customReviews.length > 0 && (
-                  <span className="text-[10px] font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full flex items-center gap-1">
-                    <Check size={10} /> Cloud Sync
-                  </span>
-                )}
+                
+                <div className="flex items-center gap-2 self-end sm:self-center">
+                  {!tableDiagnostics?.googleReviews ? (
+                    <>
+                      <button
+                        onClick={runDiagnostics}
+                        disabled={isDiagnosing}
+                        className="p-2 bg-gray-100 hover:bg-gray-200 text-gray-600 rounded-xl transition-all disabled:opacity-50"
+                        title="Vérifier à nouveau"
+                      >
+                        <RefreshCw size={14} className={isDiagnosing ? 'animate-spin' : ''} />
+                      </button>
+                      <button
+                        onClick={handleCopySql}
+                        className="flex items-center gap-1.5 px-3 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold transition-all shadow-sm active:scale-95"
+                      >
+                        {copiedSql ? <Check size={14} /> : <FileText size={14} />}
+                        <span>{copiedSql ? 'Copié !' : 'Initialiser (SQL)'}</span>
+                      </button>
+                    </>
+                  ) : (
+                    customReviews.length > 0 && (
+                      <span className="text-[10px] font-bold text-emerald-700 bg-emerald-100 px-2 py-1 rounded-full flex items-center gap-1 border border-emerald-200">
+                        <Check size={11} /> Cloud Sync OK
+                      </span>
+                    )
+                  )}
+                </div>
               </div>
             )}
 

@@ -529,6 +529,8 @@ const GoogleReviews = () => {
   const [items, setItems] = useState<GoogleReview[]>([]);
   const [isPaused, setIsPaused] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [direction, setDirection] = useState(0);
+  const [page, setPage] = useState(0);
 
   const fetchReviews = async () => {
     try {
@@ -550,129 +552,195 @@ const GoogleReviews = () => {
     return () => window.removeEventListener('vincent_google_reviews_updated', handleCustomUpdate);
   }, []);
 
-  // Carousel slide index (showing max 2 on screen)
-  const [slideIndex, setSlideIndex] = useState(0);
+  const paginate = (newDirection: number) => {
+    setDirection(newDirection);
+    setPage((prevPage) => (prevPage + newDirection + items.length) % items.length);
+  };
 
-  const maxStartIndex = Math.max(0, items.length - 2);
-
-  // Auto-play interval (advance every 10 seconds)
   useEffect(() => {
-    if (isPaused || maxStartIndex === 0 || loading) return;
+    if (isPaused || loading || items.length <= 1) return;
     const timer = setInterval(() => {
-      setSlideIndex((prev) => (prev < maxStartIndex ? prev + 1 : 0));
-    }, 10000);
+      paginate(1);
+    }, 8000);
     return () => clearInterval(timer);
-  }, [isPaused, maxStartIndex, items.length, loading]);
-
-  const visibleItems = items.slice(slideIndex, slideIndex + 2);
+  }, [isPaused, items.length, loading]);
 
   if (loading || items.length === 0) return null;
+
+  const variants = {
+    enter: (direction: number) => ({
+      x: direction > 0 ? 1000 : -1000,
+      opacity: 0,
+      scale: 0.9
+    }),
+    center: {
+      zIndex: 1,
+      x: 0,
+      opacity: 1,
+      scale: 1
+    },
+    exit: (direction: number) => ({
+      zIndex: 0,
+      x: direction < 0 ? 1000 : -1000,
+      opacity: 0,
+      scale: 0.9,
+      position: 'absolute' as const
+    })
+  };
 
   return (
     <section 
       id="reviews" 
-      className="py-12 sm:py-16 px-4 sm:px-6 bg-[#faf9f5] border-y border-stone-200/60 relative"
+      className="py-20 sm:py-24 px-4 sm:px-6 bg-[#faf9f5] border-y border-stone-200/60 overflow-hidden"
       onMouseEnter={() => setIsPaused(true)}
       onMouseLeave={() => setIsPaused(false)}
-      onTouchStart={() => setIsPaused(true)}
-      onTouchEnd={() => setIsPaused(false)}
     >
-      <div className="max-w-5xl mx-auto">
-        
-        {/* Discreet Compact Header */}
-        <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 mb-8">
-          <div>
-            <h2 className="text-2xl sm:text-3xl md:text-4xl font-serif text-stone-900 leading-tight">
+      <div className="max-w-6xl mx-auto">
+        {/* Header */}
+        <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-6 mb-12">
+          <div className="max-w-xl">
+            <h2 className="text-3xl sm:text-4xl md:text-5xl font-serif text-stone-900 leading-tight mb-4">
               {reviewsData.title}
             </h2>
+            <p className="text-stone-500 text-sm sm:text-base leading-relaxed">
+              {reviewsData.subtitle}
+            </p>
           </div>
 
-          {/* Action Button */}
-          <div className="shrink-0 self-start sm:self-end">
-            <a
-              href={DEFAULT_GOOGLE_MAPS_URL}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-full bg-white border border-stone-200 hover:border-primary text-stone-800 hover:text-primary text-xs font-semibold transition-all shadow-2xs hover:shadow-xs active:scale-95 cursor-pointer"
-              title="Ouvrir la fiche Google Maps"
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => paginate(-1)}
+              className="w-12 h-12 rounded-full border border-stone-200 bg-white flex items-center justify-center text-stone-600 hover:text-primary hover:border-primary transition-all active:scale-90"
+              aria-label="Previous review"
             >
-              <GoogleIcon size={14} />
-              <span>{reviewsData.leaveReview}</span>
-              <ExternalLink size={13} className="opacity-60" />
-            </a>
+              <ChevronLeft size={20} />
+            </button>
+            <button
+              onClick={() => paginate(1)}
+              className="w-12 h-12 rounded-full border border-stone-200 bg-white flex items-center justify-center text-stone-600 hover:text-primary hover:border-primary transition-all active:scale-90"
+              aria-label="Next review"
+            >
+              <ChevronRight size={20} />
+            </button>
           </div>
         </div>
 
-        {/* Discreet Automatic Carousel with Max 2 Cards on Screen */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-stretch">
-          {visibleItems.map((review: any, idx: number) => (
+        {/* Dynamic Slider Container */}
+        <div className="relative h-[380px] sm:h-[320px] w-full flex items-center justify-center">
+          <AnimatePresence initial={false} custom={direction} mode="popLayout">
             <motion.div
-              key={slideIndex + '-' + (review.id || idx)}
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.35, ease: 'easeOut' }}
-              className="bg-white rounded-2xl p-6 sm:p-7 border border-stone-200/80 shadow-2xs hover:shadow-xs hover:border-stone-300 transition-all flex flex-col justify-between h-full"
+              key={page}
+              custom={direction}
+              variants={variants}
+              initial="enter"
+              animate="center"
+              exit="exit"
+              transition={{
+                x: { type: "spring", stiffness: 300, damping: 30 },
+                opacity: { duration: 0.2 },
+                scale: { duration: 0.3 }
+              }}
+              drag="x"
+              dragConstraints={{ left: 0, right: 0 }}
+              dragElastic={1}
+              onDragEnd={(_, info) => {
+                const swipe = info.offset.x;
+                if (swipe < -50) paginate(1);
+                else if (swipe > 50) paginate(-1);
+              }}
+              className="w-full max-w-4xl cursor-grab active:cursor-grabbing"
             >
-              <div className="flex-1 flex flex-col justify-between">
-                {/* Review Header: Initials, Name & Google Stars */}
-                <div className="flex items-start justify-between gap-3 mb-4">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-full bg-stone-100 border border-stone-200 text-stone-700 font-semibold text-xs flex items-center justify-center shrink-0">
-                      {review.initials || (review.author ? review.author.substring(0, 2).toUpperCase() : 'GP')}
-                    </div>
-                    <div>
-                      <h4 className="font-semibold text-sm text-stone-900 leading-tight">
-                        {review.author}
-                      </h4>
-                      <span className="text-[11px] text-stone-400 mt-0.5 block">
-                        {getTimeAgo(review.date, lang)}
+              {(() => {
+                const review = items[page];
+                return (
+                  <div className="bg-white rounded-[32px] p-8 sm:p-12 border border-stone-200/80 shadow-sm relative group flex flex-col md:flex-row items-center gap-8">
+                    {/* Large Initials / Avatar */}
+                    <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-full bg-stone-50 border border-stone-100 flex items-center justify-center shrink-0 relative">
+                      <Quote className="absolute -top-2 -right-2 text-primary/10 fill-primary/10" size={40} />
+                      <span className="text-2xl sm:text-3xl font-serif font-bold text-primary">
+                        {review.initials || (review.author ? review.author[0].toUpperCase() : 'GP')}
                       </span>
                     </div>
+
+                    <div className="flex-1 text-center md:text-left">
+                      {/* Rating */}
+                      <div className="flex items-center justify-center md:justify-start gap-1 mb-4 text-amber-400">
+                        {[...Array(review.rating || 5)].map((_, i) => (
+                          <Star key={i} size={18} className="fill-amber-400" />
+                        ))}
+                      </div>
+
+                      {/* Text */}
+                      <blockquote className="text-lg sm:text-xl text-stone-700 font-serif italic leading-relaxed mb-6">
+                        « {review.text} »
+                      </blockquote>
+
+                      {/* Author Info */}
+                      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-t border-stone-100 pt-6">
+                        <div>
+                          <cite className="not-italic font-bold text-stone-900 block text-base">
+                            {review.author}
+                          </cite>
+                          <span className="text-xs text-stone-400 uppercase tracking-widest font-semibold mt-1 block">
+                            {getTimeAgo(review.date, lang)}
+                          </span>
+                        </div>
+                        <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-emerald-50 text-emerald-700 text-[10px] font-bold self-center md:self-auto border border-emerald-100">
+                          <CheckCircle2 size={14} className="text-emerald-500" />
+                          <span>{reviewsData.verifiedBadge}</span>
+                        </div>
+                      </div>
+                    </div>
                   </div>
-
-                  <div className="flex items-center gap-0.5 text-amber-400 shrink-0">
-                    {[...Array(review.rating || 5)].map((_, i) => (
-                      <Star key={i} size={14} className="fill-amber-400 text-amber-400" />
-                    ))}
-                  </div>
-                </div>
-
-                {/* Patient Comment */}
-                <div className="my-2 flex-1 flex items-center">
-                  <p className="text-xs sm:text-sm text-stone-600 leading-relaxed italic">
-                    « {review.text} »
-                  </p>
-                </div>
-              </div>
-
-              {/* Card Footer: Verified badge */}
-              <div className="pt-4 mt-4 border-t border-stone-100 flex items-center justify-end text-[11px]">
-                <span className="inline-flex items-center gap-1.5 text-[11px] text-emerald-700 font-medium">
-                  <CheckCircle2 size={13} className="text-emerald-600" />
-                  <span>{reviewsData.verifiedBadge}</span>
-                </span>
-              </div>
+                );
+              })()}
             </motion.div>
+          </AnimatePresence>
+        </div>
+
+        {/* Pagination Dots */}
+        <div className="flex justify-center gap-2 mt-8">
+          {items.map((_, idx) => (
+            <button
+              key={idx}
+              onClick={() => {
+                setDirection(idx > page ? 1 : -1);
+                setPage(idx);
+              }}
+              className={`w-2.5 h-2.5 rounded-full transition-all duration-300 ${
+                idx === page ? 'bg-primary w-8' : 'bg-stone-200 hover:bg-stone-300'
+              }`}
+              aria-label={`Go to review ${idx + 1}`}
+            />
           ))}
         </div>
 
-        {/* Sub-Footer with Direct Google Link */}
-        <div className="mt-6 flex items-center justify-end text-xs text-stone-500 pt-3 border-t border-stone-200/40">
+        {/* Footer Actions */}
+        <div className="mt-16 flex flex-col sm:flex-row items-center justify-center gap-6 pt-8 border-t border-stone-200/40">
           <a
             href={DEFAULT_GOOGLE_MAPS_URL}
             target="_blank"
             rel="noopener noreferrer"
-            className="text-stone-600 hover:text-primary font-medium inline-flex items-center gap-1.5 transition-colors hover:underline"
+            className="primary-button inline-flex items-center gap-3 px-8 text-sm"
+          >
+            <GoogleIcon size={18} />
+            <span>{reviewsData.leaveReview}</span>
+          </a>
+          <a
+            href={DEFAULT_GOOGLE_MAPS_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-stone-500 hover:text-primary font-semibold inline-flex items-center gap-2 transition-all hover:underline text-sm"
           >
             <span>{reviewsData.viewAllGoogle}</span>
-            <ExternalLink size={12} />
+            <ExternalLink size={14} />
           </a>
         </div>
-
       </div>
     </section>
   );
 };
+
 
 const About = () => {
   const { t } = useTranslation();
