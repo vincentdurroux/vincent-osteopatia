@@ -63,3 +63,13 @@ export interface CalendarEvent {
   isGoogleEvent?: boolean;
   eventType?: EventType;
 }
+
+export interface GoogleReview {
+  id?: string;
+  author: string;
+  initials: string;
+  date: number; // timestamp
+  rating: number;
+  text: string;
+  created_at?: string;
+}

@@ -3,6 +3,8 @@ import { motion, AnimatePresence } from 'motion/react';
 import { MapPin, Phone, Mail, Clock, Calendar, ChevronRight, ChevronLeft, Heart, User, Activity, Baby, Globe, Check, CreditCard, Bone, Zap, Trophy, Menu, X, Shield, Star, ExternalLink, CheckCircle2, Quote } from 'lucide-react';
 import SpineLogo from './components/SpineLogo';
 import { translations, Language } from './translations';
+import { api } from './lib/supabase';
+import { GoogleReview } from './types';
 import AdminDashboard from './components/admin/AdminDashboard';
 
 export const detectBrowserLanguage = (): Language => {
@@ -498,24 +500,6 @@ const GoogleIcon = ({ size = 20, className = "" }: { size?: number; className?: 
 
 const DEFAULT_GOOGLE_MAPS_URL = "https://g.page/r/CWVMMZoe1_QSEBM/review";
 
-const getStoredGoogleReviews = () => {
-  if (typeof window !== 'undefined') {
-    try {
-      const stored = localStorage.getItem('vincent_custom_google_reviews');
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          return parsed;
-        }
-      }
-    } catch (e) {
-      console.error('Error reading custom google reviews:', e);
-    }
-  }
-  // Fixed baseline reviews in original language
-  return translations.fr.reviews.items;
-};
-
 const getTimeAgo = (timestamp: number | string, lang: Language) => {
   if (typeof timestamp === 'string') return timestamp;
   
@@ -542,13 +526,25 @@ const GoogleReviews = () => {
   const { lang, t } = useTranslation();
   const reviewsData = (t as any).reviews || translations.fr.reviews;
   
-  // Permanent static comments that do NOT change language when site language toggles
-  const [items, setItems] = useState(() => getStoredGoogleReviews());
+  const [items, setItems] = useState<GoogleReview[]>([]);
   const [isPaused, setIsPaused] = useState(false);
+  const [loading, setLoading] = useState(true);
+
+  const fetchReviews = async () => {
+    try {
+      const data = await api.getGoogleReviews();
+      setItems(data || []);
+    } catch (err) {
+      console.error('Error fetching reviews:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
+    fetchReviews();
     const handleCustomUpdate = () => {
-      setItems(getStoredGoogleReviews());
+      fetchReviews();
     };
     window.addEventListener('vincent_google_reviews_updated', handleCustomUpdate);
     return () => window.removeEventListener('vincent_google_reviews_updated', handleCustomUpdate);
@@ -561,16 +557,16 @@ const GoogleReviews = () => {
 
   // Auto-play interval (advance every 10 seconds)
   useEffect(() => {
-    if (isPaused || maxStartIndex === 0) return;
+    if (isPaused || maxStartIndex === 0 || loading) return;
     const timer = setInterval(() => {
       setSlideIndex((prev) => (prev < maxStartIndex ? prev + 1 : 0));
     }, 10000);
     return () => clearInterval(timer);
-  }, [isPaused, maxStartIndex, items.length]);
+  }, [isPaused, maxStartIndex, items.length, loading]);
 
   const visibleItems = items.slice(slideIndex, slideIndex + 2);
 
-  if (items.length === 0) return null;
+  if (loading || items.length === 0) return null;
 
   return (
     <section 

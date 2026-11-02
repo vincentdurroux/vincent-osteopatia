@@ -1,5 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
-import { Client, ClientNote, Invoice, CalendarEvent, EventType } from '../types';
+import { Client, ClientNote, Invoice, CalendarEvent, EventType, GoogleReview } from '../types';
 
 // Default Supabase project credentials as robust production fallback
 const DEFAULT_SUPABASE_URL = 'https://lnlemynayesjduntoran.supabase.co';
@@ -310,6 +310,19 @@ export function mapEventFromDB(e: any): CalendarEvent {
     eventType: eventType || 'appointment',
   };
 }
+
+export function mapReviewFromDB(r: any): GoogleReview {
+  return {
+    id: String(r.id),
+    author: r.author || '',
+    initials: r.initials || '',
+    date: Number(r.date) || Date.now(),
+    rating: Number(r.rating) || 5,
+    text: r.text || '',
+    created_at: r.created_at,
+  };
+}
+
 
 // ==========================================
 // RESILIENT SELF-HEALING DATABASE EXECUTOR
@@ -825,11 +838,23 @@ BEGIN
     BEGIN ALTER TABLE public.calendar_events ADD COLUMN "clientName" TEXT; EXCEPTION WHEN duplicate_column THEN END;
 END $$;
 
--- 5. SÉCURITÉ ROW LEVEL SECURITY (RLS)
+-- 5. TABLE DES AVIS GOOGLE
+CREATE TABLE IF NOT EXISTS public.google_reviews (
+    id TEXT PRIMARY KEY,
+    author TEXT NOT NULL,
+    initials TEXT,
+    date BIGINT NOT NULL,
+    rating INTEGER DEFAULT 5,
+    text TEXT NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 6. SÉCURITÉ ROW LEVEL SECURITY (RLS)
 ALTER TABLE public.clients ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.client_notes ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.invoices ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.calendar_events ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.google_reviews ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS "Accès total clients" ON public.clients;
 CREATE POLICY "Accès total clients" ON public.clients FOR ALL USING (true) WITH CHECK (true);
@@ -843,11 +868,15 @@ CREATE POLICY "Accès total factures" ON public.invoices FOR ALL USING (true) WI
 DROP POLICY IF EXISTS "Accès total agenda" ON public.calendar_events;
 CREATE POLICY "Accès total agenda" ON public.calendar_events FOR ALL USING (true) WITH CHECK (true);
 
--- 6. ACCÈS ROLES ANON ET AUTHENTICATED
+DROP POLICY IF EXISTS "Accès total avis" ON public.google_reviews;
+CREATE POLICY "Accès total avis" ON public.google_reviews FOR ALL USING (true) WITH CHECK (true);
+
+-- 7. ACCÈS ROLES ANON ET AUTHENTICATED
 GRANT ALL ON public.clients TO anon, authenticated;
 GRANT ALL ON public.client_notes TO anon, authenticated;
 GRANT ALL ON public.invoices TO anon, authenticated;
 GRANT ALL ON public.calendar_events TO anon, authenticated;
+GRANT ALL ON public.google_reviews TO anon, authenticated;
 `;
 
 // ==========================================
@@ -861,6 +890,7 @@ export const api = {
     clientNotes: boolean;
     invoices: boolean;
     calendarEvents: boolean;
+    googleReviews: boolean;
     errorSummary?: string;
     projectUrl?: string;
   }> {
@@ -871,6 +901,7 @@ export const api = {
         clientNotes: false,
         invoices: false,
         calendarEvents: false,
+        googleReviews: false,
         errorSummary: 'Variables de connexion Supabase manquantes.',
       };
     }
@@ -881,6 +912,7 @@ export const api = {
       clientNotes: false,
       invoices: false,
       calendarEvents: false,
+      googleReviews: false,
       errorSummary: '',
       projectUrl: supabaseUrl,
     };
@@ -921,6 +953,15 @@ export const api = {
       if (error) errors.push(`Table calendar_events : ${error.message}`);
     } catch (e: any) {
       errors.push(`Table calendar_events : ${e.message}`);
+    }
+
+    // Test google_reviews
+    try {
+      const { error } = await supabase.from('google_reviews').select('id').limit(1);
+      results.googleReviews = !error;
+      if (error) errors.push(`Table google_reviews : ${error.message}`);
+    } catch (e: any) {
+      errors.push(`Table google_reviews : ${e.message}`);
     }
 
     if (errors.length > 0) {
@@ -982,6 +1023,17 @@ export const api = {
           syncedCount++;
         } catch (e: any) {
           errors.push(`RDV: ${e.message}`);
+        }
+      }
+
+      // 5. Sync Reviews
+      const localReviews = loadLocal<GoogleReview>('google_reviews', []);
+      for (const rev of localReviews) {
+        try {
+          await this.createGoogleReview(rev);
+          syncedCount++;
+        } catch (e: any) {
+          errors.push(`Avis: ${e.message}`);
         }
       }
 
@@ -2246,6 +2298,79 @@ export const api = {
     const current = loadLocal('events', []);
     const filtered = current.filter(e => e.id !== id);
     saveLocal('events', filtered);
+    return true;
+  },
+
+  // ==========================================
+  // GOOGLE REVIEWS (CUSTOM PATIENT FEEDBACK)
+  // ==========================================
+  async getGoogleReviews(): Promise<GoogleReview[]> {
+    const local = loadLocal<GoogleReview>('google_reviews', []);
+    if (isSupabaseConfigured && supabase) {
+      try {
+        const { data, error } = await supabase.from('google_reviews').select('*').order('date', { ascending: false });
+        if (!error && data) {
+          const mapped = data.map(mapReviewFromDB);
+          saveLocal('google_reviews', mapped);
+          return mapped;
+        }
+      } catch (err) {
+        console.warn('Supabase getGoogleReviews exception:', err);
+      }
+    }
+    return local;
+  },
+
+  async createGoogleReview(review: Omit<GoogleReview, 'id'> & { id?: string }): Promise<GoogleReview> {
+    const newReview: GoogleReview = {
+      ...review,
+      id: review.id || crypto.randomUUID(),
+    };
+
+    if (isSupabaseConfigured && supabase) {
+      try {
+        const payload = {
+          id: newReview.id,
+          author: newReview.author,
+          initials: newReview.initials,
+          date: newReview.date,
+          rating: newReview.rating,
+          text: newReview.text,
+        };
+
+        const result = await executeResilientInsert('google_reviews', [payload]);
+        if (result.success && result.data) {
+          const mapped = mapReviewFromDB(result.data);
+          const current = loadLocal<GoogleReview>('google_reviews', []);
+          const idx = current.findIndex(r => r.id === mapped.id);
+          if (idx !== -1) current[idx] = mapped;
+          else current.unshift(mapped);
+          saveLocal('google_reviews', current);
+          return mapped;
+        }
+      } catch (err) {
+        console.warn('Supabase createGoogleReview exception:', err);
+      }
+    }
+
+    const current = loadLocal<GoogleReview>('google_reviews', []);
+    current.unshift(newReview);
+    saveLocal('google_reviews', current);
+    return newReview;
+  },
+
+  async deleteGoogleReview(id: string): Promise<boolean> {
+    addDeletedTombstone('google_reviews', id);
+    if (isSupabaseConfigured && supabase) {
+      try {
+        await supabase.from('google_reviews').delete().eq('id', id);
+      } catch (err) {
+        console.warn('Supabase deleteGoogleReview exception:', err);
+      }
+    }
+    const current = loadLocal<GoogleReview>('google_reviews', []);
+    const filtered = current.filter(r => r.id !== id);
+    saveLocal('google_reviews', filtered);
     return true;
   }
 };

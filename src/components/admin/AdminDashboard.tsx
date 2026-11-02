@@ -9,7 +9,7 @@ import {
   Tag, BadgePercent, Percent, Sparkles, IdCard, X, Columns3, Lock, Coffee, Briefcase, Bookmark, Pin, StickyNote,
   ArrowUpDown, ArrowUp, ArrowDown, ExternalLink, Info, Star
 } from 'lucide-react';
-import { Client, ClientNote, Invoice, CalendarEvent, EventType } from '../../types';
+import { Client, ClientNote, Invoice, CalendarEvent, EventType, GoogleReview } from '../../types';
 import { api, supabase, isSupabaseConfigured, SUPABASE_SQL_SETUP, capitalizeFirstName, sortInvoicesByDate, normalizeInvoiceDescription } from '../../lib/supabase';
 import SpineLogo from '../SpineLogo';
 import { useTranslation } from '../../App';
@@ -160,40 +160,63 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
   }, []);
   
   // Google Reviews management state
-  const [customReviews, setCustomReviews] = useState<any[]>(() => {
-    if (typeof window !== 'undefined') {
-      try {
-        const stored = localStorage.getItem('vincent_custom_google_reviews');
-        if (stored) {
-          const parsed = JSON.parse(stored);
-          if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-        }
-      } catch (e) {
-        console.error('Error reading custom google reviews:', e);
-      }
-    }
-    return translations.fr.reviews.items;
-  });
-
+  const [customReviews, setCustomReviews] = useState<GoogleReview[]>([]);
   const [isAddReviewModalOpen, setIsAddReviewModalOpen] = useState(false);
   const [editingReviewIndex, setEditingReviewIndex] = useState<number | null>(null);
   const [reviewForm, setReviewForm] = useState({
     author: '',
     initials: '',
-    date: 'Il y a 1 semaine',
+    date: new Date().toISOString().split('T')[0],
     rating: 5,
     text: '',
   });
 
-  const saveCustomReviewsToStorage = (updated: any[]) => {
-    setCustomReviews(updated);
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('vincent_custom_google_reviews', JSON.stringify(updated));
-      window.dispatchEvent(new Event('vincent_google_reviews_updated'));
+  const loadReviewsFromAPI = async () => {
+    try {
+      const data = await api.getGoogleReviews();
+      setCustomReviews(data || []);
+    } catch (err) {
+      console.warn('Error loading reviews from Supabase:', err);
     }
   };
 
-  const handleSaveReview = (e: React.FormEvent) => {
+  useEffect(() => {
+    loadReviewsFromAPI();
+  }, []);
+
+  // Migration logic: if we have local reviews but Supabase is configured, push them up
+  useEffect(() => {
+    const migrateLocalReviews = async () => {
+      if (typeof window === 'undefined' || !isSupabaseConfigured) return;
+      
+      const stored = localStorage.getItem('vincent_custom_google_reviews');
+      if (stored) {
+        try {
+          const parsed = JSON.parse(stored);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            // Check if remote is empty
+            const remote = await api.getGoogleReviews();
+            if (remote.length === 0) {
+              console.log('Migrating local reviews to Supabase...');
+              for (const r of parsed) {
+                await api.createGoogleReview(r);
+              }
+              // Clear local after successful migration
+              localStorage.removeItem('vincent_custom_google_reviews');
+              loadReviewsFromAPI();
+              window.dispatchEvent(new Event('vincent_google_reviews_updated'));
+            }
+          }
+        } catch (e) {
+          console.warn('Migration error:', e);
+        }
+      }
+    };
+    
+    migrateLocalReviews();
+  }, []);
+
+  const handleSaveReview = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!reviewForm.author.trim() || !reviewForm.text.trim()) return;
 
@@ -201,7 +224,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
     const initialsClean = reviewForm.initials.trim() || authorClean.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2);
     const dateTimestamp = reviewForm.date ? new Date(reviewForm.date).getTime() : Date.now();
     
-    const newEntry = {
+    const reviewData: any = {
       author: authorClean,
       initials: initialsClean,
       date: dateTimestamp,
@@ -209,21 +232,28 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
       text: reviewForm.text.trim(),
     };
 
-    let updated: any[];
-    if (editingReviewIndex !== null && editingReviewIndex >= 0) {
-      updated = [...customReviews];
-      updated[editingReviewIndex] = newEntry;
-    } else {
-      updated = [newEntry, ...customReviews];
+    try {
+      const currentEditing = editingReviewIndex !== null ? customReviews[editingReviewIndex] : null;
+      if (currentEditing?.id) {
+        reviewData.id = currentEditing.id;
+      }
+      
+      await api.createGoogleReview(reviewData);
+      await loadReviewsFromAPI();
+      
+      window.dispatchEvent(new Event('vincent_google_reviews_updated'));
+      setIsAddReviewModalOpen(false);
+      setEditingReviewIndex(null);
+      setReviewForm({ author: '', initials: '', date: new Date().toISOString().split('T')[0], rating: 5, text: '' });
+    } catch (err) {
+      console.error('Error saving review:', err);
     }
-
-    saveCustomReviewsToStorage(updated);
-    setIsAddReviewModalOpen(false);
-    setEditingReviewIndex(null);
-    setReviewForm({ author: '', initials: '', date: new Date().toISOString().split('T')[0], rating: 5, text: '' });
   };
 
   const handleDeleteReview = (index: number) => {
+    const target = customReviews[index];
+    if (!target?.id) return;
+
     setConfirmDialog({
       isOpen: true,
       title: 'Delete Google review',
@@ -231,9 +261,14 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
       confirmText: 'Delete review',
       cancelText: 'Cancel',
       isDangerous: true,
-      onConfirm: () => {
-        const updated = customReviews.filter((_, i) => i !== index);
-        saveCustomReviewsToStorage(updated);
+      onConfirm: async () => {
+        try {
+          await api.deleteGoogleReview(target.id!);
+          await loadReviewsFromAPI();
+          window.dispatchEvent(new Event('vincent_google_reviews_updated'));
+        } catch (err) {
+          console.error('Error deleting review:', err);
+        }
       },
     });
   };
@@ -589,6 +624,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
     clientNotes: boolean;
     invoices: boolean;
     calendarEvents: boolean;
+    googleReviews: boolean;
     errorSummary?: string;
   } | null>(null);
   const [isSyncingAll, setIsSyncingAll] = useState(false);
@@ -8282,6 +8318,35 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                 </button>
               </div>
             </div>
+
+            {isSupabaseConfigured && (
+              <div className={`mb-6 p-3 rounded-2xl border flex items-center justify-between gap-4 ${
+                customReviews.length > 0 ? 'bg-emerald-50 border-emerald-100' : 'bg-amber-50 border-amber-100'
+              }`}>
+                <div className="flex items-center gap-3">
+                  <div className={`w-8 h-8 rounded-xl flex items-center justify-center ${
+                    customReviews.length > 0 ? 'bg-emerald-100 text-emerald-600' : 'bg-amber-100 text-amber-600'
+                  }`}>
+                    <Database size={16} />
+                  </div>
+                  <div>
+                    <p className="text-xs font-bold text-gray-800">
+                      {customReviews.length > 0 ? 'Synchronisation Supabase active' : 'Base de données prête'}
+                    </p>
+                    <p className="text-[10px] text-gray-500">
+                      {customReviews.length > 0 
+                        ? `Vos ${customReviews.length} avis sont sauvegardés en ligne et visibles par tous les visiteurs.`
+                        : "Ajoutez votre premier avis pour l'activer sur le site."}
+                    </p>
+                  </div>
+                </div>
+                {customReviews.length > 0 && (
+                  <span className="text-[10px] font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full flex items-center gap-1">
+                    <Check size={10} /> Cloud Sync
+                  </span>
+                )}
+              </div>
+            )}
 
             {/* Reviews Cards List (Scrollable Area) */}
             <div className="flex-1 overflow-y-auto min-h-0 pr-2">
