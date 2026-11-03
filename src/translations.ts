@@ -74,6 +74,20 @@ export const translations = {
         }
       }
     },
+    techniques: {
+      craniosacral: {
+        title: "Approche Crânio-sacrée",
+        desc: "Techniques subtiles libérant les micromouvements du crâne jusqu'au sacrum pour apaiser le système nerveux, les céphalées et les tensions profondes.",
+      },
+      visceral: {
+        title: "Approche Viscérale",
+        desc: "Mobilisation délicate des organes et de leurs attaches tissulaires afin d'améliorer la mobilité digestive, la respiration et le confort postural.",
+      },
+      musculoskeletal: {
+        title: "Approche Musculo-squelettique",
+        desc: "Ajustements articulaires et travail myofascial précis pour restaurer l'amplitude de mouvement, soulager les lombalgies, cervicalgies et contractures.",
+      },
+    },
     reviews: {
       tag: "Avis Google Pro Vérifiés",
       title: "Témoignages",
@@ -403,6 +417,20 @@ export const translations = {
         }
       }
     },
+    techniques: {
+      craniosacral: {
+        title: "Craniosacral Approach",
+        desc: "Subtle, gentle techniques restoring cranial and sacral rhythm to soothe the nervous system, relieve headaches, and release deep tensions.",
+      },
+      visceral: {
+        title: "Visceral Approach",
+        desc: "Gentle manual mobilization of internal organs and their fascial attachments to enhance digestive mobility, breathing ease, and posture.",
+      },
+      musculoskeletal: {
+        title: "Musculoskeletal Approach",
+        desc: "Precise joint mobilizations and myofascial work to restore full range of motion, ease back pain, neck stiffness, and muscle tightness.",
+      },
+    },
     reviews: {
       tag: "Verified Google Pro Reviews",
       title: "Testimonials",
@@ -731,6 +759,20 @@ export const translations = {
           ]
         }
       }
+    },
+    techniques: {
+      craniosacral: {
+        title: "Enfoque Craneosacral",
+        desc: "Técnicas sutiles que liberan los micromovimientos desde el cráneo hasta el sacro, calmando el sistema nervioso, cefaleas y tensiones profundas.",
+      },
+      visceral: {
+        title: "Enfoque Visceral",
+        desc: "Movilización suave de los órganos internos y sus fascias para optimizar la función digestiva, la respiración y el equilibrio postural.",
+      },
+      musculoskeletal: {
+        title: "Enfoque Musculoesquelético",
+        desc: "Ajustes articulares y trabajo miofascial de precisión para recuperar la movilidad, aliviar lumbalgias, cervicalgias y sobrecargas.",
+      },
     },
     reviews: {
       tag: "Reseñas de Google Pro Verificadas",

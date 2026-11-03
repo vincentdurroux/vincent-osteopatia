@@ -182,7 +182,7 @@ const Navbar = ({ onSecretAdmin }: { onSecretAdmin?: () => void }) => {
   };
 
   return (
-    <nav className="fixed top-0 left-0 right-0 z-50 bg-[#f5f5f0]/90 backdrop-blur-md border-b border-black/5">
+    <nav className="fixed top-0 left-0 right-0 z-50 bg-[#fdfdfb]/90 backdrop-blur-md border-b border-black/5">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 h-20 flex items-center justify-between">
         <div 
           onClick={handleLogoClick}
@@ -197,6 +197,7 @@ const Navbar = ({ onSecretAdmin }: { onSecretAdmin?: () => void }) => {
 
         {/* Desktop Menu */}
         <div className="hidden lg:flex items-center gap-7 text-sm font-medium uppercase tracking-widest text-primary/80">
+          <a href="#about" onClick={(e) => scrollToSection(e, 'about')} className="hover:text-primary transition-colors">{t.nav.about}</a>
           <a href="#services" onClick={(e) => scrollToSection(e, 'services')} className="hover:text-primary transition-colors">{t.nav.services}</a>
           <a href="#reviews" onClick={(e) => scrollToSection(e, 'reviews')} className="hover:text-primary transition-colors flex items-center gap-1.5">
             <span>{t.nav.reviews || 'Avis'}</span>
@@ -204,7 +205,6 @@ const Navbar = ({ onSecretAdmin }: { onSecretAdmin?: () => void }) => {
               ★ 5.0
             </span>
           </a>
-          <a href="#about" onClick={(e) => scrollToSection(e, 'about')} className="hover:text-primary transition-colors">{t.nav.about}</a>
           <a href="#location" onClick={(e) => scrollToSection(e, 'location')} className="hover:text-primary transition-colors">{t.nav.clinic}</a>
           <a href="#contact" onClick={(e) => scrollToSection(e, 'contact')} className="hover:text-primary transition-colors">{t.nav.contact}</a>
         </div>
@@ -238,6 +238,7 @@ const Navbar = ({ onSecretAdmin }: { onSecretAdmin?: () => void }) => {
             className="lg:hidden bg-white border-b border-black/5 overflow-hidden"
           >
             <div className="flex flex-col p-6 gap-6 text-sm font-medium uppercase tracking-widest text-primary/80">
+              <a href="#about" onClick={(e) => scrollToSection(e, 'about')} className="hover:text-primary transition-colors">{t.nav.about}</a>
               <a href="#services" onClick={(e) => scrollToSection(e, 'services')} className="hover:text-primary transition-colors">{t.nav.services}</a>
               <a href="#reviews" onClick={(e) => scrollToSection(e, 'reviews')} className="hover:text-primary transition-colors flex items-center justify-between">
                 <span>{t.nav.reviews || 'Avis'}</span>
@@ -245,7 +246,6 @@ const Navbar = ({ onSecretAdmin }: { onSecretAdmin?: () => void }) => {
                   ★ 5.0 Google
                 </span>
               </a>
-              <a href="#about" onClick={(e) => scrollToSection(e, 'about')} className="hover:text-primary transition-colors">{t.nav.about}</a>
               <a href="#location" onClick={(e) => scrollToSection(e, 'location')} className="hover:text-primary transition-colors">{t.nav.clinic}</a>
               <a href="#contact" onClick={(e) => scrollToSection(e, 'contact')} className="hover:text-primary transition-colors">{t.nav.contact}</a>
               <a 
@@ -414,11 +414,11 @@ const Services = () => {
   const { t } = useTranslation();
   
   return (
-    <section id="services" className="py-16 sm:py-20 px-4 sm:px-6 bg-white/50">
+    <section id="services" className="py-16 sm:py-20 px-4 sm:px-6">
       <div className="max-w-7xl mx-auto">
-        <div className="text-center mb-12 sm:mb-16">
-          <h2 className="text-3xl sm:text-4xl md:text-5xl mb-4">{t.services.title}</h2>
-          <div className="w-16 sm:w-20 h-1 bg-primary/20 mx-auto"></div>
+        <div className="mb-10 sm:mb-12">
+          <h2 className="text-2xl sm:text-3xl md:text-4xl font-serif text-stone-900 leading-tight mb-3">{t.services.title}</h2>
+          <div className="w-16 sm:w-20 h-1 bg-primary/20"></div>
         </div>
         
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 sm:gap-6">
@@ -710,7 +710,7 @@ const GoogleReviews = () => {
   return (
     <section 
       id="reviews" 
-      className="py-12 sm:py-16 px-4 sm:px-6 bg-[#faf9f5] border-y border-stone-200/60 relative"
+      className="py-16 sm:py-20 px-4 sm:px-6 relative"
       onMouseEnter={() => setIsPaused(true)}
       onMouseLeave={() => setIsPaused(false)}
       onTouchStart={() => setIsPaused(true)}
@@ -719,11 +719,12 @@ const GoogleReviews = () => {
       <div className="max-w-5xl mx-auto">
         
         {/* Discreet Compact Header */}
-        <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 mb-8">
+        <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 mb-8 sm:mb-10">
           <div>
-            <h2 className="text-2xl sm:text-3xl md:text-4xl font-serif text-stone-900 leading-tight">
+            <h2 className="text-2xl sm:text-3xl md:text-4xl font-serif text-stone-900 leading-tight mb-3">
               {reviewsData.title}
             </h2>
+            <div className="w-16 sm:w-20 h-1 bg-primary/20"></div>
           </div>
 
           {/* Action Button */}
@@ -776,23 +777,31 @@ const GoogleReviews = () => {
 const About = () => {
   const { t } = useTranslation();
   return (
-    <section id="about" className="py-16 sm:py-20 px-4 sm:px-6 bg-secondary/30">
+    <section id="about" className="py-12 sm:py-16 px-4 sm:px-6">
       <div className="max-w-7xl mx-auto">
-        <div className="text-center mb-12 sm:mb-16">
-          <h2 className="text-3xl sm:text-4xl md:text-5xl mb-4">{t.about.title}</h2>
-          <div className="w-16 sm:w-20 h-1 bg-primary/20 mx-auto"></div>
-        </div>
-
         <div className="grid lg:grid-cols-[1.3fr_0.7fr] gap-12 lg:gap-20 items-center">
           <motion.div
             initial={{ opacity: 0, x: -20 }}
             whileInView={{ opacity: 1, x: 0 }}
             viewport={{ once: true }}
             transition={{ duration: 0.8 }}
-            className="order-2 lg:order-1"
           >
             <div className="space-y-6 text-base sm:text-lg text-gray-700 leading-relaxed">
               <p className="font-medium text-primary">{t.about.p1}</p>
+              
+              {/* Photo on Mobile & Tablet: positioned right under the introductory paragraph */}
+              <div className="lg:hidden flex justify-center py-2 sm:py-3">
+                <div className="aspect-[4/5] w-full max-w-[220px] sm:max-w-[260px] rounded-[30px] overflow-hidden shadow-2xl relative">
+                  <img 
+                    src="/photo-vincent.webp" 
+                    alt="Vincent - Osteopath" 
+                    className="w-full h-full object-cover"
+                    referrerPolicy="no-referrer"
+                    loading="lazy"
+                  />
+                </div>
+              </div>
+
               <p>{t.about.p2}</p>
               <p>{t.about.p3}</p>
               <div className="pt-4 border-t border-primary/10">
@@ -805,9 +814,9 @@ const About = () => {
             whileInView={{ opacity: 1, x: 0 }}
             viewport={{ once: true }}
             transition={{ duration: 0.8 }}
-            className="relative order-1 lg:order-2 flex justify-center lg:justify-end"
+            className="hidden lg:flex justify-end"
           >
-            <div className="aspect-[4/5] w-full max-w-[220px] sm:max-w-[280px] rounded-[30px] lg:rounded-[40px] overflow-hidden shadow-2xl relative">
+            <div className="aspect-[4/5] w-full max-w-[280px] rounded-[40px] overflow-hidden shadow-2xl relative">
               <img 
                 src="/photo-vincent.webp" 
                 alt="Vincent - Osteopath" 
@@ -828,9 +837,9 @@ const Location = () => {
   return (
     <section id="location" className="py-16 sm:py-20 px-4 sm:px-6">
       <div className="max-w-7xl mx-auto">
-        <div className="text-center mb-12 sm:mb-16">
-          <h2 className="text-3xl sm:text-4xl md:text-5xl mb-4">{t.location.title}</h2>
-          <div className="w-16 sm:w-20 h-1 bg-primary/20 mx-auto"></div>
+        <div className="mb-10 sm:mb-12">
+          <h2 className="text-2xl sm:text-3xl md:text-4xl font-serif text-stone-900 leading-tight mb-3">{t.location.title}</h2>
+          <div className="w-16 sm:w-20 h-1 bg-primary/20"></div>
         </div>
 
         <div className="grid lg:grid-cols-2 gap-12 lg:gap-16 items-center">
@@ -947,12 +956,12 @@ const Footer = () => {
         <div>
           <h4 className="text-sm uppercase tracking-widest font-semibold mb-6 text-white/40">{t.footer.links}</h4>
           <ul className="space-y-3 text-base sm:text-lg font-serif">
+            <li><a href="#about" onClick={(e) => scrollToSection(e, 'about')} className="hover:text-accent transition-colors">{t.nav.about}</a></li>
             <li><a href="#services" onClick={(e) => scrollToSection(e, 'services')} className="hover:text-accent transition-colors">{t.nav.services}</a></li>
             <li><a href="#reviews" onClick={(e) => scrollToSection(e, 'reviews')} className="hover:text-accent transition-colors flex items-center gap-2">
               <span>{t.nav.reviews || 'Avis'}</span>
               <span className="text-xs text-amber-300 font-sans">★★★★★ 5.0</span>
             </a></li>
-            <li><a href="#about" onClick={(e) => scrollToSection(e, 'about')} className="hover:text-accent transition-colors">{t.nav.about}</a></li>
             <li><a href="#location" onClick={(e) => scrollToSection(e, 'location')} className="hover:text-accent transition-colors">{t.nav.clinic}</a></li>
           </ul>
         </div>
@@ -1242,9 +1251,9 @@ export default function App() {
             >
               <Navbar onSecretAdmin={() => setIsPasscodeOpen(true)} />
               <Hero onOpenBooking={() => setIsBookingModalOpen(true)} />
+              <About />
               <Services />
               <GoogleReviews />
-              <About />
               <Location />
               <Footer />
               <BookingModal isOpen={isBookingModalOpen} onClose={() => setIsBookingModalOpen(false)} />
