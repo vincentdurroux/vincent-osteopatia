@@ -1062,9 +1062,29 @@ export const api = {
       try {
         const { data, error } = await supabase.from('clients').select('*');
         if (!error && data) {
-          console.log('Supabase fetched clients:', data);
           const remoteClients = data.map(row => {
             const mapped = mapClientFromDB(row);
+            const local = localMap.get(mapped.id);
+            if (local) {
+              // If remote is missing name or is 'Patient sans nom', restore from local cache if known
+              if ((mapped.name === 'Patient sans nom' || !mapped.name) && local.name && local.name !== 'Patient sans nom') {
+                mapped.name = local.name;
+                mapped.firstName = mapped.firstName || local.firstName;
+                mapped.lastName = mapped.lastName || local.lastName;
+              }
+              // If local has active Bono with remaining sessions, preserve it if remote has 0 or undefined
+              if (local.hasBono && typeof local.bonoSessionsRemaining === 'number' && local.bonoSessionsRemaining > 0) {
+                if (!mapped.hasBono || mapped.bonoSessionsRemaining === undefined || mapped.bonoSessionsRemaining === 0) {
+                  mapped.hasBono = true;
+                  mapped.bonoType = mapped.bonoType || local.bonoType || 'Bono';
+                  mapped.bonoSessionsRemaining = local.bonoSessionsRemaining;
+                }
+              }
+              // Preserve profile note if local has it and remote is blank
+              if (local.profileNote && !mapped.profileNote) {
+                mapped.profileNote = local.profileNote;
+              }
+            }
             return mapped;
           });
           

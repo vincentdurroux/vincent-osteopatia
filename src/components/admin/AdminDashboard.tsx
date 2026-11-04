@@ -1068,70 +1068,91 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
         finalDiscType = 'bono';
         finalDiscLabel = 'Bono 5 séances (250€)';
       } else if (newInvoiceBillingPlan === 'deduct_bono') {
-        try {
-          const currentRem = typeof client.bonoSessionsRemaining === 'number' 
-            ? client.bonoSessionsRemaining 
-            : (client.bonoType?.includes('3') ? 3 : 5);
-          const newRemaining = Math.max(0, currentRem - 1);
-          const eventIdToDeduct = newInvoice.eventId;
-          const existingDeductions = client.bonoDeductedEventIds || [];
-          const updatedDeductions = eventIdToDeduct && !existingDeductions.includes(eventIdToDeduct)
-            ? [...existingDeductions, eventIdToDeduct]
-            : existingDeductions;
+        finalDescription = `${translations[lang as Language].admin.billing.deductBonoDesc || "Séance d'Ostéopathie (Prise en compte Bono)"} (${client.bonoType || 'Bono'})`;
+        finalAmount = 0;
+        finalOriginal = 60;
+        finalDiscount = 60;
+        finalDiscType = 'bono';
+        finalDiscLabel = `Décompté sur ${client.bonoType || 'Bono'}`;
+      }
 
+      const isDiscounted = finalDiscount > 0;
+      const created = await api.createInvoice({
+        clientId: client.id,
+        clientName: client.name,
+        amount: finalAmount,
+        originalAmount: isDiscounted ? finalOriginal : finalAmount,
+        discountAmount: isDiscounted ? finalDiscount : undefined,
+        discountType: isDiscounted && finalDiscType !== 'none' ? finalDiscType : undefined,
+        discountLabel: isDiscounted ? (finalDiscLabel || (finalDiscType === 'bono' ? (client.bonoType || 'Bono') : undefined)) : undefined,
+        status: newInvoice.status || 'paid',
+        paymentMethod: newInvoice.paymentMethod,
+        date: newInvoice.date || new Date().toISOString().split('T')[0],
+        paymentDate: newInvoice.status === 'paid' ? (newInvoice.paymentDate || newInvoice.date || new Date().toISOString().split('T')[0]) : undefined,
+        description: normalizeInvoiceDescription(finalDescription),
+        language: 'es',
+        quantity: 1,
+        noteId: newInvoice.eventId || undefined,
+      });
+
+      // Update state immediately to guarantee invoice persists in UI
+      setInvoices(prev => sortInvoicesByDate([created, ...prev.filter(i => i.id !== created.id)], false));
+      setIsAddInvoiceOpen(false);
+      setNewInvoiceBillingPlan('single');
+      setNewInvoiceIncludeToday(true);
+      setNewInvoice({
+        clientId: '',
+        amount: 60,
+        originalAmount: 60,
+        discountAmount: 0,
+        discountType: 'none',
+        discountLabel: '',
+        status: 'paid',
+        paymentMethod: 'card',
+        description: "Sesión de osteopatía",
+        language: 'es',
+        quantity: 1,
+        date: new Date().toISOString().split('T')[0],
+        paymentDate: new Date().toISOString().split('T')[0],
+        eventId: '',
+      });
+
+      // Update client Bono status safely without risking invoice creation
+      try {
+        if (newInvoiceBillingPlan === 'bono3' || newInvoiceBillingPlan === 'bono5') {
+          const totalSessions = newInvoiceBillingPlan === 'bono3' ? 3 : 5;
+          const remaining = newInvoiceIncludeToday ? totalSessions - 1 : totalSessions;
+          const bonoTitle = newInvoiceBillingPlan === 'bono3' ? 'Bono 3 séances' : 'Bono 5 séances';
           const updatedClient: Client = {
             ...client,
-            bonoSessionsRemaining: newRemaining,
-            bonoDeductedEventIds: updatedDeductions,
+            hasBono: true,
+            bonoType: bonoTitle,
+            defaultDiscount: undefined,
+            bonoSessionsRemaining: remaining,
           };
           const savedClient = await api.updateClient(updatedClient);
           setClients(prev => prev.map(c => c.id === savedClient.id ? savedClient : c));
           if (selectedClient?.id === client.id) {
             setSelectedClient(savedClient);
           }
-          setIsAddInvoiceOpen(false);
-          setNewInvoiceBillingPlan('single');
-          setNewInvoiceIncludeToday(true);
-          setNewInvoice({
-            clientId: '',
-            amount: 60,
-            originalAmount: 60,
-            discountAmount: 0,
-            discountType: 'none',
-            discountLabel: '',
-            status: 'paid',
-            paymentMethod: 'card',
-            description: "Sesión de osteopatía",
-            language: 'es',
-            quantity: 1,
-            date: new Date().toISOString().split('T')[0],
-            paymentDate: new Date().toISOString().split('T')[0],
-            eventId: '',
-          });
-        } catch (err) {
-          console.error('Failed to deduct bono session:', err);
+        } else if ((newInvoiceBillingPlan === 'deduct_bono' || newInvoice.discountType === 'bono') && client.hasBono) {
+          const currentRem = typeof client.bonoSessionsRemaining === 'number' 
+            ? client.bonoSessionsRemaining 
+            : (client.bonoType?.includes('3') ? 3 : 5);
+          const newRemaining = Math.max(0, currentRem - 1);
+          const updatedClient: Client = {
+            ...client,
+            bonoSessionsRemaining: newRemaining,
+          };
+          const savedClient = await api.updateClient(updatedClient);
+          setClients(prev => prev.map(c => c.id === savedClient.id ? savedClient : c));
+          if (selectedClient?.id === client.id) {
+            setSelectedClient(savedClient);
+          }
         }
-        return;
+      } catch (bonoErr) {
+        console.warn('Could not update client bono session count alongside invoice:', bonoErr);
       }
-      setIsAddInvoiceOpen(false);
-      setNewInvoiceBillingPlan("single");
-      setNewInvoiceIncludeToday(true);
-      setNewInvoice({
-        clientId: "",
-        amount: 60,
-        originalAmount: 60,
-        discountAmount: 0,
-        discountType: "none",
-        discountLabel: "",
-        status: "paid",
-        paymentMethod: "card",
-        description: "Sesión de osteopatía",
-        language: "es",
-        quantity: 1,
-        date: new Date().toISOString().split("T")[0],
-        paymentDate: new Date().toISOString().split("T")[0],
-        eventId: "",
-      });
     } catch (err) {
       console.error('Failed to create invoice:', err);
     }
@@ -1165,30 +1186,68 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
         finalDiscType = 'bono';
         finalDiscLabel = 'Bono 5 séances (250€)';
       } else if (inlineBillingPlan === 'deduct_bono') {
-        try {
-          const currentRem = typeof selectedClient.bonoSessionsRemaining === 'number' 
-            ? selectedClient.bonoSessionsRemaining 
-            : (selectedClient.bonoType?.includes('3') ? 3 : 5);
-          const newRemaining = Math.max(0, currentRem - 1);
-          const eventIdToDeduct = note.eventId || note.id;
-          const existingDeductions = selectedClient.bonoDeductedEventIds || [];
-          const updatedDeductions = eventIdToDeduct && !existingDeductions.includes(eventIdToDeduct)
-            ? [...existingDeductions, eventIdToDeduct]
-            : existingDeductions;
+        finalDescription = `${translations[lang as Language].admin.billing.deductBonoDesc || "Séance d'Ostéopathie (Prise en compte Bono)"} (${selectedClient.bonoType || 'Bono'})`;
+        finalAmount = 0;
+        finalOriginal = 60;
+        finalDiscount = 60;
+        finalDiscType = 'bono';
+        finalDiscLabel = `Décompté sur ${selectedClient.bonoType || 'Bono'}`;
+      }
 
+      const isDiscounted = finalDiscount > 0;
+      const created = await api.createInvoice({
+        clientId: selectedClient.id,
+        clientName: selectedClient.name,
+        amount: finalAmount,
+        originalAmount: isDiscounted ? finalOriginal : finalAmount,
+        discountAmount: isDiscounted ? finalDiscount : undefined,
+        discountType: isDiscounted && finalDiscType !== 'none' ? finalDiscType : undefined,
+        discountLabel: isDiscounted ? (finalDiscLabel || (finalDiscType === 'bono' ? (selectedClient.bonoType || 'Bono') : undefined)) : undefined,
+        status: inlineInvoiceStatus,
+        paymentMethod: inlineInvoicePaymentMethod,
+        date: noteDateStr,
+        paymentDate: inlineInvoiceStatus === 'paid' ? noteDateStr : undefined,
+        description: normalizeInvoiceDescription(finalDescription),
+        language: 'es',
+        quantity: 1,
+        noteId: note.id,
+      });
+
+      // Update state immediately to guarantee invoice persists in UI
+      setInvoices(prev => sortInvoicesByDate([created, ...prev.filter(i => i.id !== created.id)], false));
+      setCreatingInvoiceForNoteId(null);
+
+      // Update client Bono status safely
+      try {
+        if (inlineBillingPlan === 'bono3' || inlineBillingPlan === 'bono5') {
+          const totalSessions = inlineBillingPlan === 'bono3' ? 3 : 5;
+          const remaining = inlineIncludeToday ? totalSessions - 1 : totalSessions;
+          const bonoTitle = inlineBillingPlan === 'bono3' ? 'Bono 3 séances' : 'Bono 5 séances';
           const updatedClient: Client = {
             ...selectedClient,
-            bonoSessionsRemaining: newRemaining,
-            bonoDeductedEventIds: updatedDeductions,
+            hasBono: true,
+            bonoType: bonoTitle,
+            defaultDiscount: undefined,
+            bonoSessionsRemaining: remaining,
           };
           const savedClient = await api.updateClient(updatedClient);
           setClients(prev => prev.map(c => c.id === savedClient.id ? savedClient : c));
           setSelectedClient(savedClient);
-          setCreatingInvoiceForNoteId(null);
-        } catch (err) {
-          console.error('Failed to deduct inline bono session:', err);
+        } else if ((inlineBillingPlan === 'deduct_bono' || inlineInvoiceDiscountType === 'bono') && selectedClient.hasBono) {
+          const currentRem = typeof selectedClient.bonoSessionsRemaining === 'number' 
+            ? selectedClient.bonoSessionsRemaining 
+            : (selectedClient.bonoType?.includes('3') ? 3 : 5);
+          const newRemaining = Math.max(0, currentRem - 1);
+          const updatedClient: Client = {
+            ...selectedClient,
+            bonoSessionsRemaining: newRemaining,
+          };
+          const savedClient = await api.updateClient(updatedClient);
+          setClients(prev => prev.map(c => c.id === savedClient.id ? savedClient : c));
+          setSelectedClient(savedClient);
         }
-        return;
+      } catch (bonoErr) {
+        console.warn('Could not update client bono session count alongside inline invoice:', bonoErr);
       }
     } catch (err) {
       console.error('Failed to create inline invoice:', err);
@@ -3120,7 +3179,15 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                 return (
                                   <div 
                                     key={ev.id}
-                                      className={`p-3.5 rounded-2xl border transition-all flex flex-col justify-between gap-2.5 ${!hasNote && !paidInvoice ? "bg-rose-50 border-rose-200" : hasNote && paidInvoice ? "bg-blue-50 border-blue-200" : hasNote && !paidInvoice ? "bg-amber-50 border-amber-200" : "bg-[#fafafa] border-black/5 hover:bg-white"}`}
+                                    className={`p-3.5 rounded-2xl border transition-all flex flex-col justify-between gap-2.5 ${
+                                      isOngoing
+                                        ? 'bg-teal-50/80 border-teal-300 ring-2 ring-teal-400/40 shadow-xs'
+                                        : isPast
+                                        ? 'bg-amber-50/90 border-amber-200 hover:bg-amber-50 shadow-xs'
+                                        : hasNote
+                                        ? 'bg-sky-50/90 border-sky-200 hover:bg-sky-50 shadow-xs'
+                                        : 'bg-[#fafafa] border-black/5 hover:bg-white'
+                                    }`}
                                   >
                                     <div className="flex items-start justify-between gap-2">
                                       <div className="space-y-1.5 flex-1 min-w-0">
@@ -3305,56 +3372,29 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                         )}
 
                                         {!paidInvoice && (
-                                          selectedClient.hasBono && (selectedClient.bonoSessionsRemaining ?? 0) > 0 && !(selectedClient.bonoDeductedEventIds?.includes(ev.id)) ? (
-                                            <button
-                                              type="button"
-                                              onClick={async () => {
-                                                try {
-                                                  const newRemaining = Math.max(0, (selectedClient.bonoSessionsRemaining ?? 0) - 1);
-                                                  const existingDeductions = selectedClient.bonoDeductedEventIds || [];
-                                                  const updatedClient: Client = {
-                                                    ...selectedClient,
-                                                    bonoSessionsRemaining: newRemaining,
-                                                    bonoDeductedEventIds: [...existingDeductions, ev.id],
-                                                  };
-                                                  const savedClient = await api.updateClient(updatedClient);
-                                                  setClients(prev => prev.map(c => c.id === savedClient.id ? savedClient : c));
-                                                  setSelectedClient(savedClient);
-                                                } catch (err) {
-                                                  console.error('Failed to deduct bono session:', err);
-                                                }
-                                              }}
-                                              className="text-emerald-800 hover:text-emerald-950 font-bold inline-flex items-center gap-1 bg-emerald-50 hover:bg-emerald-100 px-2 py-0.5 rounded-lg border border-emerald-200/80 transition-all cursor-pointer text-[10px]"
-                                              title={lang === 'fr' ? "Décompter une séance de ce Bono" : lang === 'es' ? "Descontar sesión de bono" : "Deduct session from Bono"}
-                                            >
-                                              <CheckCircle2 size={10} />
-                                              <span>{lang === 'fr' ? 'Décompte du Bono' : lang === 'es' ? 'Descuento Bono' : 'Bono Deduction'}</span>
-                                            </button>
-                                          ) : (
-                                            <button
-                                              type="button"
-                                              onClick={() => {
-                                                if (!selectedClient) return;
-                                                const isoDate = evDate.toISOString().split('T')[0];
-                                                setNewInvoice(prev => ({
-                                                  ...prev,
-                                                  clientId: selectedClient.id,
-                                                  date: isoDate,
-                                                  paymentDate: isoDate,
-                                                  eventId: ev.id,
-                                                  description: ev.summary || prev.description,
-                                                }));
-                                                setNewInvoiceBillingPlan(selectedClient.hasBono && (selectedClient.bonoSessionsRemaining ?? 0) > 0 ? 'deduct_bono' : 'single');
-                                                setNewInvoiceIncludeToday(true);
-                                                setIsAddInvoiceOpen(true);
-                                              }}
-                                              className="text-emerald-800 hover:text-emerald-950 font-bold inline-flex items-center gap-1 bg-emerald-50 hover:bg-emerald-100 px-2 py-0.5 rounded-lg border border-emerald-200/80 transition-all cursor-pointer text-[10px]"
-                                              title={lang === 'fr' ? "Associer un paiement ou émettre une facture pour ce rendez-vous" : "Cobrar cita"}
-                                            >
-                                              <Plus size={10} />
-                                              <span>{lang === 'fr' ? 'Encaisser / Facturer' : lang === 'es' ? 'Cobrar / Facturar' : 'Bill / Collect'}</span>
-                                            </button>
-                                          )
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              if (!selectedClient) return;
+                                              const isoDate = evDate.toISOString().split('T')[0];
+                                              setNewInvoice(prev => ({
+                                                ...prev,
+                                                clientId: selectedClient.id,
+                                                date: isoDate,
+                                                paymentDate: isoDate,
+                                                eventId: ev.id,
+                                                description: ev.summary || prev.description,
+                                              }));
+                                              setNewInvoiceBillingPlan(selectedClient.hasBono && (selectedClient.bonoSessionsRemaining ?? 0) > 0 ? 'deduct_bono' : 'single');
+                                              setNewInvoiceIncludeToday(true);
+                                              setIsAddInvoiceOpen(true);
+                                            }}
+                                            className="text-emerald-800 hover:text-emerald-950 font-bold inline-flex items-center gap-1 bg-emerald-50 hover:bg-emerald-100 px-2 py-0.5 rounded-lg border border-emerald-200/80 transition-all cursor-pointer text-[10px]"
+                                            title={lang === 'fr' ? "Associer un paiement ou émettre une facture pour ce rendez-vous" : "Cobrar cita"}
+                                          >
+                                            <Plus size={10} />
+                                            <span>{lang === 'fr' ? 'Encaisser / Facturer' : lang === 'es' ? 'Cobrar / Facturar' : 'Bill / Collect'}</span>
+                                          </button>
                                         )}
                                       </div>
 
