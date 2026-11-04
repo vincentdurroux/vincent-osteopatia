@@ -303,8 +303,16 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
     eventId: '',
   });
 
-  // Persistent Clinical Note Draft Storage (saved in localStorage across page leaves/refreshes)
-  const NOTE_DRAFTS_STORAGE_KEY = 'vincent_osteo_note_drafts_v2';
+  // Persistent Clinical Note Draft Storage (saved in localStorage across page leaves/refreshes, associated with client + session/date/eventId)
+  const NOTE_DRAFTS_STORAGE_KEY = 'vincent_osteo_note_drafts_v3';
+
+  const getDraftKey = (clientId: string, eventId?: string, date?: string) => {
+    const dateStr = date ? date.split('T')[0] : new Date().toISOString().split('T')[0];
+    if (eventId) {
+      return `${clientId}_evt_${eventId}`;
+    }
+    return `${clientId}_date_${dateStr}`;
+  };
 
   const getStoredDrafts = (): Record<string, {
     anamnese: string;
@@ -326,7 +334,11 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
 
   const [draftsMap, setDraftsMap] = useState(getStoredDrafts);
   const [activeDraftNotice, setActiveDraftNotice] = useState<boolean>(false);
-  const prevClientIdRef = useRef<string | null>(null);
+  const prevSessionRef = useRef<{ clientId: string | null; eventId: string; date: string }>({
+    clientId: null,
+    eventId: '',
+    date: '',
+  });
   const newNoteRef = useRef(newNote);
 
   // Keep newNoteRef up-to-date with state changes
@@ -334,20 +346,36 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
     newNoteRef.current = newNote;
   }, [newNote]);
 
-  const saveDraftToStorage = (clientId: string, draft: Partial<typeof newNote> | null) => {
+  const saveDraftToStorage = (clientId: string, arg2?: string | Partial<typeof newNote> | null, arg3?: string | Partial<typeof newNote> | null, arg4?: Partial<typeof newNote> | null) => {
     if (typeof window === 'undefined' || !clientId) return;
+    let eventId: string | undefined = newNote.eventId;
+    let date: string | undefined = newNote.date;
+    let draft: Partial<typeof newNote> | null = null;
+
+    if (arguments.length === 2) {
+      draft = arg2 as Partial<typeof newNote> | null;
+    } else if (arguments.length >= 4) {
+      eventId = arg2 as string | undefined;
+      date = arg3 as string | undefined;
+      draft = arg4 as Partial<typeof newNote> | null;
+    } else {
+      eventId = arg2 as string | undefined;
+      draft = arg3 as Partial<typeof newNote> | null;
+    }
+
     try {
       const current = getStoredDrafts();
+      const key = getDraftKey(clientId, eventId, date);
       if (!draft || (!draft.anamnese?.trim() && !draft.treatment?.trim() && !draft.motif?.trim())) {
-        delete current[clientId];
+        delete current[key];
       } else {
-        current[clientId] = {
+        current[key] = {
           anamnese: draft.anamnese || '',
           treatment: draft.treatment || '',
           category: draft.category || 'treatment',
           date: draft.date || new Date().toISOString().split('T')[0],
           motif: draft.motif || '',
-          eventId: draft.eventId || '',
+          eventId: draft.eventId || eventId || '',
           updatedAt: Date.now(),
         };
       }
@@ -364,7 +392,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
       const updated = { ...prev, ...fields };
       newNoteRef.current = updated;
       if (selectedClient?.id) {
-        saveDraftToStorage(selectedClient.id, updated);
+        saveDraftToStorage(selectedClient.id, updated.eventId, updated.date, updated);
         if (updated.anamnese.trim() || updated.treatment.trim() || updated.motif.trim()) {
           setActiveDraftNotice(true);
         }
@@ -373,18 +401,17 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
     });
   };
 
-  // Discard draft for current client
+  // Discard draft for current session
   const handleDiscardDraft = () => {
     if (!selectedClient?.id) return;
-    saveDraftToStorage(selectedClient.id, null);
-    setNewNote({
+    saveDraftToStorage(selectedClient.id, newNote.eventId, newNote.date, null);
+    setNewNote(prev => ({
+      ...prev,
       anamnese: '',
       treatment: '',
       category: 'treatment',
-      date: new Date().toISOString().split('T')[0],
       motif: '',
-      eventId: '',
-    });
+    }));
     setActiveDraftNotice(false);
   };
 
@@ -392,7 +419,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
   useEffect(() => {
     const handleBeforeUnload = () => {
       if (selectedClient?.id && (newNoteRef.current.anamnese.trim() || newNoteRef.current.treatment.trim() || newNoteRef.current.motif.trim())) {
-        saveDraftToStorage(selectedClient.id, newNoteRef.current);
+        saveDraftToStorage(selectedClient.id, newNoteRef.current.eventId, newNoteRef.current.date, newNoteRef.current);
       }
     };
     window.addEventListener('beforeunload', handleBeforeUnload);
@@ -401,44 +428,49 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
       window.removeEventListener('beforeunload', handleBeforeUnload);
       window.removeEventListener('pagehide', handleBeforeUnload);
       if (selectedClient?.id && (newNoteRef.current.anamnese.trim() || newNoteRef.current.treatment.trim() || newNoteRef.current.motif.trim())) {
-        saveDraftToStorage(selectedClient.id, newNoteRef.current);
+        saveDraftToStorage(selectedClient.id, newNoteRef.current.eventId, newNoteRef.current.date, newNoteRef.current);
       }
     };
   }, [selectedClient?.id]);
 
-  // Synchronize drafts when client selection changes
+  // Synchronize drafts when client selection or session (eventId / date) changes
   useEffect(() => {
-    const prevClientId = prevClientIdRef.current;
-    const currentClientId = selectedClient?.id || null;
+    const prev = prevSessionRef.current;
+    const currClientId = selectedClient?.id || null;
+    const currEventId = newNote.eventId;
+    const currDate = newNote.date;
 
-    // 1. Save the draft of the previous patient if not empty
-    if (prevClientId && (newNoteRef.current.anamnese.trim() || newNoteRef.current.treatment.trim() || newNoteRef.current.motif.trim())) {
-      saveDraftToStorage(prevClientId, newNoteRef.current);
+    // 1. Save draft of previous session if not empty
+    if (prev.clientId && (prev.clientId !== currClientId || prev.eventId !== currEventId || prev.date !== currDate)) {
+      if (newNoteRef.current.anamnese.trim() || newNoteRef.current.treatment.trim() || newNoteRef.current.motif.trim()) {
+        saveDraftToStorage(prev.clientId, prev.eventId, prev.date, newNoteRef.current);
+      }
     }
 
-    // 2. Load draft of the newly selected patient from localStorage
-    if (currentClientId) {
+    // 2. Load draft of current client + session from localStorage
+    if (currClientId) {
       const stored = getStoredDrafts();
-      const draft = stored[currentClientId];
+      const key = getDraftKey(currClientId, currEventId, currDate);
+      const draft = stored[key];
       if (draft && (draft.anamnese || draft.treatment || draft.motif)) {
-        setNewNote({
+        setNewNote(prevNote => ({
+          ...prevNote,
           anamnese: draft.anamnese || '',
           treatment: draft.treatment || '',
           category: draft.category || 'treatment',
-          date: draft.date || new Date().toISOString().split('T')[0],
+          date: draft.date || currDate,
           motif: draft.motif || '',
-          eventId: draft.eventId || '',
-        });
+          eventId: draft.eventId || currEventId,
+        }));
         setActiveDraftNotice(true);
       } else {
-        setNewNote({
+        setNewNote(prevNote => ({
+          ...prevNote,
           anamnese: '',
           treatment: '',
           category: 'treatment',
-          date: new Date().toISOString().split('T')[0],
           motif: '',
-          eventId: '',
-        });
+        }));
         setActiveDraftNotice(false);
       }
     } else {
@@ -453,8 +485,8 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
       setActiveDraftNotice(false);
     }
 
-    prevClientIdRef.current = currentClientId;
-  }, [selectedClient?.id]);
+    prevSessionRef.current = { clientId: currClientId, eventId: currEventId, date: currDate };
+  }, [selectedClient?.id, newNote.eventId, newNote.date]);
   
   const [isAddInvoiceOpen, setIsAddInvoiceOpen] = useState(false);
   const [newInvoiceBillingPlan, setNewInvoiceBillingPlan] = useState<'single' | 'bono3' | 'bono5' | 'deduct_bono' | 'custom'>('single');
@@ -1036,90 +1068,50 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
         finalDiscType = 'bono';
         finalDiscLabel = 'Bono 5 séances (250€)';
       } else if (newInvoiceBillingPlan === 'deduct_bono') {
-        finalDescription = `${translations[lang as Language].admin.billing.deductBonoDesc || "Séance d'Ostéopathie (Prise en compte Bono)"} (${client.bonoType || 'Bono'})`;
-        finalAmount = 0;
-        finalOriginal = 60;
-        finalDiscount = 60;
-        finalDiscType = 'bono';
-        finalDiscLabel = `Décompté sur ${client.bonoType || 'Bono'}`;
-      }
-
-      const isDiscounted = finalDiscount > 0;
-      const created = await api.createInvoice({
-        clientId: client.id,
-        clientName: client.name,
-        amount: finalAmount,
-        originalAmount: isDiscounted ? finalOriginal : finalAmount,
-        discountAmount: isDiscounted ? finalDiscount : undefined,
-        discountType: isDiscounted && finalDiscType !== 'none' ? finalDiscType : undefined,
-        discountLabel: isDiscounted ? (finalDiscLabel || (finalDiscType === 'bono' ? (client.bonoType || 'Bono') : undefined)) : undefined,
-        status: newInvoice.status || 'paid',
-        paymentMethod: newInvoice.paymentMethod,
-        date: newInvoice.date || new Date().toISOString().split('T')[0],
-        paymentDate: newInvoice.status === 'paid' ? (newInvoice.paymentDate || newInvoice.date || new Date().toISOString().split('T')[0]) : undefined,
-        description: normalizeInvoiceDescription(finalDescription),
-        language: 'es',
-        quantity: 1,
-        noteId: newInvoice.eventId || undefined,
-      });
-
-      // Update state immediately to guarantee invoice persists in UI
-      setInvoices(prev => sortInvoicesByDate([created, ...prev.filter(i => i.id !== created.id)], false));
-      setIsAddInvoiceOpen(false);
-      setNewInvoiceBillingPlan('single');
-      setNewInvoiceIncludeToday(true);
-      setNewInvoice({
-        clientId: '',
-        amount: 60,
-        originalAmount: 60,
-        discountAmount: 0,
-        discountType: 'none',
-        discountLabel: '',
-        status: 'paid',
-        paymentMethod: 'card',
-        description: "Sesión de osteopatía",
-        language: 'es',
-        quantity: 1,
-        date: new Date().toISOString().split('T')[0],
-        paymentDate: new Date().toISOString().split('T')[0],
-        eventId: '',
-      });
-
-      // Update client Bono status safely without risking invoice creation
-      try {
-        if (newInvoiceBillingPlan === 'bono3' || newInvoiceBillingPlan === 'bono5') {
-          const totalSessions = newInvoiceBillingPlan === 'bono3' ? 3 : 5;
-          const remaining = newInvoiceIncludeToday ? totalSessions - 1 : totalSessions;
-          const bonoTitle = newInvoiceBillingPlan === 'bono3' ? 'Bono 3 séances' : 'Bono 5 séances';
-          const updatedClient: Client = {
-            ...client,
-            hasBono: true,
-            bonoType: bonoTitle,
-            defaultDiscount: undefined,
-            bonoSessionsRemaining: remaining,
-          };
-          const savedClient = await api.updateClient(updatedClient);
-          setClients(prev => prev.map(c => c.id === savedClient.id ? savedClient : c));
-          if (selectedClient?.id === client.id) {
-            setSelectedClient(savedClient);
-          }
-        } else if ((newInvoiceBillingPlan === 'deduct_bono' || newInvoice.discountType === 'bono') && client.hasBono) {
+        try {
           const currentRem = typeof client.bonoSessionsRemaining === 'number' 
             ? client.bonoSessionsRemaining 
             : (client.bonoType?.includes('3') ? 3 : 5);
           const newRemaining = Math.max(0, currentRem - 1);
+          const eventIdToDeduct = newInvoice.eventId;
+          const existingDeductions = client.bonoDeductedEventIds || [];
+          const updatedDeductions = eventIdToDeduct && !existingDeductions.includes(eventIdToDeduct)
+            ? [...existingDeductions, eventIdToDeduct]
+            : existingDeductions;
+
           const updatedClient: Client = {
             ...client,
             bonoSessionsRemaining: newRemaining,
+            bonoDeductedEventIds: updatedDeductions,
           };
           const savedClient = await api.updateClient(updatedClient);
           setClients(prev => prev.map(c => c.id === savedClient.id ? savedClient : c));
           if (selectedClient?.id === client.id) {
             setSelectedClient(savedClient);
           }
+          setIsAddInvoiceOpen(false);
+          setNewInvoiceBillingPlan('single');
+          setNewInvoiceIncludeToday(true);
+          setNewInvoice({
+            clientId: '',
+            amount: 60,
+            originalAmount: 60,
+            discountAmount: 0,
+            discountType: 'none',
+            discountLabel: '',
+            status: 'paid',
+            paymentMethod: 'card',
+            description: "Sesión de osteopatía",
+            language: 'es',
+            quantity: 1,
+            date: new Date().toISOString().split('T')[0],
+            paymentDate: new Date().toISOString().split('T')[0],
+            eventId: '',
+          });
+        } catch (err) {
+          console.error('Failed to deduct bono session:', err);
         }
-      } catch (bonoErr) {
-        console.warn('Could not update client bono session count alongside invoice:', bonoErr);
+        return;
       }
     } catch (err) {
       console.error('Failed to create invoice:', err);
@@ -1154,68 +1146,30 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
         finalDiscType = 'bono';
         finalDiscLabel = 'Bono 5 séances (250€)';
       } else if (inlineBillingPlan === 'deduct_bono') {
-        finalDescription = `${translations[lang as Language].admin.billing.deductBonoDesc || "Séance d'Ostéopathie (Prise en compte Bono)"} (${selectedClient.bonoType || 'Bono'})`;
-        finalAmount = 0;
-        finalOriginal = 60;
-        finalDiscount = 60;
-        finalDiscType = 'bono';
-        finalDiscLabel = `Décompté sur ${selectedClient.bonoType || 'Bono'}`;
-      }
-
-      const isDiscounted = finalDiscount > 0;
-      const created = await api.createInvoice({
-        clientId: selectedClient.id,
-        clientName: selectedClient.name,
-        amount: finalAmount,
-        originalAmount: isDiscounted ? finalOriginal : finalAmount,
-        discountAmount: isDiscounted ? finalDiscount : undefined,
-        discountType: isDiscounted && finalDiscType !== 'none' ? finalDiscType : undefined,
-        discountLabel: isDiscounted ? (finalDiscLabel || (finalDiscType === 'bono' ? (selectedClient.bonoType || 'Bono') : undefined)) : undefined,
-        status: inlineInvoiceStatus,
-        paymentMethod: inlineInvoicePaymentMethod,
-        date: noteDateStr,
-        paymentDate: inlineInvoiceStatus === 'paid' ? noteDateStr : undefined,
-        description: normalizeInvoiceDescription(finalDescription),
-        language: 'es',
-        quantity: 1,
-        noteId: note.id,
-      });
-
-      // Update state immediately to guarantee invoice persists in UI
-      setInvoices(prev => sortInvoicesByDate([created, ...prev.filter(i => i.id !== created.id)], false));
-      setCreatingInvoiceForNoteId(null);
-
-      // Update client Bono status safely
-      try {
-        if (inlineBillingPlan === 'bono3' || inlineBillingPlan === 'bono5') {
-          const totalSessions = inlineBillingPlan === 'bono3' ? 3 : 5;
-          const remaining = inlineIncludeToday ? totalSessions - 1 : totalSessions;
-          const bonoTitle = inlineBillingPlan === 'bono3' ? 'Bono 3 séances' : 'Bono 5 séances';
-          const updatedClient: Client = {
-            ...selectedClient,
-            hasBono: true,
-            bonoType: bonoTitle,
-            defaultDiscount: undefined,
-            bonoSessionsRemaining: remaining,
-          };
-          const savedClient = await api.updateClient(updatedClient);
-          setClients(prev => prev.map(c => c.id === savedClient.id ? savedClient : c));
-          setSelectedClient(savedClient);
-        } else if ((inlineBillingPlan === 'deduct_bono' || inlineInvoiceDiscountType === 'bono') && selectedClient.hasBono) {
+        try {
           const currentRem = typeof selectedClient.bonoSessionsRemaining === 'number' 
             ? selectedClient.bonoSessionsRemaining 
             : (selectedClient.bonoType?.includes('3') ? 3 : 5);
           const newRemaining = Math.max(0, currentRem - 1);
+          const eventIdToDeduct = note.eventId || note.id;
+          const existingDeductions = selectedClient.bonoDeductedEventIds || [];
+          const updatedDeductions = eventIdToDeduct && !existingDeductions.includes(eventIdToDeduct)
+            ? [...existingDeductions, eventIdToDeduct]
+            : existingDeductions;
+
           const updatedClient: Client = {
             ...selectedClient,
             bonoSessionsRemaining: newRemaining,
+            bonoDeductedEventIds: updatedDeductions,
           };
           const savedClient = await api.updateClient(updatedClient);
           setClients(prev => prev.map(c => c.id === savedClient.id ? savedClient : c));
           setSelectedClient(savedClient);
+          setCreatingInvoiceForNoteId(null);
+        } catch (err) {
+          console.error('Failed to deduct inline bono session:', err);
         }
-      } catch (bonoErr) {
-        console.warn('Could not update client bono session count alongside inline invoice:', bonoErr);
+        return;
       }
     } catch (err) {
       console.error('Failed to create inline invoice:', err);
@@ -2997,6 +2951,21 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                       if (ev.clientId === selectedClient.id) return true;
                       if (ev.clientName && ev.clientName.trim().toLowerCase() === selectedClient.name.trim().toLowerCase()) return true;
                       return false;
+                    });
+
+                    const todayStr = new Date().toISOString().split('T')[0];
+                    const upcomingAppointments = patientAppointments.filter(ev => {
+                      const evDateStr = ev.start ? ev.start.split('T')[0] : '';
+                      const isToday = evDateStr === todayStr;
+                      const isFuture = new Date(ev.start).getTime() > currentTime.getTime();
+                      return isFuture && !isToday;
+                    }).sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
+
+                    const pastOrTodayAppointments = patientAppointments.filter(ev => {
+                      const evDateStr = ev.start ? ev.start.split('T')[0] : '';
+                      const isToday = evDateStr === todayStr;
+                      const isFuture = new Date(ev.start).getTime() > currentTime.getTime();
+                      return !isFuture || isToday;
                     }).sort((a, b) => new Date(b.start).getTime() - new Date(a.start).getTime());
 
                     return (
@@ -3015,8 +2984,8 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                               </h4>
                               <p className="text-[11px] text-gray-500">
                                 {lang === 'fr' 
-                                  ? 'Consultations planifiées ou passées issues de votre agenda' 
-                                  : 'Appointments scheduled or completed in your calendar'}
+                                  ? 'Consultations du jour, passées et à venir' 
+                                  : 'Today, past and upcoming consultations'}
                               </p>
                             </div>
                           </div>
@@ -3040,289 +3009,354 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                           </button>
                         </div>
 
-                        {patientAppointments.length > 0 ? (
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
-                            {patientAppointments.map(ev => {
-                              const evDate = new Date(ev.start);
-                              const timeStatus = getAppointmentTimeStatus(ev);
-                              const isOngoing = timeStatus.isOngoing;
-                              const isUpcoming = timeStatus.isUpcoming;
-                              const isPast = timeStatus.isPast;
-                              const dateStr = evDate.toLocaleDateString(lang === 'fr' ? 'fr-FR' : lang === 'es' ? 'es-ES' : 'en-US', {
-                                weekday: 'short',
-                                day: 'numeric',
-                                month: 'short',
-                                year: 'numeric'
-                              });
-                              const timeStr = `${evDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} - ${new Date(ev.end).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
-                              const evDateStr = ev.start ? ev.start.split('T')[0] : '';
-
-                              // 1. Associated clinical notes (by eventId or same client & date)
-                              const associatedNotes = clientNotes.filter(n => {
-                                if (n.eventId && n.eventId === ev.id) return true;
-                                const nDateStr = n.date ? n.date.split('T')[0] : '';
-                                return nDateStr === evDateStr;
-                              });
-                              const hasNote = associatedNotes.length > 0;
-                              const firstNote = associatedNotes[0];
-
-                              // 2. Associated invoices / payments (by eventId, noteId, or same client & date)
-                              const associatedInvoices = invoices.filter(inv => {
-                                if (inv.eventId && inv.eventId === ev.id) return true;
-                                if (inv.noteId && inv.noteId === ev.id) return true;
-                                if (inv.noteId && associatedNotes.some(n => n.id === inv.noteId)) return true;
-                                const isSameClient = inv.clientId === (ev.clientId || selectedClient.id);
-                                if (isSameClient) {
-                                  const invDateStr = inv.date ? inv.date.split('T')[0] : '';
-                                  const invPayDateStr = inv.paymentDate ? inv.paymentDate.split('T')[0] : '';
-                                  if (invDateStr === evDateStr || invPayDateStr === evDateStr) return true;
-                                }
-                                return false;
-                              });
-                              const paidInvoice = associatedInvoices.find(inv => inv.status === 'paid');
-                              const pendingInvoice = associatedInvoices.find(inv => inv.status === 'pending');
-
-                              return (
-                                <div 
-                                  key={ev.id}
-                                  className={`p-3.5 rounded-2xl border transition-all flex flex-col justify-between gap-2.5 ${
-                                    isOngoing
-                                      ? 'bg-teal-50/80 border-teal-300 ring-2 ring-teal-400/40 shadow-xs'
-                                      : isUpcoming 
-                                      ? 'bg-emerald-50/50 border-emerald-200/80 hover:bg-emerald-50' 
-                                      : hasNote
-                                      ? 'bg-sky-50/90 border-sky-200 hover:bg-sky-50 shadow-xs'
-                                      : isPast
-                                      ? 'bg-amber-50/90 border-amber-200 hover:bg-amber-50 shadow-xs'
-                                      : 'bg-[#fafafa] border-black/5 hover:bg-white'
-                                  }`}
-                                >
-                                  <div className="flex items-start justify-between gap-2">
-                                    <div className="space-y-1.5 flex-1 min-w-0">
-                                      {/* Badges row: Past/Ongoing/Upcoming + Note Notification + Payment Notification */}
-                                      <div className="flex items-center gap-1.5 flex-wrap">
-                                        {isOngoing ? (
-                                          <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-md bg-teal-600 text-white animate-pulse flex items-center gap-1 shadow-xs">
-                                            <span className="w-1.5 h-1.5 rounded-full bg-white"></span>
-                                            {lang === 'fr' ? 'En cours' : lang === 'es' ? 'En curso' : 'In progress'}
-                                          </span>
-                                        ) : isUpcoming ? (
-                                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-emerald-600 text-white">
-                                            {lang === 'fr' ? 'À venir' : lang === 'es' ? 'Próxima' : 'Upcoming'}
-                                          </span>
-                                        ) : (
-                                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-gray-200 text-gray-700">
-                                            {lang === 'fr' ? 'Passé' : lang === 'es' ? 'Pasada' : 'Past'}
-                                          </span>
-                                        )}
-                                        <span className="text-xs font-bold text-gray-900">{dateStr}</span>
-
-                                        {/* Note Status Notification Badge */}
-                                        {hasNote ? (
-                                          <button
-                                            type="button"
-                                            onClick={() => handleScrollToNote(firstNote.id)}
-                                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-sky-100 text-sky-800 border border-sky-300 hover:bg-sky-200 transition-colors cursor-pointer"
-                                            title={lang === 'fr' ? "Note rédigée - Cliquer pour voir au dossier" : "Nota redactada - Ver en ficha"}
-                                          >
-                                            <FileCheck size={11} className="text-sky-700" />
-                                            <span>{lang === 'fr' ? '✓ Note rédigée' : lang === 'es' ? '✓ Nota redactada' : '✓ Note added'}</span>
-                                          </button>
-                                        ) : isPast ? (
-                                          <span 
-                                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium bg-amber-50 text-amber-700 border border-amber-200/80"
-                                            title={lang === 'fr' ? "Rendez-vous passé sans note rédigée" : "Sin nota"}
-                                          >
-                                            <FileText size={10} className="text-amber-500" />
-                                            <span>{lang === 'fr' ? 'Note en attente' : lang === 'es' ? 'Nota pendiente' : 'Note pending'}</span>
-                                          </span>
-                                        ) : isOngoing ? (
-                                          <span 
-                                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium bg-teal-50 text-teal-800 border border-teal-200"
-                                            title={lang === 'fr' ? "Consultation actuellement en cours" : "Consulta en curso"}
-                                          >
-                                            <FileText size={10} className="text-teal-600" />
-                                            <span>{lang === 'fr' ? 'En consultation' : lang === 'es' ? 'En consulta' : 'In session'}</span>
-                                          </span>
-                                        ) : null}
-
-                                        {/* Payment Status Notification Badge */}
-                                        {paidInvoice ? (
-                                          (() => {
-                                            const methodLabel = paidInvoice.discountType === 'bono'
-                                              ? 'Bono'
-                                              : paidInvoice.paymentMethod === 'card'
-                                              ? (lang === 'fr' ? 'CB' : lang === 'es' ? 'Tarjeta' : 'Card')
-                                              : paidInvoice.paymentMethod === 'cash'
-                                              ? (lang === 'fr' ? 'Espèces' : lang === 'es' ? 'Efectivo' : 'Cash')
-                                              : (lang === 'fr' ? 'Virement' : lang === 'es' ? 'Transf.' : 'Transfer');
-                                            return (
-                                              <button
-                                                type="button"
-                                                onClick={() => setSelectedInvoiceForPrint(paidInvoice)}
-                                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-emerald-100 text-emerald-900 border border-emerald-300 hover:bg-emerald-200 transition-colors cursor-pointer"
-                                                title={lang === 'fr' ? `Paiement validé (${paidInvoice.amount} € - ${methodLabel}) - Cliquer pour voir la facture` : `Pago registrado (${paidInvoice.amount} €)`}
-                                              >
-                                                <CheckCircle2 size={11} className="text-emerald-700" />
-                                                <span>{lang === 'fr' ? 'Payé' : lang === 'es' ? 'Pagado' : 'Paid'} : {paidInvoice.amount} € ({methodLabel})</span>
-                                              </button>
-                                            );
-                                          })()
-                                        ) : pendingInvoice ? (
-                                          <button
-                                            type="button"
-                                            onClick={() => setSelectedInvoiceForPrint(pendingInvoice)}
-                                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-300 hover:bg-amber-200 transition-colors cursor-pointer"
-                                            title={lang === 'fr' ? `Facture émise en attente de paiement (${pendingInvoice.amount} €)` : `Factura pendiente`}
-                                          >
-                                            <Clock size={11} className="text-amber-700" />
-                                            <span>{lang === 'fr' ? 'En attente' : lang === 'es' ? 'Pendiente' : 'Pending'} : {pendingInvoice.amount} €</span>
-                                          </button>
-                                        ) : (
-                                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium bg-gray-100 text-gray-500 border border-gray-200">
-                                            <CreditCard size={10} className="text-gray-400" />
-                                            <span>{lang === 'fr' ? 'Non réglé' : lang === 'es' ? 'No cobrado' : 'Unbilled'}</span>
-                                          </span>
-                                        )}
+                        {/* Upcoming Appointments in less detailed format just above */}
+                        {upcomingAppointments.length > 0 && (
+                          <div className="space-y-2 pt-1 pb-2 border-b border-black/5">
+                            <h5 className="text-[11px] font-bold uppercase tracking-wider text-emerald-800 flex items-center gap-1.5 px-1">
+                              <Clock size={13} className="text-emerald-600" />
+                              <span>{lang === 'fr' ? 'Rendez-vous à venir' : lang === 'es' ? 'Próximas citas' : 'Upcoming appointments'} ({upcomingAppointments.length})</span>
+                            </h5>
+                            <div className="space-y-2">
+                              {upcomingAppointments.map(ev => {
+                                const evDate = new Date(ev.start);
+                                const dateStr = evDate.toLocaleDateString(lang === 'fr' ? 'fr-FR' : lang === 'es' ? 'es-ES' : 'en-US', {
+                                  weekday: 'short',
+                                  day: 'numeric',
+                                  month: 'short',
+                                  year: 'numeric'
+                                });
+                                const timeStr = `${evDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} - ${new Date(ev.end).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+                                return (
+                                  <div key={ev.id} className="p-3 bg-emerald-50/70 border border-emerald-200/60 rounded-xl flex items-center justify-between gap-3 text-xs">
+                                    <div className="flex items-center gap-2.5 min-w-0">
+                                      <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0"></span>
+                                      <div className="min-w-0">
+                                        <p className="font-bold text-gray-900 truncate">{ev.summary || (lang === 'fr' ? "Séance d'ostéopathie" : "Osteopathy session")}</p>
+                                        <p className="text-[11px] text-gray-500 font-medium">{dateStr} • <span className="font-mono">{timeStr}</span></p>
                                       </div>
-
-                                      <p className="text-xs font-semibold text-primary mt-1">
-                                        {ev.summary || (lang === 'fr' ? "Séance d'ostéopathie" : "Osteopathy session")}
-                                      </p>
-                                      <p className="text-[11px] text-gray-500 font-mono mt-0.5">
-                                        {timeStr}
-                                      </p>
-                                      {ev.description && (
-                                        <p className="text-[11px] text-gray-600 italic mt-1 line-clamp-2 bg-white/70 p-1.5 rounded-lg border border-black/5">
-                                          {ev.description}
-                                        </p>
-                                      )}
-
-                                      {/* Note Preview Snippet if note exists */}
-                                      {hasNote && (firstNote.motif || firstNote.treatment || firstNote.anamnese || firstNote.content) && (
-                                        <div 
-                                          onClick={() => handleScrollToNote(firstNote.id)}
-                                          className="bg-sky-50/80 hover:bg-sky-100/90 p-2 rounded-xl border border-sky-200/80 text-[11px] text-gray-700 cursor-pointer transition-all group/note mt-1"
-                                          title={lang === 'fr' ? "Cliquer pour voir la note complète dans le dossier" : "Clic para ver la nota en la ficha"}
-                                        >
-                                          <div className="flex items-center justify-between gap-1 text-[10px] font-bold text-sky-900 mb-0.5">
-                                            <span className="flex items-center gap-1 truncate">
-                                              <FileCheck size={11} className="text-sky-600 shrink-0" />
-                                              <span className="truncate">{firstNote.motif || (lang === 'fr' ? "Note clinique associée" : "Nota clínica")}</span>
-                                            </span>
-                                            <span className="text-sky-600 group-hover/note:underline font-semibold text-[9px] shrink-0 flex items-center gap-0.5">
-                                              <span>{lang === 'fr' ? "Voir note" : "Ver"}</span>
-                                              <ArrowDown size={10} />
-                                            </span>
-                                          </div>
-                                          <p className="line-clamp-2 text-gray-600 text-[10px] leading-relaxed italic">
-                                            {firstNote.treatment || firstNote.anamnese || firstNote.content}
-                                          </p>
-                                        </div>
-                                      )}
                                     </div>
-
                                     <div className="flex items-center gap-1 shrink-0">
                                       <button
                                         type="button"
                                         onClick={() => openEditEventModal(ev)}
-                                        className="p-1.5 text-gray-500 hover:text-primary hover:bg-white rounded-lg transition-all"
-                                        title={lang === 'fr' ? "Modifier le rendez-vous" : "Edit appointment"}
+                                        className="px-2.5 py-1 bg-white hover:bg-emerald-100/80 text-emerald-800 rounded-lg text-[10px] font-bold transition-all border border-emerald-200 cursor-pointer"
                                       >
-                                        <Pencil size={13} />
+                                        {lang === 'fr' ? 'Modifier' : lang === 'es' ? 'Editar' : 'Edit'}
                                       </button>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Past and Today's Appointments (Detailed) */}
+                        {pastOrTodayAppointments.length > 0 ? (
+                          <div className="space-y-2">
+                            <h5 className="text-[11px] font-bold uppercase tracking-wider text-gray-500 flex items-center gap-1.5 px-1 pt-1">
+                              <span>{lang === 'fr' ? "Rendez-vous du jour et passés" : lang === 'es' ? "Citas de hoy y pasadas" : "Today and past appointments"} ({pastOrTodayAppointments.length})</span>
+                            </h5>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                              {pastOrTodayAppointments.map(ev => {
+                                const evDate = new Date(ev.start);
+                                const timeStatus = getAppointmentTimeStatus(ev);
+                                const isOngoing = timeStatus.isOngoing;
+                                const isUpcoming = timeStatus.isUpcoming;
+                                const isPast = timeStatus.isPast;
+                                const dateStr = evDate.toLocaleDateString(lang === 'fr' ? 'fr-FR' : lang === 'es' ? 'es-ES' : 'en-US', {
+                                  weekday: 'short',
+                                  day: 'numeric',
+                                  month: 'short',
+                                  year: 'numeric'
+                                });
+                                const timeStr = `${evDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} - ${new Date(ev.end).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+                                const evDateStr = ev.start ? ev.start.split('T')[0] : '';
+
+                                // 1. Associated clinical notes (by eventId or same client & date)
+                                const associatedNotes = clientNotes.filter(n => {
+                                  if (n.eventId && n.eventId === ev.id) return true;
+                                  const nDateStr = n.date ? n.date.split('T')[0] : '';
+                                  return nDateStr === evDateStr;
+                                });
+                                const hasNote = associatedNotes.length > 0;
+                                const firstNote = associatedNotes[0];
+
+                                // 2. Associated invoices / payments (by eventId, noteId, or same client & date)
+                                const associatedInvoices = invoices.filter(inv => {
+                                  if (inv.eventId && inv.eventId === ev.id) return true;
+                                  if (inv.noteId && inv.noteId === ev.id) return true;
+                                  if (inv.noteId && associatedNotes.some(n => n.id === inv.noteId)) return true;
+                                  const isSameClient = inv.clientId === (ev.clientId || selectedClient.id);
+                                  if (isSameClient) {
+                                    const invDateStr = inv.date ? inv.date.split('T')[0] : '';
+                                    const invPayDateStr = inv.paymentDate ? inv.paymentDate.split('T')[0] : '';
+                                    if (invDateStr === evDateStr || invPayDateStr === evDateStr) return true;
+                                  }
+                                  return false;
+                                });
+                                const paidInvoice = associatedInvoices.find(inv => inv.status === 'paid');
+                                const pendingInvoice = associatedInvoices.find(inv => inv.status === 'pending');
+
+                                return (
+                                  <div 
+                                    key={ev.id}
+                                      className={`p-3.5 rounded-2xl border transition-all flex flex-col justify-between gap-2.5 ${!hasNote && !paidInvoice ? "bg-rose-50 border-rose-200" : hasNote && paidInvoice ? "bg-blue-50 border-blue-200" : hasNote && !paidInvoice ? "bg-amber-50 border-amber-200" : "bg-[#fafafa] border-black/5 hover:bg-white"}`}
+                                  >
+                                    <div className="flex items-start justify-between gap-2">
+                                      <div className="space-y-1.5 flex-1 min-w-0">
+                                        {/* Badges row: Ongoing/Today vs Past + Note Notification + Payment Notification */}
+                                        <div className="flex items-center gap-1.5 flex-wrap">
+                                          {isOngoing ? (
+                                            <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-md bg-teal-600 text-white animate-pulse flex items-center gap-1 shadow-xs">
+                                              <span className="w-1.5 h-1.5 rounded-full bg-white"></span>
+                                              {lang === 'fr' ? 'En cours' : lang === 'es' ? 'En curso' : 'In progress'}
+                                            </span>
+                                          ) : evDateStr === todayStr ? (
+                                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-emerald-600 text-white">
+                                              {lang === 'fr' ? "Aujourd'hui" : lang === 'es' ? 'Hoy' : 'Today'}
+                                            </span>
+                                          ) : (
+                                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-gray-200 text-gray-700">
+                                              {lang === 'fr' ? 'Passé' : lang === 'es' ? 'Pasada' : 'Past'}
+                                            </span>
+                                          )}
+                                          <span className="text-xs font-bold text-gray-900">{dateStr}</span>
+
+                                          {/* Note Status Notification Badge */}
+                                          {hasNote ? (
+                                            <button
+                                              type="button"
+                                              onClick={() => handleScrollToNote(firstNote.id)}
+                                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-sky-100 text-sky-800 border border-sky-300 hover:bg-sky-200 transition-colors cursor-pointer"
+                                              title={lang === 'fr' ? "Note rédigée - Cliquer pour voir au dossier" : "Nota redactada - Ver en ficha"}
+                                            >
+                                              <FileCheck size={11} className="text-sky-700" />
+                                              <span>{lang === 'fr' ? '✓ Note rédigée' : lang === 'es' ? '✓ Nota redactada' : '✓ Note added'}</span>
+                                            </button>
+                                          ) : isPast ? (
+                                            <span 
+                                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium bg-amber-50 text-amber-700 border border-amber-200/80"
+                                              title={lang === 'fr' ? "Rendez-vous passé sans note rédigée" : "Sin nota"}
+                                            >
+                                              <FileText size={10} className="text-amber-500" />
+                                              <span>{lang === 'fr' ? 'Note en attente' : lang === 'es' ? 'Nota pendiente' : 'Note pending'}</span>
+                                            </span>
+                                          ) : isOngoing ? (
+                                            <span 
+                                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium bg-teal-50 text-teal-800 border border-teal-200"
+                                              title={lang === 'fr' ? "Consultation actuellement en cours" : "Consulta en curso"}
+                                            >
+                                              <FileText size={10} className="text-teal-600" />
+                                              <span>{lang === 'fr' ? 'En consultation' : lang === 'es' ? 'En consulta' : 'In session'}</span>
+                                            </span>
+                                          ) : null}
+
+                                          {/* Payment Status Notification Badge */}
+                                          {paidInvoice ? (
+                                            (() => {
+                                              const methodLabel = paidInvoice.discountType === 'bono'
+                                                ? 'Bono'
+                                                : paidInvoice.paymentMethod === 'card'
+                                                ? (lang === 'fr' ? 'CB' : lang === 'es' ? 'Tarjeta' : 'Card')
+                                                : paidInvoice.paymentMethod === 'cash'
+                                                ? (lang === 'fr' ? 'Espèces' : lang === 'es' ? 'Efectivo' : 'Cash')
+                                                : (lang === 'fr' ? 'Virement' : lang === 'es' ? 'Transf.' : 'Transfer');
+                                              return (
+                                                <button
+                                                  type="button"
+                                                  onClick={() => setSelectedInvoiceForPrint(paidInvoice)}
+                                                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-emerald-100 text-emerald-900 border border-emerald-300 hover:bg-emerald-200 transition-colors cursor-pointer"
+                                                  title={lang === 'fr' ? `Paiement validé (${paidInvoice.amount} € - ${methodLabel}) - Cliquer pour voir la facture` : `Pago registrado (${paidInvoice.amount} €)`}
+                                                >
+                                                  <CheckCircle2 size={11} className="text-emerald-700" />
+                                                  <span>{lang === 'fr' ? 'Payé' : lang === 'es' ? 'Pagado' : 'Paid'} : {paidInvoice.amount} € ({methodLabel})</span>
+                                                </button>
+                                              );
+                                            })()
+                                          ) : pendingInvoice ? (
+                                            <button
+                                              type="button"
+                                              onClick={() => setSelectedInvoiceForPrint(pendingInvoice)}
+                                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-300 hover:bg-amber-200 transition-colors cursor-pointer"
+                                              title={lang === 'fr' ? `Facture émise en attente de paiement (${pendingInvoice.amount} €)` : `Factura pendiente`}
+                                            >
+                                              <Clock size={11} className="text-amber-700" />
+                                              <span>{lang === 'fr' ? 'En attente' : lang === 'es' ? 'Pendiente' : 'Pending'} : {pendingInvoice.amount} €</span>
+                                            </button>
+                                          ) : (
+                                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium bg-gray-100 text-gray-500 border border-gray-200">
+                                              <CreditCard size={10} className="text-gray-400" />
+                                              <span>{lang === 'fr' ? 'Non réglé' : lang === 'es' ? 'No cobrado' : 'Unbilled'}</span>
+                                            </span>
+                                          )}
+                                        </div>
+
+                                        <p className="text-xs font-semibold text-primary mt-1">
+                                          {ev.summary || (lang === 'fr' ? "Séance d'ostéopathie" : "Osteopathy session")}
+                                        </p>
+                                        <p className="text-[11px] text-gray-500 font-mono mt-0.5">
+                                          {timeStr}
+                                        </p>
+                                        {ev.description && (
+                                          <p className="text-[11px] text-gray-600 italic mt-1 line-clamp-2 bg-white/70 p-1.5 rounded-lg border border-black/5">
+                                            {ev.description}
+                                          </p>
+                                        )}
+
+                                        {/* Note Preview Snippet if note exists */}
+                                        {hasNote && (firstNote.motif || firstNote.treatment || firstNote.anamnese || firstNote.content) && (
+                                          <div 
+                                            onClick={() => handleScrollToNote(firstNote.id)}
+                                            className="bg-sky-50/80 hover:bg-sky-100/90 p-2 rounded-xl border border-sky-200/80 text-[11px] text-gray-700 cursor-pointer transition-all group/note mt-1"
+                                            title={lang === 'fr' ? "Cliquer pour voir la note complète dans le dossier" : "Clic para ver la nota en la ficha"}
+                                          >
+                                            <div className="flex items-center justify-between gap-1 text-[10px] font-bold text-sky-900 mb-0.5">
+                                              <span className="flex items-center gap-1 truncate">
+                                                <FileCheck size={11} className="text-sky-600 shrink-0" />
+                                                <span className="truncate">{firstNote.motif || (lang === 'fr' ? "Note clinique associée" : "Nota clínica")}</span>
+                                              </span>
+                                              <span className="text-sky-600 group-hover/note:underline font-semibold text-[9px] shrink-0 flex items-center gap-0.5">
+                                                <span>{lang === 'fr' ? "Voir note" : "Ver"}</span>
+                                                <ArrowDown size={10} />
+                                              </span>
+                                            </div>
+                                            <p className="line-clamp-2 text-gray-600 text-[10px] leading-relaxed italic">
+                                              {firstNote.treatment || firstNote.anamnese || firstNote.content}
+                                            </p>
+                                          </div>
+                                        )}
+                                      </div>
+
+                                      <div className="flex items-center gap-1 shrink-0">
+                                        <button
+                                          type="button"
+                                          onClick={() => openEditEventModal(ev)}
+                                          className="p-1.5 text-gray-500 hover:text-primary hover:bg-white rounded-lg transition-all"
+                                          title={lang === 'fr' ? "Modifier le rendez-vous" : "Edit appointment"}
+                                        >
+                                          <Pencil size={13} />
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => handleDeleteEvent(ev.id)}
+                                          className="p-1.5 text-gray-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-all"
+                                          title={lang === 'fr' ? "Supprimer le rendez-vous" : "Delete appointment"}
+                                        >
+                                          <Trash2 size={13} />
+                                        </button>
+                                      </div>
+                                    </div>
+
+                                    {/* Quick actions for this appointment */}
+                                    <div className="pt-2 border-t border-black/5 flex items-center justify-between gap-2 text-[11px] flex-wrap">
+                                      <div className="flex items-center gap-2 flex-wrap">
+                                        {hasNote ? (
+                                          <button
+                                            type="button"
+                                            onClick={() => handleScrollToNote(firstNote.id)}
+                                            className="text-sky-700 hover:text-sky-900 font-bold inline-flex items-center gap-1 cursor-pointer hover:underline"
+                                          >
+                                            <FileCheck size={11} className="text-sky-600" />
+                                            <span>{lang === 'fr' ? 'Voir la note au dossier' : lang === 'es' ? 'Ver nota en ficha' : 'View note in file'} ↓</span>
+                                          </button>
+                                        ) : (
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              const isoDate = evDate.toISOString().split('T')[0];
+                                              setNewNote(prev => ({
+                                                ...prev,
+                                                date: isoDate,
+                                                motif: ev.summary || prev.motif,
+                                                eventId: ev.id,
+                                              }));
+                                              const noteFormElem = document.getElementById('new-note-form');
+                                              if (noteFormElem) {
+                                                noteFormElem.scrollIntoView({ behavior: 'smooth' });
+                                                const firstField = noteFormElem.querySelector('input, textarea') as HTMLInputElement | HTMLTextAreaElement | null;
+                                                if (firstField) firstField.focus();
+                                              }
+                                            }}
+                                            className="text-primary hover:underline font-bold inline-flex items-center gap-1 cursor-pointer"
+                                          >
+                                            <Plus size={11} />
+                                            <span>{lang === 'fr' ? 'Rédiger une note pour ce RDV' : 'Write note for this appointment'}</span>
+                                          </button>
+                                        )}
+
+                                        {!paidInvoice && (
+                                          selectedClient.hasBono && (selectedClient.bonoSessionsRemaining ?? 0) > 0 && !(selectedClient.bonoDeductedEventIds?.includes(ev.id)) ? (
+                                            <button
+                                              type="button"
+                                              onClick={async () => {
+                                                try {
+                                                  const newRemaining = Math.max(0, (selectedClient.bonoSessionsRemaining ?? 0) - 1);
+                                                  const existingDeductions = selectedClient.bonoDeductedEventIds || [];
+                                                  const updatedClient: Client = {
+                                                    ...selectedClient,
+                                                    bonoSessionsRemaining: newRemaining,
+                                                    bonoDeductedEventIds: [...existingDeductions, ev.id],
+                                                  };
+                                                  const savedClient = await api.updateClient(updatedClient);
+                                                  setClients(prev => prev.map(c => c.id === savedClient.id ? savedClient : c));
+                                                  setSelectedClient(savedClient);
+                                                } catch (err) {
+                                                  console.error('Failed to deduct bono session:', err);
+                                                }
+                                              }}
+                                              className="text-emerald-800 hover:text-emerald-950 font-bold inline-flex items-center gap-1 bg-emerald-50 hover:bg-emerald-100 px-2 py-0.5 rounded-lg border border-emerald-200/80 transition-all cursor-pointer text-[10px]"
+                                              title={lang === 'fr' ? "Décompter une séance de ce Bono" : lang === 'es' ? "Descontar sesión de bono" : "Deduct session from Bono"}
+                                            >
+                                              <CheckCircle2 size={10} />
+                                              <span>{lang === 'fr' ? 'Décompte du Bono' : lang === 'es' ? 'Descuento Bono' : 'Bono Deduction'}</span>
+                                            </button>
+                                          ) : (
+                                            <button
+                                              type="button"
+                                              onClick={() => {
+                                                if (!selectedClient) return;
+                                                const isoDate = evDate.toISOString().split('T')[0];
+                                                setNewInvoice(prev => ({
+                                                  ...prev,
+                                                  clientId: selectedClient.id,
+                                                  date: isoDate,
+                                                  paymentDate: isoDate,
+                                                  eventId: ev.id,
+                                                  description: ev.summary || prev.description,
+                                                }));
+                                                setNewInvoiceBillingPlan(selectedClient.hasBono && (selectedClient.bonoSessionsRemaining ?? 0) > 0 ? 'deduct_bono' : 'single');
+                                                setNewInvoiceIncludeToday(true);
+                                                setIsAddInvoiceOpen(true);
+                                              }}
+                                              className="text-emerald-800 hover:text-emerald-950 font-bold inline-flex items-center gap-1 bg-emerald-50 hover:bg-emerald-100 px-2 py-0.5 rounded-lg border border-emerald-200/80 transition-all cursor-pointer text-[10px]"
+                                              title={lang === 'fr' ? "Associer un paiement ou émettre une facture pour ce rendez-vous" : "Cobrar cita"}
+                                            >
+                                              <Plus size={10} />
+                                              <span>{lang === 'fr' ? 'Encaisser / Facturer' : lang === 'es' ? 'Cobrar / Facturar' : 'Bill / Collect'}</span>
+                                            </button>
+                                          )
+                                        )}
+                                      </div>
+
                                       <button
                                         type="button"
-                                        onClick={() => handleDeleteEvent(ev.id)}
-                                        className="p-1.5 text-gray-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-all"
-                                        title={lang === 'fr' ? "Supprimer le rendez-vous" : "Delete appointment"}
+                                        onClick={() => {
+                                          setCurrentCalendarDate(evDate);
+                                          setActiveTab('calendar');
+                                          setCalendarViewMode('day');
+                                        }}
+                                        className="text-gray-500 hover:text-gray-800 text-[10px] font-medium cursor-pointer ml-auto"
                                       >
-                                        <Trash2 size={13} />
+                                        {lang === 'fr' ? "Voir dans l'agenda" : "View in calendar"} →
                                       </button>
                                     </div>
                                   </div>
-
-                                  {/* Quick actions for this appointment */}
-                                  <div className="pt-2 border-t border-black/5 flex items-center justify-between gap-2 text-[11px] flex-wrap">
-                                    <div className="flex items-center gap-2 flex-wrap">
-                                      {hasNote ? (
-                                        <button
-                                          type="button"
-                                          onClick={() => handleScrollToNote(firstNote.id)}
-                                          className="text-sky-700 hover:text-sky-900 font-bold inline-flex items-center gap-1 cursor-pointer hover:underline"
-                                        >
-                                          <FileCheck size={11} className="text-sky-600" />
-                                          <span>{lang === 'fr' ? 'Voir la note au dossier' : lang === 'es' ? 'Ver nota en ficha' : 'View note in file'} ↓</span>
-                                        </button>
-                                      ) : (
-                                        <button
-                                          type="button"
-                                          onClick={() => {
-                                            const isoDate = evDate.toISOString().split('T')[0];
-                                            setNewNote(prev => ({
-                                              ...prev,
-                                              date: isoDate,
-                                              motif: ev.summary || prev.motif,
-                                              eventId: ev.id,
-                                            }));
-                                            const noteFormElem = document.getElementById('new-note-form');
-                                            if (noteFormElem) {
-                                              noteFormElem.scrollIntoView({ behavior: 'smooth' });
-                                              const firstField = noteFormElem.querySelector('input, textarea') as HTMLInputElement | HTMLTextAreaElement | null;
-                                              if (firstField) firstField.focus();
-                                            }
-                                          }}
-                                          className="text-primary hover:underline font-bold inline-flex items-center gap-1 cursor-pointer"
-                                        >
-                                          <Plus size={11} />
-                                          <span>{lang === 'fr' ? 'Rédiger une note pour ce RDV' : 'Write note for this appointment'}</span>
-                                        </button>
-                                      )}
-
-                                      {!paidInvoice && (
-                                        <button
-                                          type="button"
-                                          onClick={() => {
-                                            if (!selectedClient) return;
-                                            const isoDate = evDate.toISOString().split('T')[0];
-                                            setNewInvoice(prev => ({
-                                              ...prev,
-                                              clientId: selectedClient.id,
-                                              date: isoDate,
-                                              paymentDate: isoDate,
-                                              eventId: ev.id,
-                                              description: ev.summary || prev.description,
-                                            }));
-                                            setNewInvoiceBillingPlan(selectedClient.hasBono && (selectedClient.bonoSessionsRemaining ?? 0) > 0 ? 'deduct_bono' : 'single');
-                                            setNewInvoiceIncludeToday(true);
-                                            setIsAddInvoiceOpen(true);
-                                          }}
-                                          className="text-emerald-800 hover:text-emerald-950 font-bold inline-flex items-center gap-1 bg-emerald-50 hover:bg-emerald-100 px-2 py-0.5 rounded-lg border border-emerald-200/80 transition-all cursor-pointer text-[10px]"
-                                          title={lang === 'fr' ? "Associer un paiement ou émettre une facture pour ce rendez-vous" : "Cobrar cita"}
-                                        >
-                                          <Plus size={10} />
-                                          <span>{lang === 'fr' ? 'Encaisser / Facturer' : lang === 'es' ? 'Cobrar / Facturar' : 'Bill / Collect'}</span>
-                                        </button>
-                                      )}
-                                    </div>
-
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        setCurrentCalendarDate(evDate);
-                                        setActiveTab('calendar');
-                                        setCalendarViewMode('day');
-                                      }}
-                                      className="text-gray-500 hover:text-gray-800 text-[10px] font-medium cursor-pointer ml-auto"
-                                    >
-                                      {lang === 'fr' ? "Voir dans l'agenda" : "View in calendar"} →
-                                    </button>
-                                  </div>
-                                </div>
-                              );
-                            })}
+                                );
+                              })}
+                            </div>
                           </div>
-                        ) : (
+                        ) : upcomingAppointments.length === 0 ? (
                           <div className="py-5 px-4 bg-[#fafafa] rounded-2xl border border-dashed border-gray-200 text-center space-y-1.5">
                             <CalendarIcon className="mx-auto text-gray-300" size={20} />
                             <p className="text-xs text-gray-400">
@@ -3331,7 +3365,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                 : "No appointments scheduled for this patient in the calendar."}
                             </p>
                           </div>
-                        )}
+                        ) : null}
                       </div>
                     );
                   })()}
@@ -7979,7 +8013,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                         </label>
                         <input
                           type="number"
-                          value={editingClient.bonoSessionsRemaining ?? 3}
+                          value={editingClient.bonoSessionsRemaining ?? (editingClient.bonoType?.includes('3') ? 3 : 5)}
                           onChange={(e) => setEditingClient(prev => prev ? ({ ...prev, bonoSessionsRemaining: Number(e.target.value) }) : null)}
                           placeholder="3"
                           className="w-full p-2 bg-white rounded-xl border border-black/10 text-xs font-bold text-primary focus:outline-none focus:ring-1 focus:ring-primary"
