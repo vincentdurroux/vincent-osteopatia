@@ -1113,6 +1113,25 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
         }
         return;
       }
+      setIsAddInvoiceOpen(false);
+      setNewInvoiceBillingPlan("single");
+      setNewInvoiceIncludeToday(true);
+      setNewInvoice({
+        clientId: "",
+        amount: 60,
+        originalAmount: 60,
+        discountAmount: 0,
+        discountType: "none",
+        discountLabel: "",
+        status: "paid",
+        paymentMethod: "card",
+        description: "Sesión de osteopatía",
+        language: "es",
+        quantity: 1,
+        date: new Date().toISOString().split("T")[0],
+        paymentDate: new Date().toISOString().split("T")[0],
+        eventId: "",
+      });
     } catch (err) {
       console.error('Failed to create invoice:', err);
     }
