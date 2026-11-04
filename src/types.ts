@@ -48,6 +48,7 @@ export interface Invoice {
   noteId?: string;
   eventId?: string;
   quantity?: number;
+  isBonoRedemption?: boolean;
 }
 
 export type EventType = 'appointment' | 'blocked';

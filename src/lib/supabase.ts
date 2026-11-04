@@ -239,6 +239,7 @@ export function mapInvoiceFromDB(i: any): Invoice {
     quantity: Number(i.quantity) || 1,
     noteId: i.noteId || i.note_id || undefined,
     eventId: i.eventId || i.event_id || i.noteId || i.note_id || undefined,
+    isBonoRedemption: Boolean(i.isBonoRedemption || i.is_bono_redemption),
   };
 }
 
@@ -812,6 +813,8 @@ BEGIN
     BEGIN ALTER TABLE public.invoices ADD COLUMN language TEXT DEFAULT 'fr'; EXCEPTION WHEN duplicate_column THEN END;
     BEGIN ALTER TABLE public.invoices ADD COLUMN note_id TEXT; EXCEPTION WHEN duplicate_column THEN END;
     BEGIN ALTER TABLE public.invoices ADD COLUMN "noteId" TEXT; EXCEPTION WHEN duplicate_column THEN END;
+    BEGIN ALTER TABLE public.invoices ADD COLUMN is_bono_redemption BOOLEAN DEFAULT FALSE; EXCEPTION WHEN duplicate_column THEN END;
+    BEGIN ALTER TABLE public.invoices ADD COLUMN "isBonoRedemption" BOOLEAN DEFAULT FALSE; EXCEPTION WHEN duplicate_column THEN END;
 END $$;
 
 -- 4. TABLE DE L'AGENDA & RENDEZ-VOUS
@@ -1772,14 +1775,16 @@ export const api = {
     return sortInvoicesByDate(localInvoices, false);
   },
 
-  async createInvoice(invoice: Omit<Invoice, 'id' | 'invoiceNumber'> & { id?: string; invoiceNumber?: string }): Promise<Invoice> {
-    const nextInvoiceNum = invoice.invoiceNumber || await this.getNextInvoiceNumber();
+  async createInvoice(invoice: Omit<Invoice, 'id' | 'invoiceNumber'> & { id?: string; invoiceNumber?: string; isBonoRedemption?: boolean }): Promise<Invoice> {
+    const isBonoRedeem = invoice.isBonoRedemption || (invoice.amount === 0 && invoice.discountType === 'bono');
+    const nextInvoiceNum = isBonoRedeem ? '' : (invoice.invoiceNumber || await this.getNextInvoiceNumber());
     const invoiceId = invoice.id || crypto.randomUUID();
 
     const newInvoice: Invoice = {
       ...invoice,
       id: invoiceId,
       invoiceNumber: nextInvoiceNum,
+      isBonoRedemption: isBonoRedeem,
     };
 
     // Save locally immediately to guarantee persistence
@@ -1840,6 +1845,8 @@ export const api = {
           note_id: newInvoice.noteId || null,
           eventId: newInvoice.eventId || newInvoice.noteId || null,
           event_id: newInvoice.eventId || newInvoice.noteId || null,
+          isBonoRedemption: newInvoice.isBonoRedemption || false,
+          is_bono_redemption: newInvoice.isBonoRedemption || false,
         };
 
         const result = await executeResilientInsert('invoices', [cleanPayload]);
@@ -1930,6 +1937,8 @@ export const api = {
           discount_label: invoice.discountLabel || null,
           noteId: invoice.noteId || null,
           note_id: invoice.noteId || null,
+          isBonoRedemption: invoice.isBonoRedemption || false,
+          is_bono_redemption: invoice.isBonoRedemption || false,
         };
 
         const result = await executeResilientUpdate('invoices', invoice.id, [cleanPayload]);

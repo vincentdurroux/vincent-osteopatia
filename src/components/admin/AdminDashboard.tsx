@@ -1093,6 +1093,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
         language: 'es',
         quantity: 1,
         noteId: newInvoice.eventId || undefined,
+        isBonoRedemption: newInvoiceBillingPlan === 'deduct_bono',
       });
 
       // Update state immediately to guarantee invoice persists in UI
@@ -1211,6 +1212,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
         language: 'es',
         quantity: 1,
         noteId: note.id,
+        isBonoRedemption: inlineBillingPlan === 'deduct_bono',
       });
 
       // Update state immediately to guarantee invoice persists in UI
@@ -3241,6 +3243,17 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                           {/* Payment Status Notification Badge */}
                                           {paidInvoice ? (
                                             (() => {
+                                              if (paidInvoice.isBonoRedemption) {
+                                                return (
+                                                  <span 
+                                                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300"
+                                                    title={lang === 'fr' ? "Séance décomptée du Bono" : "Session redeemed from Bono"}
+                                                  >
+                                                    <Sparkles size={11} className="text-emerald-700" />
+                                                    <span>{translations[lang].admin.billing.bonoRedemptionLabel}</span>
+                                                  </span>
+                                                );
+                                              }
                                               const methodLabel = paidInvoice.discountType === 'bono'
                                                 ? 'Bono'
                                                 : paidInvoice.paymentMethod === 'card'
@@ -5712,7 +5725,16 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                   <tbody>
                     {displayedInvoices.map(inv => (
                       <tr key={inv.id} className="border-b border-black/5 hover:bg-black/[0.01] transition-colors group">
-                        <td className="py-4 font-bold text-primary">{inv.invoiceNumber}</td>
+                        <td className="py-4">
+                          {inv.isBonoRedemption ? (
+                            <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg bg-emerald-50 text-emerald-700 text-[10px] font-bold border border-emerald-200/50">
+                              <Sparkles size={11} />
+                              {translations[lang].admin.billing.bonoRedemptionLabel}
+                            </span>
+                          ) : (
+                            <span className="font-bold text-primary">{inv.invoiceNumber}</span>
+                          )}
+                        </td>
                         <td className="py-4 font-bold">{inv.clientName}</td>
                         <td className="py-4 text-gray-500 text-xs">
                           <div className="font-medium text-gray-700">{new Date(inv.date).toLocaleDateString(lang === 'fr' ? 'fr-FR' : lang === 'es' ? 'es-ES' : 'en-US')}</div>
@@ -5788,16 +5810,18 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                             >
                               <Pencil size={13} />
                             </button>
-                            <button
-                              onClick={() => setSelectedInvoiceForPrint(inv)}
-                              className="p-1.5 hover:bg-primary/10 text-primary rounded-lg transition-colors inline-flex items-center gap-1.5"
-                              title={translations[lang].admin.billing.print}
-                            >
-                              <Printer size={13} />
-                              <span className="text-[10px] uppercase font-bold tracking-wider">
-                                {translations[lang].admin.billing.receipt}
-                              </span>
-                            </button>
+                            {!inv.isBonoRedemption && (
+                              <button
+                                onClick={() => setSelectedInvoiceForPrint(inv)}
+                                className="p-1.5 hover:bg-primary/10 text-primary rounded-lg transition-colors inline-flex items-center gap-1.5"
+                                title={translations[lang].admin.billing.print}
+                              >
+                                <Printer size={13} />
+                                <span className="text-[10px] uppercase font-bold tracking-wider">
+                                  {translations[lang].admin.billing.receipt}
+                                </span>
+                              </button>
+                            )}
                             <button
                               onClick={() => handleDeleteInvoice(inv.id)}
                               className="p-1.5 hover:bg-red-50 text-gray-500 hover:text-red-500 rounded-lg transition-all inline-flex items-center"
@@ -8138,7 +8162,9 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
               className="relative w-full max-w-md bg-white rounded-3xl shadow-2xl p-8 z-10 border border-black/5"
             >
               <h3 className="text-xl font-serif font-bold text-primary mb-6">
-                {lang === 'fr' ? 'Modifier la Facture' : lang === 'es' ? 'Editar Factura' : 'Edit Invoice'}
+                {editingInvoice.isBonoRedemption 
+                  ? (lang === 'fr' ? 'Modifier le suivi Bono' : lang === 'es' ? 'Editar uso de Bono' : 'Edit Bono usage')
+                  : (lang === 'fr' ? 'Modifier la Facture' : lang === 'es' ? 'Editar Factura' : 'Edit Invoice')}
               </h3>
               
               <form onSubmit={handleUpdateInvoice} className="space-y-4">
