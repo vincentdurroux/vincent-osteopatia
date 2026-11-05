@@ -1205,58 +1205,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
           // Perform API deletion (which executes database cascade & tombstones)
           await api.deleteInvoice(invoiceId, inv?.invoiceNumber);
 
-          if (isPaidBono && (clientId || clientName)) {
-            // Cascade cleanup in local React states
-            const redemptions = invoices.filter(i => {
-              if (i.id === invoiceId || (inv?.invoiceNumber && i.invoiceNumber === inv.invoiceNumber)) return false;
-              const isRed = i.amount === 0 && (i.isBonoRedemption || i.discountType === 'bono' || (i.discountLabel && i.discountLabel.toLowerCase().includes('bono')));
-              if (!isRed) return false;
-              if (clientId && i.clientId === clientId) return true;
-              if (clientName && i.clientName && i.clientName.trim().toLowerCase() === clientName.trim().toLowerCase()) return true;
-              return false;
-            });
-
-            const redIds = new Set(redemptions.map(r => r.id));
-            const redNums = new Set(redemptions.map(r => r.invoiceNumber).filter(Boolean));
-
-            // 1. Update invoices state
-            setInvoices(prev => prev.filter(i => {
-              if (i.id === invoiceId || (inv?.invoiceNumber && i.invoiceNumber === inv.invoiceNumber)) return false;
-              if (redIds.has(i.id)) return false;
-              if (i.invoiceNumber && redNums.has(i.invoiceNumber)) return false;
-              return true;
-            }));
-
-            // 2. Update clients state
-            const resetFields = {
-              
-              bonoType: undefined,
-              bonoTotalSessions: 0,
-              bonoSessionsRemaining: 0,
-              bonoRedeemedDates: [],
-              bonoPurchaseDate: undefined,
-              defaultDiscount: 0,
-            };
-
-            setClients(prev => prev.map(c => {
-              const isMatch = (clientId && c.id === clientId) || (clientName && c.name?.trim().toLowerCase() === clientName.trim().toLowerCase());
-              if (isMatch) return { ...c, ...resetFields };
-              return c;
-            }));
-
-            if (selectedClient && ((clientId && selectedClient.id === clientId) || (clientName && selectedClient.name?.trim().toLowerCase() === clientName.trim().toLowerCase()))) {
-              setSelectedClient(prev => prev ? { ...prev, ...resetFields } : null);
-            }
-
-            // 3. Update notes state
-            setClientNotes(prev => prev.map(n => ({ ...n, isBonoRedeemed: false, bonoType: undefined })));
-            setAllNotes(prev => prev.map(n => {
-              const isMatch = (clientId && n.clientId === clientId) || (clientName && n.clientName?.trim().toLowerCase() === clientName.trim().toLowerCase());
-              if (isMatch) return { ...n, isBonoRedeemed: false, bonoType: undefined };
-              return n;
-            }));
-
-          } else if (isSingleRedemption && (clientId || clientName)) {
+          if (isSingleRedemption && (clientId || clientName)) {
             const targetDateStr = inv?.date ? inv.date.split('T')[0] : '';
 
             // Update invoices state
@@ -1336,28 +1285,120 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
       let finalDiscount = Number(newInvoice.discountAmount || 0);
       let finalDiscType = newInvoice.discountType;
       let finalDiscLabel = newInvoice.discountLabel;
+      let finalPaymentMethod = newInvoice.paymentMethod;
+      let isRedemption = false;
 
-      const isDiscounted = finalDiscount > 0;
-      const created = await api.createInvoice({
-        clientId: client.id,
-        clientName: client.name,
-        amount: finalAmount,
-        originalAmount: isDiscounted ? finalOriginal : finalAmount,
-        discountAmount: isDiscounted ? finalDiscount : undefined,
-        discountType: isDiscounted && finalDiscType !== 'none' ? finalDiscType : undefined,
-        discountLabel: isDiscounted ? finalDiscLabel : undefined,
-        status: newInvoice.status || 'paid',
-        paymentMethod: newInvoice.paymentMethod,
-        date: newInvoice.date || new Date().toISOString().split('T')[0],
-        paymentDate: newInvoice.status === 'paid' ? (newInvoice.paymentDate || newInvoice.date || new Date().toISOString().split('T')[0]) : undefined,
-        description: normalizeInvoiceDescription(finalDescription),
-        language: 'es',
-        quantity: 1,
-        noteId: newInvoice.eventId || undefined,
-      });
+      if (newInvoiceBillingPlan === 'deduct_bono') {
+        finalAmount = 0;
+        finalOriginal = 60;
+        finalDiscount = 60;
+        finalDiscType = 'bono';
+        finalDiscLabel = `Décompté sur ${client.bonoType || 'Bono'}`;
+        finalDescription = `Séance décomptée du Bono (${client.bonoType || 'Bono'})`;
+        finalPaymentMethod = 'not_applicable';
+        isRedemption = true;
+      }
 
-      // Update state immediately to guarantee invoice persists in UI
-      setInvoices(prev => sortInvoicesByDate([created, ...prev.filter(i => i.id !== created.id)], false));
+      if (newInvoiceBillingPlan === 'bono3' || newInvoiceBillingPlan === 'bono5') {
+        const totalSessions = newInvoiceBillingPlan === 'bono3' ? 3 : 5;
+        const bonoTitle = newInvoiceBillingPlan === 'bono3' ? 'Bono 3 séances' : 'Bono 5 séances';
+        
+        const purchaseInvoice = await api.createInvoice({
+          clientId: client.id,
+          clientName: client.name,
+          amount: newInvoiceBillingPlan === 'bono3' ? 160 : 250,
+          originalAmount: newInvoiceBillingPlan === 'bono3' ? 180 : 300,
+          discountAmount: newInvoiceBillingPlan === 'bono3' ? 20 : 50,
+          discountType: 'bono',
+          discountLabel: bonoTitle,
+          status: newInvoice.status || 'paid',
+          paymentMethod: newInvoice.paymentMethod,
+          date: newInvoice.date || new Date().toISOString().split('T')[0],
+          paymentDate: newInvoice.status === 'paid' ? (newInvoice.paymentDate || newInvoice.date || new Date().toISOString().split('T')[0]) : undefined,
+          description: `Bono Ostéopathie - Forfait ${totalSessions} séances`,
+          language: 'es',
+          quantity: 1,
+        });
+
+        let remaining = totalSessions;
+        let createdRedemptionInv: Invoice | null = null;
+
+        if (newInvoiceIncludeToday) {
+          remaining = totalSessions - 1;
+          createdRedemptionInv = await api.createInvoice({
+            clientId: client.id,
+            clientName: client.name,
+            amount: 0,
+            originalAmount: 60,
+            discountAmount: 60,
+            discountType: 'bono',
+            discountLabel: `Décompté sur ${bonoTitle}`,
+            status: 'paid',
+            paymentMethod: 'not_applicable',
+            date: newInvoice.date || new Date().toISOString().split('T')[0],
+            paymentDate: newInvoice.date || new Date().toISOString().split('T')[0],
+            description: `Séance décomptée du Bono (${bonoTitle})`,
+            language: 'es',
+            quantity: 1,
+            eventId: newInvoice.eventId || undefined,
+            noteId: newInvoice.eventId || undefined,
+            isBonoRedemption: true,
+          });
+        }
+
+        const updatedClient: Client = {
+          ...client,
+          hasBono: true,
+          bonoType: bonoTitle,
+          bonoSessionsRemaining: remaining,
+        };
+        const savedClient = await api.updateClient(updatedClient);
+        setClients(prev => prev.map(c => c.id === savedClient.id ? savedClient : c));
+        if (selectedClient?.id === client.id) setSelectedClient(savedClient);
+
+        setInvoices(prev => sortInvoicesByDate([
+          purchaseInvoice,
+          ...(createdRedemptionInv ? [createdRedemptionInv] : []),
+          ...prev.filter(i => i.id !== purchaseInvoice.id && (!createdRedemptionInv || i.id !== createdRedemptionInv.id))
+        ], false));
+
+      } else {
+        const isDiscounted = finalDiscount > 0;
+        const created = await api.createInvoice({
+          clientId: client.id,
+          clientName: client.name,
+          amount: finalAmount,
+          originalAmount: isDiscounted ? finalOriginal : finalAmount,
+          discountAmount: isDiscounted ? finalDiscount : undefined,
+          discountType: isDiscounted && finalDiscType !== 'none' ? finalDiscType : undefined,
+          discountLabel: isDiscounted ? finalDiscLabel : undefined,
+          status: newInvoice.status || 'paid',
+          paymentMethod: finalPaymentMethod,
+          date: newInvoice.date || new Date().toISOString().split('T')[0],
+          paymentDate: newInvoice.status === 'paid' ? (newInvoice.paymentDate || newInvoice.date || new Date().toISOString().split('T')[0]) : undefined,
+          description: normalizeInvoiceDescription(finalDescription),
+          language: 'es',
+          quantity: 1,
+          noteId: newInvoice.eventId || undefined,
+          eventId: newInvoice.eventId || undefined,
+          isBonoRedemption: isRedemption,
+        });
+
+        if (newInvoiceBillingPlan === 'deduct_bono' && client.hasBono) {
+          const currentRem = client.bonoSessionsRemaining ?? 1;
+          const newRemaining = Math.max(0, currentRem - 1);
+          const updatedClient: Client = {
+            ...client,
+            bonoSessionsRemaining: newRemaining,
+          };
+          const savedClient = await api.updateClient(updatedClient);
+          setClients(prev => prev.map(c => c.id === savedClient.id ? savedClient : c));
+          if (selectedClient?.id === client.id) setSelectedClient(savedClient);
+        }
+
+        setInvoices(prev => sortInvoicesByDate([created, ...prev.filter(i => i.id !== created.id)], false));
+      }
+
       setIsAddInvoiceOpen(false);
       setNewInvoiceBillingPlan('single');
       setNewInvoiceIncludeToday(true);
@@ -1377,46 +1418,11 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
         paymentDate: new Date().toISOString().split('T')[0],
         eventId: '',
       });
-
-      // Update client Bono status safely when purchasing a new pack
-      try {
-        if (newInvoiceBillingPlan === 'bono3' || newInvoiceBillingPlan === 'bono5') {
-          const totalSessions = newInvoiceBillingPlan === 'bono3' ? 3 : 5;
-          const remaining = newInvoiceIncludeToday ? totalSessions - 1 : totalSessions;
-          const bonoTitle = newInvoiceBillingPlan === 'bono3' ? 'Bono 3 séances' : 'Bono 5 séances';
-          const updatedClient: Client = {
-            ...client,
-            hasBono: true,
-            bonoType: bonoTitle,
-            bonoSessionsRemaining: remaining,
-          };
-          const savedClient = await api.updateClient(updatedClient);
-          setClients(prev => prev.map(c => c.id === savedClient.id ? savedClient : c));
-          if (selectedClient?.id === client.id) {
-            setSelectedClient(savedClient);
-          }
-        } else if (newInvoiceBillingPlan === 'deduct_bono' && client.hasBono) {
-          const currentRem = client.bonoSessionsRemaining ?? 1;
-          const newRemaining = Math.max(0, currentRem - 1);
-          const updatedClient: Client = {
-            ...client,
-            bonoSessionsRemaining: newRemaining,
-          };
-          const savedClient = await api.updateClient(updatedClient);
-          setClients(prev => prev.map(c => c.id === savedClient.id ? savedClient : c));
-          if (selectedClient?.id === client.id) {
-            setSelectedClient(savedClient);
-          }
-        }
-      } catch (bonoErr) {
-        console.warn('Could not update client bono session count alongside invoice:', bonoErr);
-      }
     } catch (err) {
       console.error('Failed to create invoice:', err);
     }
   };
 
-  // Create inline invoice from notes history
   // Create inline invoice from notes history
   const handleCreateInlineInvoice = async (note: ClientNote) => {
     if (!selectedClient) return;
@@ -1429,6 +1435,19 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
       let finalDiscount = Number(inlineInvoiceDiscountAmount);
       let finalDiscType = inlineInvoiceDiscountType;
       let finalDiscLabel = inlineInvoiceDiscountLabel;
+      let finalPaymentMethod = inlineInvoicePaymentMethod;
+      let isRedemption = false;
+
+      if (inlineBillingPlan === 'deduct_bono') {
+        finalAmount = 0;
+        finalOriginal = 60;
+        finalDiscount = 60;
+        finalDiscType = 'bono';
+        finalDiscLabel = `Décompté sur ${selectedClient.bonoType || 'Bono'}`;
+        finalDescription = `Séance décomptée du Bono (${selectedClient.bonoType || 'Bono'})`;
+        finalPaymentMethod = 'not_applicable';
+        isRedemption = true;
+      }
 
       const isDiscounted = finalDiscount > 0;
       const created = await api.createInvoice({
@@ -1440,14 +1459,31 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
         discountType: isDiscounted && finalDiscType !== 'none' ? finalDiscType : undefined,
         discountLabel: isDiscounted ? finalDiscLabel : undefined,
         status: inlineInvoiceStatus,
-        paymentMethod: inlineInvoicePaymentMethod,
+        paymentMethod: finalPaymentMethod,
         date: noteDateStr,
         paymentDate: inlineInvoiceStatus === 'paid' ? noteDateStr : undefined,
         description: normalizeInvoiceDescription(finalDescription),
         language: 'es',
         quantity: 1,
         noteId: note.id,
+        eventId: note.eventId || undefined,
+        isBonoRedemption: isRedemption,
       });
+
+      if (inlineBillingPlan === 'deduct_bono' && selectedClient.hasBono) {
+        const curRem = selectedClient.bonoSessionsRemaining ?? 1;
+        const newRem = Math.max(0, curRem - 1);
+        const updatedClient = await api.updateClient({
+          ...selectedClient,
+          bonoSessionsRemaining: newRem,
+        });
+        setClients(prev => prev.map(c => c.id === updatedClient.id ? updatedClient : c));
+        setSelectedClient(updatedClient);
+
+        // Update note state
+        setClientNotes(prev => prev.map(n => n.id === note.id ? { ...n, isBonoRedeemed: true } : n));
+        setAllNotes(prev => prev.map(n => n.id === note.id ? { ...n, isBonoRedeemed: true } : n));
+      }
 
       setInvoices(prev => sortInvoicesByDate([created, ...prev.filter(i => i.id !== created.id)], false));
       setCreatingInvoiceForNoteId(null);
@@ -3349,35 +3385,66 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                   year: 'numeric'
                                 });
                                 const timeStr = `${evDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} - ${new Date(ev.end).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
-                                const evDateStr = ev.start ? ev.start.split('T')[0] : '';
+                                const getLocalDateStr = (dStr?: string) => {
+                                  if (!dStr) return '';
+                                  try {
+                                    const d = new Date(dStr);
+                                    if (isNaN(d.getTime())) return dStr.split('T')[0] || '';
+                                    const pad = (n: number) => n < 10 ? '0' + n : String(n);
+                                    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+                                  } catch {
+                                    return dStr.split('T')[0] || '';
+                                  }
+                                };
+                                const evDateStr = getLocalDateStr(ev.start);
 
-                                // 1. Associated clinical notes (strictly by eventId)
-                                const associatedNotes = clientNotes.filter(n => {
-                                  return Boolean(n.eventId && n.eventId === ev.id);
-                                });
+                                // 1. Associated clinical notes (by eventId with date fallback)
+                                let associatedNotes = clientNotes.filter(n => Boolean(n.eventId && n.eventId === ev.id));
+                                if (associatedNotes.length === 0) {
+                                  associatedNotes = clientNotes.filter(n => {
+                                    const nDateStr = getLocalDateStr(n.date);
+                                    return nDateStr === evDateStr;
+                                  });
+                                }
                                 const hasNote = associatedNotes.length > 0;
                                 const firstNote = associatedNotes[0];
 
-                                // 2. Associated invoices / payments (strictly by eventId or noteId)
+                                // 2. Associated invoices / payments
                                 const associatedInvoices = invoices.filter(inv => {
                                   if (inv.eventId && inv.eventId === ev.id) return true;
                                   if (inv.noteId && inv.noteId === ev.id) return true;
                                   if (inv.noteId && associatedNotes.some(n => n.id === inv.noteId)) return true;
+                                  const isSameClient = inv.clientId === (ev.clientId || selectedClient?.id) || (
+                                    selectedClient && inv.clientName && selectedClient.name &&
+                                    inv.clientName.trim().toLowerCase() === selectedClient.name.trim().toLowerCase()
+                                  );
+                                  if (isSameClient) {
+                                    const invDateStr = getLocalDateStr(inv.date);
+                                    const invPayDateStr = getLocalDateStr(inv.paymentDate);
+                                    if (invDateStr === evDateStr || invPayDateStr === evDateStr) {
+                                      if (inv.amount >= 160 || (inv.description && inv.description.toLowerCase().includes('forfait'))) {
+                                        return false;
+                                      }
+                                      return true;
+                                    }
+                                  }
                                   return false;
                                 });
+
                                 const bonoInvoice = associatedInvoices.find(inv => 
-                                  inv.amount === 0 && (inv.isBonoRedemption || inv.discountType === 'bono' || inv.status === 'paid')
+                                  inv.amount === 0 || inv.isBonoRedemption || inv.discountType === 'bono' || (inv.description && inv.description.toLowerCase().includes('décomptée'))
                                 );
-                                const standardPaidInvoice = associatedInvoices.find(inv => inv.status === 'paid' && inv.amount > 0);
-                                const paidInvoice = standardPaidInvoice;
-                                const pendingInvoice = associatedInvoices.find(inv => inv.status === 'pending');
+
                                 const isBonoRedeemed = Boolean(
-                                  !standardPaidInvoice && (
-                                    bonoInvoice ||
-                                    associatedNotes.some(n => n.isBonoRedeemed) || 
-                                    (selectedClient?.bonoRedeemedDates && selectedClient.bonoRedeemedDates.includes(evDateStr))
-                                  )
+                                  bonoInvoice ||
+                                  associatedNotes.some(n => n.isBonoRedeemed) || 
+                                  (selectedClient?.bonoRedeemedDates && selectedClient.bonoRedeemedDates.includes(evDateStr))
                                 );
+
+                                const standardPaidInvoice = associatedInvoices.find(inv => inv.status === 'paid' && inv.amount > 0 && !inv.isBonoRedemption && inv.discountType !== 'bono');
+
+                                const paidInvoice = isBonoRedeemed ? undefined : standardPaidInvoice;
+                                const pendingInvoice = isBonoRedeemed ? undefined : associatedInvoices.find(inv => inv.status === 'pending');
                                 const isPaymentSettled = Boolean(paidInvoice || isBonoRedeemed);
                                 const isComplete = Boolean(hasNote && isPaymentSettled);
 
@@ -4089,7 +4156,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                 (selectedClient?.bonoRedeemedDates && selectedClient.bonoRedeemedDates.includes(noteDateOnly))
                               );
 
-                              return associatedInvoice && associatedInvoice.amount > 0 ? (
+                              return associatedInvoice && associatedInvoice.amount > 0 && !isNoteBonoRedeemed ? (
                                 <div className="mt-4 pt-4 border-t border-black/5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-stone-50 p-3.5 rounded-2xl border border-black/5">
                                   <div className="flex items-center gap-2.5">
                                     <CreditCard size={15} className="text-primary shrink-0" />

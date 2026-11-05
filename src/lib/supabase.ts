@@ -224,26 +224,35 @@ export function normalizeInvoiceDescription(desc?: string): string {
 }
 
 export function mapInvoiceFromDB(i: any): Invoice {
+  const isRedemption = Boolean(
+    i.isBonoRedemption ||
+    i.is_bono_redemption ||
+    Number(i.amount) === 0 ||
+    i.discountType === 'bono' ||
+    i.discount_type === 'bono' ||
+    (i.description && (i.description.toLowerCase().includes('décomptée') || i.description.toLowerCase().includes('decomptée')))
+  );
+
   return {
     id: String(i.id),
-    invoiceNumber: i.invoiceNumber || i.invoice_number || i.invoicenumber || `FAC-${i.id}`,
+    invoiceNumber: isRedemption ? (i.invoiceNumber || i.invoice_number || '') : (i.invoiceNumber || i.invoice_number || i.invoicenumber || `FAC-${i.id}`),
     clientId: String(i.clientId || i.client_id || i.clientid || ''),
     clientName: i.clientName || i.client_name || i.clientname || '',
     date: i.date || new Date().toISOString().split('T')[0],
     paymentDate: i.paymentDate || i.payment_date || i.paymentdate || undefined,
-    amount: Number(i.amount) || 0,
-    originalAmount: i.originalAmount !== undefined ? Number(i.originalAmount) : (i.original_amount !== undefined ? Number(i.original_amount) : (Number(i.amount) || 0)),
-    discountAmount: i.discountAmount !== undefined ? Number(i.discountAmount) : (i.discount_amount !== undefined ? Number(i.discount_amount) : undefined),
-    discountType: i.discountType || i.discount_type || undefined,
-    discountLabel: i.discountLabel || i.discount_label || undefined,
+    amount: isRedemption ? 0 : (Number(i.amount) || 0),
+    originalAmount: i.originalAmount !== undefined ? Number(i.originalAmount) : (i.original_amount !== undefined ? Number(i.original_amount) : (isRedemption ? 60 : (Number(i.amount) || 0))),
+    discountAmount: isRedemption ? 60 : (i.discountAmount !== undefined ? Number(i.discountAmount) : (i.discount_amount !== undefined ? Number(i.discount_amount) : undefined)),
+    discountType: isRedemption ? 'bono' : (i.discountType || i.discount_type || undefined),
+    discountLabel: i.discountLabel || i.discount_label || (isRedemption ? 'Décompté sur Bono' : undefined),
     status: i.status || 'paid',
-    paymentMethod: i.paymentMethod || i.payment_method || i.paymentmethod || 'card',
+    paymentMethod: isRedemption ? 'not_applicable' : (i.paymentMethod || i.payment_method || i.paymentmethod || 'card'),
     description: normalizeInvoiceDescription(i.description),
     language: 'es',
     quantity: Number(i.quantity) || 1,
     noteId: i.noteId || i.note_id || undefined,
     eventId: i.eventId || i.event_id || i.noteId || i.note_id || undefined,
-    isBonoRedemption: Boolean(i.isBonoRedemption || i.is_bono_redemption || false),
+    isBonoRedemption: isRedemption,
   };
 }
 
@@ -1746,13 +1755,17 @@ export const api = {
   },
 
   async createInvoice(invoice: Omit<Invoice, 'id' | 'invoiceNumber'> & { id?: string; invoiceNumber?: string }): Promise<Invoice> {
-    const nextInvoiceNum = invoice.invoiceNumber || await this.getNextInvoiceNumber();
+    const isRedemption = Boolean(invoice.isBonoRedemption || invoice.amount === 0 || invoice.discountType === 'bono');
+    const nextInvoiceNum = isRedemption ? (invoice.invoiceNumber || '') : (invoice.invoiceNumber || await this.getNextInvoiceNumber());
     const invoiceId = invoice.id || crypto.randomUUID();
 
     const newInvoice: Invoice = {
       ...invoice,
       id: invoiceId,
       invoiceNumber: nextInvoiceNum,
+      isBonoRedemption: isRedemption,
+      amount: isRedemption ? 0 : invoice.amount,
+      paymentMethod: isRedemption ? 'not_applicable' : invoice.paymentMethod,
     };
 
     // Save locally immediately to guarantee persistence
