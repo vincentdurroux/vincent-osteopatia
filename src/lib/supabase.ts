@@ -1110,22 +1110,56 @@ export const api = {
   async getClients(): Promise<Client[]> {
     if (isSupabaseConfigured && supabase) {
       try {
-        const { data, error } = await supabase.from('clients').select('*');
-        if (!error && data) {
-          const remoteClients = data.map(row => mapClientFromDB(row));
-          const activeRemoteClients = remoteClients.filter(c => !isDeletedTombstone('clients', c.id, c.name));
-          
-          // Clean up any deleted client that still lingers in Supabase in the background
-          const deletedRemotes = remoteClients.filter(c => isDeletedTombstone('clients', c.id, c.name));
-          for (const d of deletedRemotes) {
-            supabase.from('clients').delete().eq('id', d.id).then(() => {});
-          }
+        const [clientsRes, invoicesRes, notesRes] = await Promise.all([
+          supabase.from('clients').select('*'),
+          supabase.from('invoices').select('*'),
+          supabase.from('client_notes').select('*'),
+        ]);
 
-          return activeRemoteClients.sort((a, b) => a.name.localeCompare(b.name));
-        }
-        if (error) {
-          console.warn('Supabase clients fetch failed:', error.message);
-        }
+        const clientsData = clientsRes.data || [];
+        const invoicesData = invoicesRes.data || [];
+        const notesData = notesRes.data || [];
+
+        const allInvoices = invoicesData.map(mapInvoiceFromDB);
+        const allNotes = notesData.map(mapNoteFromDB);
+
+        const remoteClients = clientsData.map(row => {
+          const client = mapClientFromDB(row);
+          
+          const clientInvoices = allInvoices.filter(i => 
+            (i.clientId === client.id || (i.clientName && client.name && i.clientName.trim().toLowerCase() === client.name.trim().toLowerCase())) &&
+            i.amount === 0 && (i.isBonoRedemption || i.discountType === 'bono')
+          );
+          const clientNotesList = allNotes.filter(n => 
+            n.clientId === client.id && n.isBonoRedeemed
+          );
+
+          const datesSet = new Set<string>();
+          clientInvoices.forEach(i => {
+            if (i.date) datesSet.add(i.date.split('T')[0]);
+          });
+          clientNotesList.forEach(n => {
+            if (n.date) datesSet.add(n.date.split('T')[0]);
+          });
+          client.bonoRedeemedDates?.forEach(d => {
+            if (d) datesSet.add(d);
+          });
+
+          const bonoRedeemedDates = Array.from(datesSet);
+          const totalSessions = (client.bonoType?.includes('3') || client.bonoType?.includes('160')) ? 3 : 5;
+          const bonoSessionsRemaining = client.hasBono 
+            ? Math.max(0, totalSessions - bonoRedeemedDates.length)
+            : (client.bonoSessionsRemaining ?? 0);
+
+          return {
+            ...client,
+            bonoRedeemedDates,
+            bonoSessionsRemaining,
+          };
+        });
+
+        const activeRemoteClients = remoteClients.filter(c => !isDeletedTombstone('clients', c.id, c.name));
+        return activeRemoteClients.sort((a, b) => a.name.localeCompare(b.name));
       } catch (err: any) {
         console.warn('Supabase clients fetch exception:', err);
       }
@@ -1441,6 +1475,11 @@ export const api = {
           profile_note: normalizedClient.profileNote || null,
           profileNote: normalizedClient.profileNote || null,
         };
+
+        cleanPayload.bono_redeemed_dates = normalizedClient.bonoRedeemedDates || [];
+        cleanPayload.bonoRedeemedDates = normalizedClient.bonoRedeemedDates || [];
+        fallbackPayload.bono_redeemed_dates = normalizedClient.bonoRedeemedDates || [];
+        fallbackPayload.bonoRedeemedDates = normalizedClient.bonoRedeemedDates || [];
 
         const result = await executeResilientUpdate('clients', normalizedClient.id, [cleanPayload, fallbackPayload]);
 
