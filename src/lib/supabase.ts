@@ -166,6 +166,23 @@ export function mapClientFromDB(c: any): Client {
     finalName = 'Patient sans nom';
   }
 
+  // Determine remaining sessions reliably from either column, preferring positive counts
+  const remSnake = (c.bono_sessions_remaining !== null && c.bono_sessions_remaining !== undefined) ? Number(c.bono_sessions_remaining) : undefined;
+  const remCamel = (c.bonoSessionsRemaining !== null && c.bonoSessionsRemaining !== undefined) ? Number(c.bonoSessionsRemaining) : undefined;
+  let remainingSessions: number | undefined = undefined;
+  if (remSnake !== undefined && remSnake > 0) {
+    remainingSessions = remSnake;
+  } else if (remCamel !== undefined && remCamel > 0) {
+    remainingSessions = remCamel;
+  } else if (remSnake !== undefined) {
+    remainingSessions = remSnake;
+  } else if (remCamel !== undefined) {
+    remainingSessions = remCamel;
+  }
+
+  const hasBono = Boolean(c.hasBono || c.has_bono || (remainingSessions !== undefined && remainingSessions > 0));
+  const bonoType = (c.bonoType || c.bono_type || (hasBono ? 'Bono' : '')).trim();
+
   return {
     id: String(c.id),
     firstName: firstName || '',
@@ -178,16 +195,24 @@ export function mapClientFromDB(c: any): Client {
     address: c.address || c.adresse || '',
     createdAt: c.createdAt || c.created_at || new Date().toISOString(),
     lastSessionAt: c.lastSessionAt || c.last_session_at,
-    hasBono: Boolean(c.hasBono || c.has_bono),
-    bonoType: c.bonoType || c.bono_type || '',
+    hasBono,
+    bonoType,
     defaultDiscount: c.defaultDiscount !== undefined ? Number(c.defaultDiscount) : (c.default_discount !== undefined ? Number(c.default_discount) : undefined),
-    bonoSessionsRemaining: c.bonoSessionsRemaining !== undefined ? Number(c.bonoSessionsRemaining) : (c.bono_sessions_remaining !== undefined ? Number(c.bono_sessions_remaining) : undefined),
+    bonoSessionsRemaining: remainingSessions,
     profileNote: c.profileNote || c.profile_note || c.remarque || c.note || '',
     bonoRedeemedDates: Array.isArray(c.bonoRedeemedDates || c.bono_redeemed_dates) ? (c.bonoRedeemedDates || c.bono_redeemed_dates) : [],
   };
 }
 
 export function mapNoteFromDB(n: any): ClientNote {
+  const isRedeemed = Boolean(
+    n.isBonoRedeemed || 
+    n.is_bono_redeemed || 
+    n.bonoRedeemed ||
+    n.category === 'treatment_bono' ||
+    (typeof n.category === 'string' && n.category.includes('bono'))
+  );
+
   return {
     id: String(n.id),
     clientId: String(n.clientId || n.client_id || n.clientid || ''),
@@ -198,7 +223,7 @@ export function mapNoteFromDB(n: any): ClientNote {
     content: n.content || `Anamnèse :\n${n.anamnese || ''}\n\nTraitement :\n${n.treatment || ''}`,
     category: n.category || 'treatment',
     eventId: n.eventId || n.event_id || undefined,
-    isBonoRedeemed: Boolean(n.isBonoRedeemed || n.is_bono_redeemed || n.bonoRedeemed),
+    isBonoRedeemed: isRedeemed,
     bonoType: n.bonoType || n.bono_type || undefined,
   };
 }
@@ -223,15 +248,29 @@ export function normalizeInvoiceDescription(desc?: string): string {
 }
 
 export function mapInvoiceFromDB(i: any): Invoice {
+  const isBonoRedeem = Boolean(
+    i.isBonoRedemption || 
+    i.is_bono_redemption || 
+    i.discountType === 'bono' || 
+    i.discount_type === 'bono' || 
+    (Number(i.amount) === 0 && (
+      (typeof i.discount_label === 'string' && i.discount_label.toLowerCase().includes('bono')) || 
+      (typeof i.discountLabel === 'string' && i.discountLabel.toLowerCase().includes('bono')) ||
+      (typeof i.description === 'string' && i.description.toLowerCase().includes('bono')) ||
+      i.invoiceNumber === '' ||
+      i.invoice_number === ''
+    ))
+  );
+
   return {
     id: String(i.id),
-    invoiceNumber: i.invoiceNumber || i.invoice_number || i.invoicenumber || `FAC-${i.id}`,
+    invoiceNumber: i.invoiceNumber || i.invoice_number || i.invoicenumber || (isBonoRedeem ? '' : `FAC-${i.id}`),
     clientId: String(i.clientId || i.client_id || i.clientid || ''),
     clientName: i.clientName || i.client_name || i.clientname || '',
     date: i.date || new Date().toISOString().split('T')[0],
     paymentDate: i.paymentDate || i.payment_date || i.paymentdate || undefined,
     amount: Number(i.amount) || 0,
-    originalAmount: i.originalAmount !== undefined ? Number(i.originalAmount) : (i.original_amount !== undefined ? Number(i.original_amount) : undefined),
+    originalAmount: i.originalAmount !== undefined ? Number(i.originalAmount) : (i.original_amount !== undefined ? Number(i.original_amount) : (Number(i.amount) || 0)),
     discountAmount: i.discountAmount !== undefined ? Number(i.discountAmount) : (i.discount_amount !== undefined ? Number(i.discount_amount) : undefined),
     discountType: i.discountType || i.discount_type || undefined,
     discountLabel: i.discountLabel || i.discount_label || undefined,
@@ -242,7 +281,7 @@ export function mapInvoiceFromDB(i: any): Invoice {
     quantity: Number(i.quantity) || 1,
     noteId: i.noteId || i.note_id || undefined,
     eventId: i.eventId || i.event_id || i.noteId || i.note_id || undefined,
-    isBonoRedemption: Boolean(i.isBonoRedemption || i.is_bono_redemption),
+    isBonoRedemption: isBonoRedeem,
   };
 }
 
@@ -1078,20 +1117,12 @@ export const api = {
                 mapped.firstName = mapped.firstName || local.firstName;
                 mapped.lastName = mapped.lastName || local.lastName;
               }
-              // If local has active Bono with remaining sessions, preserve it if remote has 0 or undefined
-              if (local.hasBono && typeof local.bonoSessionsRemaining === 'number' && local.bonoSessionsRemaining > 0) {
-                if (!mapped.hasBono || mapped.bonoSessionsRemaining === undefined || mapped.bonoSessionsRemaining === 0) {
-                  mapped.hasBono = true;
-                  mapped.bonoType = mapped.bonoType || local.bonoType || 'Bono';
-                  mapped.bonoSessionsRemaining = local.bonoSessionsRemaining;
-                }
-              }
               // Preserve profile note if local has it and remote is blank
               if (local.profileNote && !mapped.profileNote) {
                 mapped.profileNote = local.profileNote;
               }
-              // Preserve bonoRedeemedDates
-              if (local.bonoRedeemedDates && local.bonoRedeemedDates.length > 0) {
+              // Preserve bonoRedeemedDates if remote doesn't have it
+              if (local.bonoRedeemedDates && local.bonoRedeemedDates.length > 0 && (!mapped.bonoRedeemedDates || mapped.bonoRedeemedDates.length === 0)) {
                 mapped.bonoRedeemedDates = local.bonoRedeemedDates;
               }
             }
@@ -1147,20 +1178,27 @@ export const api = {
 
     if (isSupabaseConfigured && supabase) {
       try {
-        // Clean matching payload for Supabase schema
+        // Clean matching payload for Supabase schema with both naming styles
         const cleanPayload: Record<string, any> = {
           id: newClient.id,
           firstName: newClient.firstName,
+          first_name: newClient.firstName,
           lastName: newClient.lastName,
+          last_name: newClient.lastName,
+          name: fullName,
           email: newClient.email || '',
           phone: newClient.phone || '',
           address: newClient.address || '',
           has_bono: Boolean(newClient.hasBono),
+          hasBono: Boolean(newClient.hasBono),
           bono_type: newClient.bonoType || null,
+          bonoType: newClient.bonoType || null,
           default_discount: newClient.defaultDiscount ?? 0,
           defaultDiscount: newClient.defaultDiscount ?? 0,
           bono_sessions_remaining: newClient.bonoSessionsRemaining ?? 0,
+          bonoSessionsRemaining: newClient.bonoSessionsRemaining ?? 0,
           profile_note: newClient.profileNote || null,
+          profileNote: newClient.profileNote || null,
           createdAt: newClient.createdAt,
           created_at: newClient.createdAt,
         };
@@ -1182,6 +1220,14 @@ export const api = {
           email: newClient.email || '',
           phone: newClient.phone || '',
           address: newClient.address || '',
+          has_bono: Boolean(newClient.hasBono),
+          hasBono: Boolean(newClient.hasBono),
+          bono_type: newClient.bonoType || null,
+          bonoType: newClient.bonoType || null,
+          bono_sessions_remaining: newClient.bonoSessionsRemaining ?? 0,
+          bonoSessionsRemaining: newClient.bonoSessionsRemaining ?? 0,
+          profile_note: newClient.profileNote || null,
+          profileNote: newClient.profileNote || null,
           created_at: newClient.createdAt,
         };
 
@@ -1189,9 +1235,16 @@ export const api = {
           id: newClient.id,
           firstName: newClient.firstName,
           lastName: newClient.lastName,
+          name: fullName,
           email: newClient.email || '',
           phone: newClient.phone || '',
           address: newClient.address || '',
+          has_bono: Boolean(newClient.hasBono),
+          hasBono: Boolean(newClient.hasBono),
+          bono_type: newClient.bonoType || null,
+          bonoType: newClient.bonoType || null,
+          bono_sessions_remaining: newClient.bonoSessionsRemaining ?? 0,
+          bonoSessionsRemaining: newClient.bonoSessionsRemaining ?? 0,
           createdAt: newClient.createdAt,
           created_at: newClient.createdAt,
         };
@@ -1367,16 +1420,23 @@ export const api = {
       try {
         const cleanPayload: Record<string, any> = {
           firstName: normalizedClient.firstName,
+          first_name: normalizedClient.firstName,
           lastName: normalizedClient.lastName,
+          last_name: normalizedClient.lastName,
+          name: fullName,
           email: normalizedClient.email || '',
           phone: normalizedClient.phone || '',
           address: normalizedClient.address || '',
           has_bono: Boolean(normalizedClient.hasBono),
+          hasBono: Boolean(normalizedClient.hasBono),
           bono_type: normalizedClient.bonoType || null,
+          bonoType: normalizedClient.bonoType || null,
           default_discount: normalizedClient.defaultDiscount ?? 0,
           defaultDiscount: normalizedClient.defaultDiscount ?? 0,
           bono_sessions_remaining: normalizedClient.bonoSessionsRemaining ?? 0,
+          bonoSessionsRemaining: normalizedClient.bonoSessionsRemaining ?? 0,
           profile_note: normalizedClient.profileNote || null,
+          profileNote: normalizedClient.profileNote || null,
         };
         if (normalizedClient.dni !== undefined) cleanPayload.dni = normalizedClient.dni;
         if (normalizedClient.birthDate) {
@@ -1391,13 +1451,20 @@ export const api = {
         const fallbackPayload: Record<string, any> = {
           name: normalizedClient.name,
           first_name: normalizedClient.firstName,
+          firstName: normalizedClient.firstName,
           last_name: normalizedClient.lastName,
+          lastName: normalizedClient.lastName,
           email: normalizedClient.email || '',
           phone: normalizedClient.phone || '',
           address: normalizedClient.address || '',
           has_bono: Boolean(normalizedClient.hasBono),
+          hasBono: Boolean(normalizedClient.hasBono),
           bono_type: normalizedClient.bonoType || null,
+          bonoType: normalizedClient.bonoType || null,
           bono_sessions_remaining: normalizedClient.bonoSessionsRemaining ?? 0,
+          bonoSessionsRemaining: normalizedClient.bonoSessionsRemaining ?? 0,
+          profile_note: normalizedClient.profileNote || null,
+          profileNote: normalizedClient.profileNote || null,
         };
 
         const result = await executeResilientUpdate('clients', normalizedClient.id, [cleanPayload, fallbackPayload]);
@@ -1575,6 +1642,7 @@ export const api = {
 
     if (isSupabaseConfigured && supabase) {
       try {
+        const effectiveCategory = (newNote.isBonoRedeemed && (!newNote.category || newNote.category === 'treatment')) ? 'treatment_bono' : (newNote.category || 'treatment');
         const snakePayload: Record<string, any> = {
           id: newNote.id,
           client_id: newNote.clientId,
@@ -1583,7 +1651,7 @@ export const api = {
           anamnese: newNote.anamnese || '',
           treatment: newNote.treatment || '',
           content: newNote.content || '',
-          category: newNote.category || 'treatment',
+          category: effectiveCategory,
         };
         if (newNote.eventId) {
           snakePayload.event_id = newNote.eventId;
@@ -1597,14 +1665,14 @@ export const api = {
           anamnese: newNote.anamnese || '',
           treatment: newNote.treatment || '',
           content: newNote.content || '',
-          category: newNote.category || 'treatment',
+          category: effectiveCategory,
         };
         if (newNote.eventId) {
           camelPayload.eventId = newNote.eventId;
         }
         if (newNote.isBonoRedeemed !== undefined) {
-          snakePayload.is_bono_redeemed = newNote.isBonoRedeemed;
-          camelPayload.isBonoRedeemed = newNote.isBonoRedeemed;
+          snakePayload.is_bono_redeemed = Boolean(newNote.isBonoRedeemed);
+          camelPayload.isBonoRedeemed = Boolean(newNote.isBonoRedeemed);
         }
         if (newNote.bonoType) {
           snakePayload.bono_type = newNote.bonoType;
@@ -1654,17 +1722,18 @@ export const api = {
   async updateClientNote(note: ClientNote): Promise<ClientNote> {
     if (isSupabaseConfigured && supabase) {
       try {
+        const effectiveCategory = (note.isBonoRedeemed && (!note.category || note.category === 'treatment')) ? 'treatment_bono' : (note.category || 'treatment');
         const payload: Record<string, any> = {
           date: note.date,
           motif: note.motif || '',
           anamnese: note.anamnese || '',
           treatment: note.treatment || '',
           content: note.content || '',
-          category: note.category || 'treatment',
-          is_bono_redeemed: note.isBonoRedeemed,
-          isBonoRedeemed: note.isBonoRedeemed,
-          bono_type: note.bonoType,
-          bonoType: note.bonoType,
+          category: effectiveCategory,
+          is_bono_redeemed: Boolean(note.isBonoRedeemed),
+          isBonoRedeemed: Boolean(note.isBonoRedeemed),
+          bono_type: note.bonoType || null,
+          bonoType: note.bonoType || null,
         };
 
         const result = await executeResilientUpdate('client_notes', note.id, [payload]);

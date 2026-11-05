@@ -3411,10 +3411,19 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                   }
                                   return false;
                                 });
-                                const paidInvoice = associatedInvoices.find(inv => inv.status === 'paid');
+                                const bonoInvoice = associatedInvoices.find(inv => 
+                                  inv.isBonoRedemption || 
+                                  inv.discountType === 'bono' || 
+                                  (inv.amount === 0 && inv.status === 'paid')
+                                );
+                                const standardPaidInvoice = associatedInvoices.find(inv => inv.status === 'paid' && inv.amount > 0 && !inv.isBonoRedemption && inv.discountType !== 'bono');
+                                const paidInvoice = standardPaidInvoice;
                                 const pendingInvoice = associatedInvoices.find(inv => inv.status === 'pending');
-                                const isBonoRedeemed = associatedNotes.some(n => n.isBonoRedeemed) || 
-                                  Boolean(selectedClient?.bonoRedeemedDates && selectedClient.bonoRedeemedDates.includes(evDateStr));
+                                const isBonoRedeemed = Boolean(
+                                  bonoInvoice ||
+                                  associatedNotes.some(n => n.isBonoRedeemed) || 
+                                  (selectedClient?.bonoRedeemedDates && selectedClient.bonoRedeemedDates.includes(evDateStr))
+                                );
 
                                 return (
                                   <div 
@@ -3479,19 +3488,16 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                           ) : null}
 
                                           {/* Payment Status Notification Badge */}
-                                          {paidInvoice ? (
+                                          {isBonoRedeemed ? (
+                                            <span 
+                                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 shadow-2xs"
+                                              title={lang === 'fr' ? "Séance décomptée du Bono - Réglé" : "Session redeemed from Bono - Settled"}
+                                            >
+                                              <Sparkles size={11} className="text-emerald-700" />
+                                              <span>{translations[lang].admin.billing.bonoRedemptionLabel} (✓ {lang === 'fr' ? 'Réglé' : lang === 'es' ? 'Pagado' : 'Settled'})</span>
+                                            </span>
+                                          ) : paidInvoice ? (
                                             (() => {
-                                              if (paidInvoice.isBonoRedemption) {
-                                                return (
-                                                  <span 
-                                                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300"
-                                                    title={lang === 'fr' ? "Séance décomptée du Bono" : "Session redeemed from Bono"}
-                                                  >
-                                                    <Sparkles size={11} className="text-emerald-700" />
-                                                    <span>{translations[lang].admin.billing.bonoRedemptionLabel}</span>
-                                                  </span>
-                                                );
-                                              }
                                               const methodLabel = paidInvoice.discountType === 'bono'
                                                 ? 'Bono'
                                                 : paidInvoice.paymentMethod === 'card'
@@ -3511,15 +3517,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                                 </button>
                                               );
                                             })()
-                                          ) : isBonoRedeemed ? (
-                                              <span 
-                                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 shadow-2xs"
-                                                title={lang === 'fr' ? "Séance décomptée du Bono - Réglé" : "Session redeemed from Bono - Settled"}
-                                              >
-                                                <Sparkles size={11} className="text-emerald-700" />
-                                                <span>{translations[lang].admin.billing.bonoRedemptionLabel} (✓ {lang === 'fr' ? 'Réglé' : lang === 'es' ? 'Pagado' : 'Settled'})</span>
-                                              </span>
-                                            ) : pendingInvoice ? (
+                                          ) : pendingInvoice ? (
                                             <button
                                               type="button"
                                               onClick={() => setSelectedInvoiceForPrint(pendingInvoice)}
