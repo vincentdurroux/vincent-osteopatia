@@ -181,23 +181,6 @@ export function mapClientFromDB(c: any): Client {
     finalName = 'Patient sans nom';
   }
 
-  // Determine remaining sessions reliably from either column, preferring positive counts
-  const remSnake = (c.bono_sessions_remaining !== null && c.bono_sessions_remaining !== undefined) ? Number(c.bono_sessions_remaining) : undefined;
-  const remCamel = (c.bonoSessionsRemaining !== null && c.bonoSessionsRemaining !== undefined) ? Number(c.bonoSessionsRemaining) : undefined;
-  let remainingSessions: number | undefined = undefined;
-  if (remSnake !== undefined && remSnake > 0) {
-    remainingSessions = remSnake;
-  } else if (remCamel !== undefined && remCamel > 0) {
-    remainingSessions = remCamel;
-  } else if (remSnake !== undefined) {
-    remainingSessions = remSnake;
-  } else if (remCamel !== undefined) {
-    remainingSessions = remCamel;
-  }
-
-  const hasBono = Boolean(c.hasBono || c.has_bono || (remainingSessions !== undefined && remainingSessions > 0));
-  const bonoType = (c.bonoType || c.bono_type || (hasBono ? 'Bono' : '')).trim();
-
   return {
     id: String(c.id),
     firstName: firstName || '',
@@ -210,24 +193,16 @@ export function mapClientFromDB(c: any): Client {
     address: c.address || c.adresse || '',
     createdAt: c.createdAt || c.created_at || new Date().toISOString(),
     lastSessionAt: c.lastSessionAt || c.last_session_at,
-    hasBono,
-    bonoType,
     defaultDiscount: c.defaultDiscount !== undefined ? Number(c.defaultDiscount) : (c.default_discount !== undefined ? Number(c.default_discount) : undefined),
-    bonoSessionsRemaining: remainingSessions,
     profileNote: c.profileNote || c.profile_note || c.remarque || c.note || '',
-    bonoRedeemedDates: Array.isArray(c.bonoRedeemedDates || c.bono_redeemed_dates) ? (c.bonoRedeemedDates || c.bono_redeemed_dates) : [],
+    hasBono: Boolean(c.hasBono || c.has_bono || false),
+    bonoType: c.bonoType || c.bono_type || '',
+    bonoSessionsRemaining: c.bonoSessionsRemaining !== undefined ? Number(c.bonoSessionsRemaining) : (c.bono_sessions_remaining !== undefined ? Number(c.bono_sessions_remaining) : 0),
+    bonoRedeemedDates: c.bonoRedeemedDates || c.bono_redeemed_dates || [],
   };
 }
 
 export function mapNoteFromDB(n: any): ClientNote {
-  const isRedeemed = Boolean(
-    n.isBonoRedeemed || 
-    n.is_bono_redeemed || 
-    n.bonoRedeemed ||
-    n.category === 'treatment_bono' ||
-    (typeof n.category === 'string' && n.category.includes('bono'))
-  );
-
   return {
     id: String(n.id),
     clientId: String(n.clientId || n.client_id || n.clientid || ''),
@@ -238,49 +213,20 @@ export function mapNoteFromDB(n: any): ClientNote {
     content: n.content || `Anamnèse :\n${n.anamnese || ''}\n\nTraitement :\n${n.treatment || ''}`,
     category: n.category || 'treatment',
     eventId: n.eventId || n.event_id || undefined,
-    isBonoRedeemed: isRedeemed,
+    isBonoRedeemed: Boolean(n.isBonoRedeemed || n.is_bono_redeemed || false),
     bonoType: n.bonoType || n.bono_type || undefined,
   };
 }
 
 export function normalizeInvoiceDescription(desc?: string): string {
   if (!desc) return "Sesión de osteopatía";
-  const t = desc.trim().toLowerCase();
-
-  // Bono packages
-  if (t.includes('bono') && (t.includes('160') || t.includes('3 session') || t.includes('3 séance') || t.includes('3 sesion') || t.includes('3-session'))) {
-    return "Bono Osteopatía - 3 sesiones (160 €)";
-  }
-  if (t.includes('bono') && (t.includes('250') || t.includes('5 session') || t.includes('5 séance') || t.includes('5 sesion') || t.includes('5-session'))) {
-    return "Bono Osteopatía - 5 sesiones (250 €)";
-  }
-  if (t.includes('décompté') || t.includes('canjeada') || t.includes('redeemed') || t.includes('prise en compte')) {
-    return "Sesión de osteopatía";
-  }
-
-  // Any single osteopathy session
-  return "Sesión de osteopatía";
+  return desc;
 }
 
 export function mapInvoiceFromDB(i: any): Invoice {
-  const invAmount = Number(i.amount) || 0;
-  // A bono redemption session is strictly 0 € (deducted from prepaid bono balance).
-  // When a bono is purchased (amount > 0 e.g. 160 € or 250 €), it is a regular paid invoice!
-  const isBonoRedeem = invAmount === 0 && Boolean(
-    i.isBonoRedemption || 
-    i.is_bono_redemption || 
-    i.discountType === 'bono' || 
-    i.discount_type === 'bono' || 
-    (typeof i.discount_label === 'string' && i.discount_label.toLowerCase().includes('bono')) || 
-    (typeof i.discountLabel === 'string' && i.discountLabel.toLowerCase().includes('bono')) ||
-    (typeof i.description === 'string' && i.description.toLowerCase().includes('bono')) ||
-    i.invoiceNumber === '' ||
-    i.invoice_number === ''
-  );
-
   return {
     id: String(i.id),
-    invoiceNumber: i.invoiceNumber || i.invoice_number || i.invoicenumber || (isBonoRedeem ? '' : `FAC-${i.id}`),
+    invoiceNumber: i.invoiceNumber || i.invoice_number || i.invoicenumber || `FAC-${i.id}`,
     clientId: String(i.clientId || i.client_id || i.clientid || ''),
     clientName: i.clientName || i.client_name || i.clientname || '',
     date: i.date || new Date().toISOString().split('T')[0],
@@ -291,15 +237,13 @@ export function mapInvoiceFromDB(i: any): Invoice {
     discountType: i.discountType || i.discount_type || undefined,
     discountLabel: i.discountLabel || i.discount_label || undefined,
     status: i.status || 'paid',
-    paymentMethod: (isBonoRedeem || i.paymentMethod === 'not_applicable' || i.payment_method === 'not_applicable')
-      ? 'not_applicable'
-      : (i.paymentMethod || i.payment_method || i.paymentmethod || 'card'),
+    paymentMethod: i.paymentMethod || i.payment_method || i.paymentmethod || 'card',
     description: normalizeInvoiceDescription(i.description),
     language: 'es',
     quantity: Number(i.quantity) || 1,
     noteId: i.noteId || i.note_id || undefined,
     eventId: i.eventId || i.event_id || i.noteId || i.note_id || undefined,
-    isBonoRedemption: isBonoRedeem,
+    isBonoRedemption: Boolean(i.isBonoRedemption || i.is_bono_redemption || false),
   };
 }
 
@@ -765,10 +709,7 @@ CREATE TABLE IF NOT EXISTS public.clients (
     address TEXT,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     last_session_at TIMESTAMPTZ,
-    has_bono BOOLEAN DEFAULT FALSE,
-    bono_type TEXT,
     default_discount NUMERIC DEFAULT 0,
-    bono_sessions_remaining NUMERIC DEFAULT 0,
     profile_note TEXT
 );
 
@@ -783,11 +724,16 @@ BEGIN
     BEGIN ALTER TABLE public.clients ADD COLUMN address TEXT; EXCEPTION WHEN duplicate_column THEN END;
     BEGIN ALTER TABLE public.clients ADD COLUMN created_at TIMESTAMPTZ DEFAULT NOW(); EXCEPTION WHEN duplicate_column THEN END;
     BEGIN ALTER TABLE public.clients ADD COLUMN last_session_at TIMESTAMPTZ; EXCEPTION WHEN duplicate_column THEN END;
-    BEGIN ALTER TABLE public.clients ADD COLUMN has_bono BOOLEAN DEFAULT FALSE; EXCEPTION WHEN duplicate_column THEN END;
-    BEGIN ALTER TABLE public.clients ADD COLUMN bono_type TEXT; EXCEPTION WHEN duplicate_column THEN END;
     BEGIN ALTER TABLE public.clients ADD COLUMN default_discount NUMERIC DEFAULT 0; EXCEPTION WHEN duplicate_column THEN END;
-    BEGIN ALTER TABLE public.clients ADD COLUMN bono_sessions_remaining NUMERIC DEFAULT 0; EXCEPTION WHEN duplicate_column THEN END;
     BEGIN ALTER TABLE public.clients ADD COLUMN profile_note TEXT; EXCEPTION WHEN duplicate_column THEN END;
+    BEGIN ALTER TABLE public.clients ADD COLUMN has_bono BOOLEAN DEFAULT FALSE; EXCEPTION WHEN duplicate_column THEN END;
+    BEGIN ALTER TABLE public.clients ADD COLUMN "hasBono" BOOLEAN DEFAULT FALSE; EXCEPTION WHEN duplicate_column THEN END;
+    BEGIN ALTER TABLE public.clients ADD COLUMN bono_type TEXT; EXCEPTION WHEN duplicate_column THEN END;
+    BEGIN ALTER TABLE public.clients ADD COLUMN "bonoType" TEXT; EXCEPTION WHEN duplicate_column THEN END;
+    BEGIN ALTER TABLE public.clients ADD COLUMN bono_sessions_remaining INTEGER DEFAULT 0; EXCEPTION WHEN duplicate_column THEN END;
+    BEGIN ALTER TABLE public.clients ADD COLUMN "bonoSessionsRemaining" INTEGER DEFAULT 0; EXCEPTION WHEN duplicate_column THEN END;
+    BEGIN ALTER TABLE public.clients ADD COLUMN bono_redeemed_dates JSONB DEFAULT '[]'::jsonb; EXCEPTION WHEN duplicate_column THEN END;
+    BEGIN ALTER TABLE public.clients ADD COLUMN "bonoRedeemedDates" JSONB DEFAULT '[]'::jsonb; EXCEPTION WHEN duplicate_column THEN END;
 END $$;
 
 -- 2. TABLE DES NOTES CLINIQUES & DOSSIERS PATIENTS
@@ -1110,56 +1056,12 @@ export const api = {
   async getClients(): Promise<Client[]> {
     if (isSupabaseConfigured && supabase) {
       try {
-        const [clientsRes, invoicesRes, notesRes] = await Promise.all([
-          supabase.from('clients').select('*'),
-          supabase.from('invoices').select('*'),
-          supabase.from('client_notes').select('*'),
-        ]);
-
-        const clientsData = clientsRes.data || [];
-        const invoicesData = invoicesRes.data || [];
-        const notesData = notesRes.data || [];
-
-        const allInvoices = invoicesData.map(mapInvoiceFromDB);
-        const allNotes = notesData.map(mapNoteFromDB);
-
-        const remoteClients = clientsData.map(row => {
-          const client = mapClientFromDB(row);
-          
-          const clientInvoices = allInvoices.filter(i => 
-            (i.clientId === client.id || (i.clientName && client.name && i.clientName.trim().toLowerCase() === client.name.trim().toLowerCase())) &&
-            i.amount === 0 && (i.isBonoRedemption || i.discountType === 'bono')
-          );
-          const clientNotesList = allNotes.filter(n => 
-            n.clientId === client.id && n.isBonoRedeemed
-          );
-
-          const datesSet = new Set<string>();
-          clientInvoices.forEach(i => {
-            if (i.date) datesSet.add(i.date.split('T')[0]);
-          });
-          clientNotesList.forEach(n => {
-            if (n.date) datesSet.add(n.date.split('T')[0]);
-          });
-          client.bonoRedeemedDates?.forEach(d => {
-            if (d) datesSet.add(d);
-          });
-
-          const bonoRedeemedDates = Array.from(datesSet);
-          const totalSessions = (client.bonoType?.includes('3') || client.bonoType?.includes('160')) ? 3 : 5;
-          const bonoSessionsRemaining = client.hasBono 
-            ? Math.max(0, totalSessions - bonoRedeemedDates.length)
-            : (client.bonoSessionsRemaining ?? 0);
-
-          return {
-            ...client,
-            bonoRedeemedDates,
-            bonoSessionsRemaining,
-          };
-        });
-
-        const activeRemoteClients = remoteClients.filter(c => !isDeletedTombstone('clients', c.id, c.name));
-        return activeRemoteClients.sort((a, b) => a.name.localeCompare(b.name));
+        const { data, error } = await supabase.from('clients').select('*');
+        if (!error && data) {
+          const remoteClients = data.map(mapClientFromDB);
+          const activeRemoteClients = remoteClients.filter(c => !isDeletedTombstone('clients', c.id, c.name));
+          return activeRemoteClients.sort((a, b) => a.name.localeCompare(b.name));
+        }
       } catch (err: any) {
         console.warn('Supabase clients fetch exception:', err);
       }
@@ -1198,14 +1100,8 @@ export const api = {
           email: newClient.email || '',
           phone: newClient.phone || '',
           address: newClient.address || '',
-          has_bono: Boolean(newClient.hasBono),
-          hasBono: Boolean(newClient.hasBono),
-          bono_type: newClient.bonoType || null,
-          bonoType: newClient.bonoType || null,
           default_discount: newClient.defaultDiscount ?? 0,
           defaultDiscount: newClient.defaultDiscount ?? 0,
-          bono_sessions_remaining: newClient.bonoSessionsRemaining ?? 0,
-          bonoSessionsRemaining: newClient.bonoSessionsRemaining ?? 0,
           profile_note: newClient.profileNote || null,
           profileNote: newClient.profileNote || null,
           createdAt: newClient.createdAt,
@@ -1220,6 +1116,20 @@ export const api = {
           cleanPayload.lastSessionAt = newClient.lastSessionAt;
           cleanPayload.last_session_at = newClient.lastSessionAt;
         }
+        cleanPayload.has_bono = Boolean(newClient.hasBono);
+        cleanPayload.hasBono = Boolean(newClient.hasBono);
+        if (newClient.bonoType) {
+          cleanPayload.bono_type = newClient.bonoType;
+          cleanPayload.bonoType = newClient.bonoType;
+        }
+        if (newClient.bonoSessionsRemaining !== undefined) {
+          cleanPayload.bono_sessions_remaining = Number(newClient.bonoSessionsRemaining);
+          cleanPayload.bonoSessionsRemaining = Number(newClient.bonoSessionsRemaining);
+        }
+        if (newClient.bonoRedeemedDates) {
+          cleanPayload.bono_redeemed_dates = newClient.bonoRedeemedDates;
+          cleanPayload.bonoRedeemedDates = newClient.bonoRedeemedDates;
+        }
 
         const snakePayload: Record<string, any> = {
           id: newClient.id,
@@ -1229,12 +1139,8 @@ export const api = {
           email: newClient.email || '',
           phone: newClient.phone || '',
           address: newClient.address || '',
-          has_bono: Boolean(newClient.hasBono),
-          hasBono: Boolean(newClient.hasBono),
-          bono_type: newClient.bonoType || null,
-          bonoType: newClient.bonoType || null,
-          bono_sessions_remaining: newClient.bonoSessionsRemaining ?? 0,
-          bonoSessionsRemaining: newClient.bonoSessionsRemaining ?? 0,
+          default_discount: newClient.defaultDiscount ?? 0,
+          defaultDiscount: newClient.defaultDiscount ?? 0,
           profile_note: newClient.profileNote || null,
           profileNote: newClient.profileNote || null,
           created_at: newClient.createdAt,
@@ -1248,12 +1154,6 @@ export const api = {
           email: newClient.email || '',
           phone: newClient.phone || '',
           address: newClient.address || '',
-          has_bono: Boolean(newClient.hasBono),
-          hasBono: Boolean(newClient.hasBono),
-          bono_type: newClient.bonoType || null,
-          bonoType: newClient.bonoType || null,
-          bono_sessions_remaining: newClient.bonoSessionsRemaining ?? 0,
-          bonoSessionsRemaining: newClient.bonoSessionsRemaining ?? 0,
           createdAt: newClient.createdAt,
           created_at: newClient.createdAt,
         };
@@ -1274,9 +1174,6 @@ export const api = {
             name: fullName,
             firstName: cleanFirstName,
             lastName: cleanLastName,
-            hasBono: newClient.hasBono !== undefined ? newClient.hasBono : mapped.hasBono,
-            bonoType: newClient.bonoType || mapped.bonoType,
-            bonoSessionsRemaining: newClient.bonoSessionsRemaining !== undefined ? newClient.bonoSessionsRemaining : mapped.bonoSessionsRemaining,
             profileNote: newClient.profileNote || mapped.profileNote,
           };
           const fresh = loadLocal('clients', mockClients);
@@ -1436,14 +1333,8 @@ export const api = {
           email: normalizedClient.email || '',
           phone: normalizedClient.phone || '',
           address: normalizedClient.address || '',
-          has_bono: Boolean(normalizedClient.hasBono),
-          hasBono: Boolean(normalizedClient.hasBono),
-          bono_type: normalizedClient.bonoType || null,
-          bonoType: normalizedClient.bonoType || null,
           default_discount: normalizedClient.defaultDiscount ?? 0,
           defaultDiscount: normalizedClient.defaultDiscount ?? 0,
-          bono_sessions_remaining: normalizedClient.bonoSessionsRemaining ?? 0,
-          bonoSessionsRemaining: normalizedClient.bonoSessionsRemaining ?? 0,
           profile_note: normalizedClient.profileNote || null,
           profileNote: normalizedClient.profileNote || null,
         };
@@ -1456,6 +1347,20 @@ export const api = {
           cleanPayload.lastSessionAt = normalizedClient.lastSessionAt;
           cleanPayload.last_session_at = normalizedClient.lastSessionAt;
         }
+        cleanPayload.has_bono = Boolean(normalizedClient.hasBono);
+        cleanPayload.hasBono = Boolean(normalizedClient.hasBono);
+        if (normalizedClient.bonoType !== undefined) {
+          cleanPayload.bono_type = normalizedClient.bonoType;
+          cleanPayload.bonoType = normalizedClient.bonoType;
+        }
+        if (normalizedClient.bonoSessionsRemaining !== undefined) {
+          cleanPayload.bono_sessions_remaining = Number(normalizedClient.bonoSessionsRemaining);
+          cleanPayload.bonoSessionsRemaining = Number(normalizedClient.bonoSessionsRemaining);
+        }
+        if (normalizedClient.bonoRedeemedDates !== undefined) {
+          cleanPayload.bono_redeemed_dates = normalizedClient.bonoRedeemedDates;
+          cleanPayload.bonoRedeemedDates = normalizedClient.bonoRedeemedDates;
+        }
 
         const fallbackPayload: Record<string, any> = {
           name: normalizedClient.name,
@@ -1466,20 +1371,9 @@ export const api = {
           email: normalizedClient.email || '',
           phone: normalizedClient.phone || '',
           address: normalizedClient.address || '',
-          has_bono: Boolean(normalizedClient.hasBono),
-          hasBono: Boolean(normalizedClient.hasBono),
-          bono_type: normalizedClient.bonoType || null,
-          bonoType: normalizedClient.bonoType || null,
-          bono_sessions_remaining: normalizedClient.bonoSessionsRemaining ?? 0,
-          bonoSessionsRemaining: normalizedClient.bonoSessionsRemaining ?? 0,
           profile_note: normalizedClient.profileNote || null,
           profileNote: normalizedClient.profileNote || null,
         };
-
-        cleanPayload.bono_redeemed_dates = normalizedClient.bonoRedeemedDates || [];
-        cleanPayload.bonoRedeemedDates = normalizedClient.bonoRedeemedDates || [];
-        fallbackPayload.bono_redeemed_dates = normalizedClient.bonoRedeemedDates || [];
-        fallbackPayload.bonoRedeemedDates = normalizedClient.bonoRedeemedDates || [];
 
         const result = await executeResilientUpdate('clients', normalizedClient.id, [cleanPayload, fallbackPayload]);
 
@@ -1491,15 +1385,9 @@ export const api = {
             name: fullName,
             firstName: cleanFirstName,
             lastName: cleanLastName,
-            hasBono: normalizedClient.hasBono !== undefined ? normalizedClient.hasBono : mapped.hasBono,
-            bonoType: normalizedClient.bonoType !== undefined ? normalizedClient.bonoType : mapped.bonoType,
-            bonoSessionsRemaining: normalizedClient.bonoSessionsRemaining !== undefined
-              ? normalizedClient.bonoSessionsRemaining
-              : mapped.bonoSessionsRemaining,
             profileNote: normalizedClient.profileNote !== undefined
               ? normalizedClient.profileNote
               : mapped.profileNote,
-            bonoRedeemedDates: normalizedClient.bonoRedeemedDates || mapped.bonoRedeemedDates || [],
           };
           const current = loadLocal('clients', mockClients);
           const index = current.findIndex(c => c.id === finalClient.id);
@@ -1648,7 +1536,6 @@ export const api = {
           }
         }
 
-        const effectiveCategory = (newNote.isBonoRedeemed && (!newNote.category || newNote.category === 'treatment')) ? 'treatment_bono' : (newNote.category || 'treatment');
         const snakePayload: Record<string, any> = {
           id: newNote.id,
           client_id: validClientId,
@@ -1657,7 +1544,7 @@ export const api = {
           anamnese: newNote.anamnese || '',
           treatment: newNote.treatment || '',
           content: newNote.content || '',
-          category: effectiveCategory,
+          category: newNote.category || 'treatment',
         };
         if (newNote.eventId) {
           snakePayload.event_id = newNote.eventId;
@@ -1671,18 +1558,10 @@ export const api = {
           anamnese: newNote.anamnese || '',
           treatment: newNote.treatment || '',
           content: newNote.content || '',
-          category: effectiveCategory,
+          category: newNote.category || 'treatment',
         };
         if (newNote.eventId) {
           camelPayload.eventId = newNote.eventId;
-        }
-        if (newNote.isBonoRedeemed !== undefined) {
-          snakePayload.is_bono_redeemed = Boolean(newNote.isBonoRedeemed);
-          camelPayload.isBonoRedeemed = Boolean(newNote.isBonoRedeemed);
-        }
-        if (newNote.bonoType) {
-          snakePayload.bono_type = newNote.bonoType;
-          camelPayload.bonoType = newNote.bonoType;
         }
 
         const result = await executeResilientInsert('client_notes', [snakePayload, camelPayload]);
@@ -1728,18 +1607,13 @@ export const api = {
   async updateClientNote(note: ClientNote): Promise<ClientNote> {
     if (isSupabaseConfigured && supabase) {
       try {
-        const effectiveCategory = (note.isBonoRedeemed && (!note.category || note.category === 'treatment')) ? 'treatment_bono' : (note.category || 'treatment');
         const payload: Record<string, any> = {
           date: note.date,
           motif: note.motif || '',
           anamnese: note.anamnese || '',
           treatment: note.treatment || '',
           content: note.content || '',
-          category: effectiveCategory,
-          is_bono_redeemed: Boolean(note.isBonoRedeemed),
-          isBonoRedeemed: Boolean(note.isBonoRedeemed),
-          bono_type: note.bonoType || null,
-          bonoType: note.bonoType || null,
+          category: note.category || 'treatment',
         };
 
         const result = await executeResilientUpdate('client_notes', note.id, [payload]);
@@ -1748,8 +1622,6 @@ export const api = {
           const finalNote: ClientNote = {
             ...note,
             ...mapped,
-            isBonoRedeemed: note.isBonoRedeemed !== undefined ? note.isBonoRedeemed : mapped.isBonoRedeemed,
-            bonoType: note.bonoType || mapped.bonoType,
           };
           const current = loadLocal('notes', mockNotes);
           const index = current.findIndex(n => n.id === note.id);
@@ -1873,18 +1745,14 @@ export const api = {
     return sortInvoicesByDate(localInvoices, false);
   },
 
-  async createInvoice(invoice: Omit<Invoice, 'id' | 'invoiceNumber'> & { id?: string; invoiceNumber?: string; isBonoRedemption?: boolean }): Promise<Invoice> {
-    const isBonoRedeem = invoice.isBonoRedemption || (invoice.amount === 0 && invoice.discountType === 'bono');
-    const nextInvoiceNum = isBonoRedeem 
-      ? (invoice.invoiceNumber || `BONO-REC-${Math.random().toString(36).substring(2, 8).toUpperCase()}`)
-      : (invoice.invoiceNumber || await this.getNextInvoiceNumber());
+  async createInvoice(invoice: Omit<Invoice, 'id' | 'invoiceNumber'> & { id?: string; invoiceNumber?: string }): Promise<Invoice> {
+    const nextInvoiceNum = invoice.invoiceNumber || await this.getNextInvoiceNumber();
     const invoiceId = invoice.id || crypto.randomUUID();
 
     const newInvoice: Invoice = {
       ...invoice,
       id: invoiceId,
       invoiceNumber: nextInvoiceNum,
-      isBonoRedemption: isBonoRedeem,
     };
 
     // Save locally immediately to guarantee persistence
@@ -1945,8 +1813,6 @@ export const api = {
           note_id: newInvoice.noteId || null,
           eventId: newInvoice.eventId || newInvoice.noteId || null,
           event_id: newInvoice.eventId || newInvoice.noteId || null,
-          isBonoRedemption: newInvoice.isBonoRedemption || false,
-          is_bono_redemption: newInvoice.isBonoRedemption || false,
         };
 
         const result = await executeResilientInsert('invoices', [cleanPayload]);
@@ -2037,8 +1903,6 @@ export const api = {
           discount_label: invoice.discountLabel || null,
           noteId: invoice.noteId || null,
           note_id: invoice.noteId || null,
-          isBonoRedemption: invoice.isBonoRedemption || false,
-          is_bono_redemption: invoice.isBonoRedemption || false,
         };
 
         const result = await executeResilientUpdate('invoices', invoice.id, [cleanPayload]);
@@ -2075,240 +1939,25 @@ export const api = {
     const targetNum = invoiceNumber || target?.invoiceNumber || (id.startsWith('FAC-') ? id : undefined);
     const targetId = target?.id || id;
 
-    // Check if target is a paid Bono invoice (purchase of a Bono)
-    const isPaidBono = Boolean(
-      target &&
-      target.amount > 0 &&
-      (
-        target.discountType === 'bono' ||
-        (target.discountLabel && target.discountLabel.toLowerCase().includes('bono')) ||
-        (target.description && target.description.toLowerCase().includes('bono'))
-      )
-    );
-
-    // Check if target is a single 0€ Bono redemption invoice
-    const isSingleRedemption = Boolean(
-      target &&
-      target.amount === 0 &&
-      (
-        target.isBonoRedemption ||
-        target.discountType === 'bono' ||
-        (target.discountLabel && target.discountLabel.toLowerCase().includes('bono'))
-      )
-    );
-
-    const clientId = target?.clientId;
-    const clientName = target?.clientName;
-
     // Record tombstones immediately so it can never resurrect
     addDeletedTombstone('invoices', targetId);
     if (targetNum) addDeletedTombstone('invoices', targetNum);
 
-    // Cascade 1: If deleting a paid Bono invoice, find and delete all 0€ Bono redemption invoices for this client
-    let redemptionsToDelete: Invoice[] = [];
-    if (isPaidBono && (clientId || clientName)) {
-      redemptionsToDelete = current.filter(i => {
-        if (i.id === targetId || (targetNum && i.invoiceNumber === targetNum)) return false;
-        const isRed = i.amount === 0 && (i.isBonoRedemption || i.discountType === 'bono' || (i.discountLabel && i.discountLabel.toLowerCase().includes('bono')));
-        if (!isRed) return false;
-        if (clientId && i.clientId === clientId) return true;
-        if (clientName && i.clientName && i.clientName.trim().toLowerCase() === clientName.trim().toLowerCase()) return true;
-        return false;
-      });
-
-      for (const red of redemptionsToDelete) {
-        addDeletedTombstone('invoices', red.id);
-        if (red.invoiceNumber) addDeletedTombstone('invoices', red.invoiceNumber);
-      }
-    }
-
     if (isSupabaseConfigured && supabase) {
       try {
-        let deletedRemoteCount = 0;
-
-        // Delete primary target invoice
         if (UUID_REGEX.test(targetId)) {
-          const res = await supabase.from('invoices').delete().eq('id', targetId).select();
-          if (res.data && res.data.length > 0) deletedRemoteCount += res.data.length;
+          await supabase.from('invoices').delete().eq('id', targetId);
         }
-
         if (targetNum) {
-          const res1 = await supabase.from('invoices').delete().eq('invoiceNumber', targetNum).select();
-          if (res1.data && res1.data.length > 0) deletedRemoteCount += res1.data.length;
-
-          const res2 = await supabase.from('invoices').delete().eq('invoice_number', targetNum).select();
-          if (res2.data && res2.data.length > 0) deletedRemoteCount += res2.data.length;
+          await supabase.from('invoices').delete().eq('invoiceNumber', targetNum);
+          await supabase.from('invoices').delete().eq('invoice_number', targetNum);
         }
-
-        // Delete cascade redemptions in Supabase
-        for (const red of redemptionsToDelete) {
-          if (UUID_REGEX.test(red.id)) {
-            await supabase.from('invoices').delete().eq('id', red.id);
-          }
-          if (red.invoiceNumber) {
-            await supabase.from('invoices').delete().eq('invoiceNumber', red.invoiceNumber);
-            await supabase.from('invoices').delete().eq('invoice_number', red.invoiceNumber);
-          }
-        }
-
-        lastSupabaseStatus = {
-          lastAction: `Suppression facture ${targetNum || targetId}`,
-          success: true,
-          timestamp: new Date().toLocaleTimeString(),
-        };
       } catch (err: any) {
         console.warn('Supabase delete invoice exception:', err);
-        lastSupabaseStatus = {
-          lastAction: `Suppression facture ${targetNum || targetId}`,
-          success: false,
-          error: err?.message || 'Erreur réseau',
-          timestamp: new Date().toLocaleTimeString(),
-        };
       }
     }
 
-    // Cascade 2: If deleting a paid Bono invoice, reset client profile & clinical notes
-    if (isPaidBono && (clientId || clientName)) {
-      const localClients = loadLocal('clients', []);
-      let updatedClientTargetId: string | undefined = clientId;
-      const updatedClients = localClients.map(c => {
-        const isMatch = (clientId && c.id === clientId) || (clientName && c.name?.trim().toLowerCase() === clientName.trim().toLowerCase());
-        if (isMatch) {
-          updatedClientTargetId = c.id;
-          return {
-            ...c,
-            hasBono: false,
-            bonoType: undefined,
-            bonoTotalSessions: 0,
-            bonoSessionsRemaining: 0,
-            bonoRedeemedDates: [],
-            bonoPurchaseDate: undefined,
-            defaultDiscount: 0,
-          };
-        }
-        return c;
-      });
-      saveLocal('clients', updatedClients);
-
-      if (isSupabaseConfigured && supabase && updatedClientTargetId) {
-        try {
-          await supabase.from('clients').update({
-            has_bono: false,
-            bono_type: null,
-            bono_total_sessions: 0,
-            bono_sessions_remaining: 0,
-            bono_redeemed_dates: [],
-            bono_purchase_date: null,
-            default_discount: 0,
-            hasBono: false,
-            bonoType: null,
-            bonoTotalSessions: 0,
-            bonoSessionsRemaining: 0,
-            bonoRedeemedDates: [],
-            bonoPurchaseDate: null,
-            defaultDiscount: 0
-          }).eq('id', updatedClientTargetId);
-        } catch (e) {
-          console.warn('Supabase update client reset bono exception:', e);
-        }
-      }
-
-      // Reset isBonoRedeemed on client notes
-      const localNotes = loadLocal('notes', []);
-      const updatedNotes = localNotes.map(n => {
-        const isMatch = (clientId && n.clientId === clientId) || (clientName && n.clientName?.trim().toLowerCase() === clientName.trim().toLowerCase());
-        if (isMatch) {
-          return {
-            ...n,
-            isBonoRedeemed: false,
-            bonoType: undefined,
-          };
-        }
-        return n;
-      });
-      saveLocal('notes', updatedNotes);
-
-      if (isSupabaseConfigured && supabase && updatedClientTargetId) {
-        try {
-          await supabase.from('client_notes').update({
-            is_bono_redeemed: false,
-            isBonoRedeemed: false,
-            bono_type: null,
-            bonoType: null
-          }).eq('clientId', updatedClientTargetId);
-
-          await supabase.from('client_notes').update({
-            is_bono_redeemed: false,
-            isBonoRedeemed: false,
-            bono_type: null,
-            bonoType: null
-          }).eq('client_id', updatedClientTargetId);
-        } catch (e) {
-          console.warn('Supabase update client notes reset bono exception:', e);
-        }
-      }
-    } else if (isSingleRedemption && (clientId || clientName)) {
-      // Cascade 3: If deleting a single 0€ redemption, refund +1 session back to client
-      const targetDateStr = target?.date ? target.date.split('T')[0] : '';
-      const localClients = loadLocal('clients', []);
-      let targetClientId: string | undefined = clientId;
-      const updatedClients = localClients.map(c => {
-        const isMatch = (clientId && c.id === clientId) || (clientName && c.name?.trim().toLowerCase() === clientName.trim().toLowerCase());
-        if (isMatch && c.hasBono) {
-          targetClientId = c.id;
-          const maxSessions = c.bonoTotalSessions || 5;
-          const newRemaining = Math.min(maxSessions, (c.bonoSessionsRemaining || 0) + 1);
-          const newDates = (c.bonoRedeemedDates || []).filter(d => d !== targetDateStr);
-          return {
-            ...c,
-            bonoSessionsRemaining: newRemaining,
-            bonoRedeemedDates: newDates,
-          };
-        }
-        return c;
-      });
-      saveLocal('clients', updatedClients);
-
-      if (isSupabaseConfigured && supabase && targetClientId) {
-        try {
-          const matchedC = updatedClients.find(c => c.id === targetClientId);
-          if (matchedC) {
-            await supabase.from('clients').update({
-              bono_sessions_remaining: matchedC.bonoSessionsRemaining,
-              bonoSessionsRemaining: matchedC.bonoSessionsRemaining,
-              bono_redeemed_dates: matchedC.bonoRedeemedDates,
-              bonoRedeemedDates: matchedC.bonoRedeemedDates,
-            }).eq('id', targetClientId);
-          }
-        } catch (e) {
-          console.warn('Supabase update client refund bono session exception:', e);
-        }
-      }
-
-      // Reset isBonoRedeemed on associated note
-      const localNotes = loadLocal('notes', []);
-      const updatedNotes = localNotes.map(n => {
-        const isClientMatch = (clientId && n.clientId === clientId) || (clientName && n.clientName?.trim().toLowerCase() === clientName.trim().toLowerCase());
-        const isEventMatch = target?.eventId && n.eventId === target.eventId;
-        const isNoteMatch = target?.noteId && n.id === target.noteId;
-        const isDateMatch = targetDateStr && n.date.split('T')[0] === targetDateStr;
-        if (isClientMatch && (isEventMatch || isNoteMatch || isDateMatch)) {
-          return { ...n, isBonoRedeemed: false };
-        }
-        return n;
-      });
-      saveLocal('notes', updatedNotes);
-    }
-
-    const redIds = new Set(redemptionsToDelete.map(r => r.id));
-    const redNums = new Set(redemptionsToDelete.map(r => r.invoiceNumber).filter(Boolean));
-
-    const filtered = current.filter(i => {
-      if (i.id === targetId || (targetNum && i.invoiceNumber === targetNum)) return false;
-      if (redIds.has(i.id)) return false;
-      if (i.invoiceNumber && redNums.has(i.invoiceNumber as string)) return false;
-      return true;
-    });
+    const filtered = current.filter(i => i.id !== targetId && (!targetNum || i.invoiceNumber !== targetNum));
     saveLocal('invoices', filtered);
     return true;
   },

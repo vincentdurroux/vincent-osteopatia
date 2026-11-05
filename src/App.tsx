@@ -909,8 +909,6 @@ const Location = () => {
               <div>
                 <h4 className="font-semibold mb-1">{t.location.fees}</h4>
                 <p className="text-gray-500 text-sm sm:text-base">{t.location.session}</p>
-                <p className="text-gray-500 text-sm sm:text-base">{t.location.bono3}</p>
-                <p className="text-gray-500 text-sm sm:text-base">{t.location.bono5}</p>
               </div>
             </div>
           </div>

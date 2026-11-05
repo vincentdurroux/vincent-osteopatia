@@ -10,11 +10,11 @@ export interface Client {
   createdAt: string;
   lastSessionAt?: string;
   address?: string;
-  hasBono?: boolean;
-  bonoType?: string;
   defaultDiscount?: number;
-  bonoSessionsRemaining?: number;
   profileNote?: string;
+  hasBono?: boolean;
+  bonoSessionsRemaining?: number;
+  bonoType?: string;
   bonoRedeemedDates?: string[];
 }
 
@@ -42,7 +42,7 @@ export interface Invoice {
   amount: number;
   originalAmount?: number;
   discountAmount?: number;
-  discountType?: 'bono' | 'custom' | 'none';
+  discountType?: 'custom' | 'none' | 'bono';
   discountLabel?: string;
   status: 'paid' | 'pending';
   paymentMethod?: 'cash' | 'card' | 'transfer' | 'not_applicable';

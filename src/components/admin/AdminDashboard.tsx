@@ -130,7 +130,7 @@ const DEFAULT_PATIENT_FORM = {
   phone: '',
   birthDate: '',
   address: '',
-  hasBono: false,
+  
   bonoType: '',
   defaultDiscount: 10,
   bonoSessionsRemaining: 0,
@@ -1096,6 +1096,55 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
     }
   };
 
+  const getClientActiveBonoInfo = (client: Client | null) => {
+    if (!client) return { hasBono: false, remaining: 0, bonoType: '' };
+    
+    // 1. If client has explicit bonoSessionsRemaining > 0, trust it directly
+    if (client.hasBono && client.bonoSessionsRemaining !== undefined && !isNaN(Number(client.bonoSessionsRemaining))) {
+      return {
+        hasBono: Number(client.bonoSessionsRemaining) > 0,
+        remaining: Number(client.bonoSessionsRemaining),
+        bonoType: client.bonoType || 'Bono 3 séances',
+      };
+    }
+
+    // 2. Otherwise calculate accurately from invoices
+    const clientInvoices = invoices.filter(i => 
+      i.clientId === client.id || 
+      (i.clientName && client.name && i.clientName.trim().toLowerCase() === client.name.trim().toLowerCase())
+    );
+
+    let totalPurchased = 0;
+    let totalRedeemed = 0;
+    let bonoType = client.bonoType || 'Bono 3 séances';
+
+    for (const inv of clientInvoices) {
+      const desc = (inv.description || '').toLowerCase();
+      const lbl = (inv.discountLabel || '').toLowerCase();
+      
+      const isBonoPurchase = inv.amount > 0 && (desc.includes('forfait') || desc.includes('bono ostéopathie') || lbl.includes('bono') || inv.discountType === 'bono');
+      const isBonoRedemption = inv.amount === 0 || inv.isBonoRedemption || desc.includes('décomptée') || desc.includes('decomptée') || desc.includes('séance décomptée');
+
+      if (isBonoPurchase) {
+        const is5 = desc.includes('5') || lbl.includes('5') || inv.amount >= 250;
+        // Purchase includes today's session by default (-1), so remaining from purchase is total - 1
+        totalPurchased += (is5 ? 4 : 2);
+        bonoType = is5 ? 'Bono 5 séances' : 'Bono 3 séances';
+      } else if (isBonoRedemption && !isBonoPurchase) {
+        totalRedeemed += 1;
+      }
+    }
+
+    const remaining = Math.max(0, totalPurchased - totalRedeemed);
+    const hasBono = (client.hasBono || totalPurchased > 0) && remaining > 0;
+
+    return {
+      hasBono,
+      remaining,
+      bonoType: client.bonoType || bonoType,
+    };
+  };
+
   // Delete Invoice with confirmation and Bono cascade deletion
   const handleDeleteInvoice = (invoiceId: string) => {
     const inv = invoices.find(i => i.id === invoiceId || i.invoiceNumber === invoiceId);
@@ -1180,7 +1229,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
 
             // 2. Update clients state
             const resetFields = {
-              hasBono: false,
+              
               bonoType: undefined,
               bonoTotalSessions: 0,
               bonoSessionsRemaining: 0,
@@ -1288,139 +1337,6 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
       let finalDiscType = newInvoice.discountType;
       let finalDiscLabel = newInvoice.discountLabel;
 
-      if (newInvoiceBillingPlan === 'bono3') {
-        finalDescription = translations[lang as Language].admin.billing.bono3Desc || "Bono Ostéopathie - Forfait 3 séances";
-        finalAmount = 160;
-        finalOriginal = 180;
-        finalDiscount = 20;
-        finalDiscType = 'bono';
-        finalDiscLabel = 'Bono 3 séances (160€)';
-      } else if (newInvoiceBillingPlan === 'bono5') {
-        finalDescription = translations[lang as Language].admin.billing.bono5Desc || "Bono Ostéopathie - Forfait 5 séances";
-        finalAmount = 250;
-        finalOriginal = 300;
-        finalDiscount = 50;
-        finalDiscType = 'bono';
-        finalDiscLabel = translations[lang as Language].admin.billing.bono5Title;
-      } else if (newInvoiceBillingPlan === 'deduct_bono') {
-        finalDescription = `${translations[lang as Language].admin.billing.deductBonoDesc || "Séance d'Ostéopathie (Prise en compte Bono)"} (${client.bonoType || 'Bono'})`;
-        finalAmount = 0;
-        finalOriginal = 60;
-        finalDiscount = 60;
-        finalDiscType = 'bono';
-        finalDiscLabel = `Décompté sur ${client.bonoType || 'Bono'}`;
-      }
-
-      // If this is a Bono session deduction, do not create an invoice; prompt confirmation and update client bono balance
-      if (newInvoiceBillingPlan === 'deduct_bono') {
-        const currentRem = typeof client.bonoSessionsRemaining === 'number' 
-          ? client.bonoSessionsRemaining 
-          : (client.bonoType?.includes('3') ? 3 : 5);
-        const newRemaining = Math.max(0, currentRem - 1);
-        const bonoName = client.bonoType || 'Bono';
-
-        const confirmMsg = (translations[lang]?.admin?.billing?.confirmBonoDeductionMessage || 
-          "Voulez-vous décompter 1 séance du forfait {bonoType} de {clientName} ? Aucune facture ne sera générée. Il restera {remaining} séance(s) sur son forfait.")
-          .replace('{bonoType}', bonoName)
-          .replace('{clientName}', client.name)
-          .replace('{remaining}', String(newRemaining));
-
-        setConfirmDialog({
-          isOpen: true,
-          title: translations[lang]?.admin?.billing?.confirmBonoDeductionTitle || (lang === 'fr' ? 'Confirmer le décompte sur le Bono' : 'Confirm Bono session deduction'),
-          message: confirmMsg,
-          confirmText: translations[lang]?.admin?.billing?.confirmBonoDeductionAction || (lang === 'fr' ? 'Confirmer le décompte' : 'Confirm'),
-          cancelText: translations[lang]?.admin?.billing?.cancel || (lang === 'fr' ? 'Annuler' : 'Cancel'),
-          isDangerous: false,
-          onConfirm: async () => {
-            const invDateOnly = newInvoice.date ? newInvoice.date.split('T')[0] : '';
-            const currentRedeemedDates = client.bonoRedeemedDates || [];
-            const updatedRedeemedDates = invDateOnly 
-              ? Array.from(new Set([...currentRedeemedDates, invDateOnly]))
-              : currentRedeemedDates;
-
-            const updatedClient: Client = {
-              ...client,
-              bonoSessionsRemaining: newRemaining,
-              lastSessionAt: newInvoice.date ? new Date(newInvoice.date).toISOString() : client.lastSessionAt,
-              bonoRedeemedDates: updatedRedeemedDates,
-            };
-            const savedClient = await api.updateClient(updatedClient);
-            setClients(prev => prev.map(c => c.id === savedClient.id ? savedClient : c));
-            if (selectedClient?.id === client.id) {
-              setSelectedClient(savedClient);
-            }
-
-            // Also find and mark any existing client notes associated with this event/date
-            const matchingNotes = clientNotes.filter(n => 
-              (newInvoice.eventId && n.eventId === newInvoice.eventId) ||
-              (invDateOnly && n.date && n.date.split('T')[0] === invDateOnly)
-            );
-            for (const n of matchingNotes) {
-              const updatedNote: ClientNote = {
-                ...n,
-                isBonoRedeemed: true,
-                bonoType: bonoName,
-              };
-              try {
-                const saved = await api.updateClientNote(updatedNote);
-                setClientNotes(prev => prev.map(item => item.id === saved.id ? saved : item));
-                setAllNotes(prev => prev.map(item => item.id === saved.id ? saved : item));
-              } catch (noteErr) {
-                console.warn('Could not update note bono state:', noteErr);
-              }
-            }
-
-            // Register bono redemption line in invoices
-            try {
-              const sessionDate = invDateOnly || new Date().toISOString().split('T')[0];
-              const redemptionInvoice = await api.createInvoice({
-                clientId: client.id,
-                clientName: client.name,
-                amount: 0,
-                originalAmount: 60,
-                discountAmount: 60,
-                discountType: 'bono',
-                discountLabel: `Décompté sur ${bonoName}`,
-                status: 'paid',
-                paymentMethod: 'not_applicable',
-                date: sessionDate,
-                paymentDate: newInvoice.paymentDate || sessionDate,
-                description: `${translations[lang]?.admin?.billing?.deductBonoDesc || "Séance d'Ostéopathie (Prise en compte Bono)"} (${bonoName})`,
-                isBonoRedemption: true,
-                eventId: newInvoice.eventId,
-                language: lang as any,
-                quantity: 1,
-              });
-              setInvoices(prev => [redemptionInvoice, ...prev]);
-            } catch (invErr) {
-              console.warn('Could not register bono deduction invoice line:', invErr);
-            }
-
-            setIsAddInvoiceOpen(false);
-            setNewInvoiceBillingPlan('single');
-            setNewInvoiceIncludeToday(true);
-            setNewInvoice({
-              clientId: '',
-              amount: 60,
-              originalAmount: 60,
-              discountAmount: 0,
-              discountType: 'none',
-              discountLabel: '',
-              status: 'paid',
-              paymentMethod: 'card',
-              description: "Sesión de osteopatía",
-              language: 'es',
-              quantity: 1,
-              date: new Date().toISOString().split('T')[0],
-              paymentDate: new Date().toISOString().split('T')[0],
-              eventId: '',
-            });
-          }
-        });
-        return;
-      }
-
       const isDiscounted = finalDiscount > 0;
       const created = await api.createInvoice({
         clientId: client.id,
@@ -1429,7 +1345,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
         originalAmount: isDiscounted ? finalOriginal : finalAmount,
         discountAmount: isDiscounted ? finalDiscount : undefined,
         discountType: isDiscounted && finalDiscType !== 'none' ? finalDiscType : undefined,
-        discountLabel: isDiscounted ? (finalDiscLabel || (finalDiscType === 'bono' ? (client.bonoType || 'Bono') : undefined)) : undefined,
+        discountLabel: isDiscounted ? finalDiscLabel : undefined,
         status: newInvoice.status || 'paid',
         paymentMethod: newInvoice.paymentMethod,
         date: newInvoice.date || new Date().toISOString().split('T')[0],
@@ -1438,7 +1354,6 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
         language: 'es',
         quantity: 1,
         noteId: newInvoice.eventId || undefined,
-        isBonoRedemption: false,
       });
 
       // Update state immediately to guarantee invoice persists in UI
@@ -1468,13 +1383,24 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
         if (newInvoiceBillingPlan === 'bono3' || newInvoiceBillingPlan === 'bono5') {
           const totalSessions = newInvoiceBillingPlan === 'bono3' ? 3 : 5;
           const remaining = newInvoiceIncludeToday ? totalSessions - 1 : totalSessions;
-          const bonoTitle = newInvoiceBillingPlan === 'bono3' ? translations[lang].admin.billing.bono3Title : translations[lang].admin.billing.bono5Title;
+          const bonoTitle = newInvoiceBillingPlan === 'bono3' ? 'Bono 3 séances' : 'Bono 5 séances';
           const updatedClient: Client = {
             ...client,
             hasBono: true,
             bonoType: bonoTitle,
-            defaultDiscount: undefined,
             bonoSessionsRemaining: remaining,
+          };
+          const savedClient = await api.updateClient(updatedClient);
+          setClients(prev => prev.map(c => c.id === savedClient.id ? savedClient : c));
+          if (selectedClient?.id === client.id) {
+            setSelectedClient(savedClient);
+          }
+        } else if (newInvoiceBillingPlan === 'deduct_bono' && client.hasBono) {
+          const currentRem = client.bonoSessionsRemaining ?? 1;
+          const newRemaining = Math.max(0, currentRem - 1);
+          const updatedClient: Client = {
+            ...client,
+            bonoSessionsRemaining: newRemaining,
           };
           const savedClient = await api.updateClient(updatedClient);
           setClients(prev => prev.map(c => c.id === savedClient.id ? savedClient : c));
@@ -1491,6 +1417,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
   };
 
   // Create inline invoice from notes history
+  // Create inline invoice from notes history
   const handleCreateInlineInvoice = async (note: ClientNote) => {
     if (!selectedClient) return;
     try {
@@ -1503,110 +1430,6 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
       let finalDiscType = inlineInvoiceDiscountType;
       let finalDiscLabel = inlineInvoiceDiscountLabel;
 
-      if (inlineBillingPlan === 'bono3') {
-        finalDescription = translations[lang as Language].admin.billing.bono3Desc || "Bono Ostéopathie - Forfait 3 séances";
-        finalAmount = 160;
-        finalOriginal = 180;
-        finalDiscount = 20;
-        finalDiscType = 'bono';
-        finalDiscLabel = 'Bono 3 séances (160€)';
-      } else if (inlineBillingPlan === 'bono5') {
-        finalDescription = translations[lang as Language].admin.billing.bono5Desc || "Bono Ostéopathie - Forfait 5 séances";
-        finalAmount = 250;
-        finalOriginal = 300;
-        finalDiscount = 50;
-        finalDiscType = 'bono';
-        finalDiscLabel = translations[lang as Language].admin.billing.bono5Title;
-      } else if (inlineBillingPlan === 'deduct_bono') {
-        finalDescription = `${translations[lang as Language].admin.billing.deductBonoDesc || "Séance d'Ostéopathie (Prise en compte Bono)"} (${selectedClient.bonoType || 'Bono'})`;
-        finalAmount = 0;
-        finalOriginal = 60;
-        finalDiscount = 60;
-        finalDiscType = 'bono';
-        finalDiscLabel = `Décompté sur ${selectedClient.bonoType || 'Bono'}`;
-      }
-
-      // If this is a Bono session deduction, do not create an invoice; prompt confirmation and update client bono balance
-      if (inlineBillingPlan === 'deduct_bono') {
-        const currentRem = typeof selectedClient.bonoSessionsRemaining === 'number' 
-          ? selectedClient.bonoSessionsRemaining 
-          : (selectedClient.bonoType?.includes('3') ? 3 : 5);
-        const newRemaining = Math.max(0, currentRem - 1);
-        const bonoName = selectedClient.bonoType || 'Bono';
-
-        const confirmMsg = (translations[lang]?.admin?.billing?.confirmBonoDeductionMessage || 
-          "Voulez-vous décompter 1 séance du forfait {bonoType} de {clientName} ? Aucune facture ne sera générée. Il restera {remaining} séance(s) sur son forfait.")
-          .replace('{bonoType}', bonoName)
-          .replace('{clientName}', selectedClient.name)
-          .replace('{remaining}', String(newRemaining));
-
-        setConfirmDialog({
-          isOpen: true,
-          title: translations[lang]?.admin?.billing?.confirmBonoDeductionTitle || (lang === 'fr' ? 'Confirmer le décompte sur le Bono' : 'Confirm Bono session deduction'),
-          message: confirmMsg,
-          confirmText: translations[lang]?.admin?.billing?.confirmBonoDeductionAction || (lang === 'fr' ? 'Confirmer le décompte' : 'Confirm'),
-          cancelText: translations[lang]?.admin?.billing?.cancel || (lang === 'fr' ? 'Annuler' : 'Cancel'),
-          isDangerous: false,
-          onConfirm: async () => {
-            const currentRedeemedDates = selectedClient.bonoRedeemedDates || [];
-            const updatedRedeemedDates = Array.from(new Set([...currentRedeemedDates, noteDateStr]));
-
-            const updatedClient: Client = {
-              ...selectedClient,
-              bonoSessionsRemaining: newRemaining,
-              lastSessionAt: note.date,
-              bonoRedeemedDates: updatedRedeemedDates,
-            };
-            const savedClient = await api.updateClient(updatedClient);
-            setClients(prev => prev.map(c => c.id === savedClient.id ? savedClient : c));
-            setSelectedClient(savedClient);
-
-            // Update the note itself with isBonoRedeemed = true
-            const updatedNote: ClientNote = {
-              ...note,
-              isBonoRedeemed: true,
-              bonoType: bonoName,
-            };
-            try {
-              const savedNote = await api.updateClientNote(updatedNote);
-              setClientNotes(prev => prev.map(n => n.id === savedNote.id ? savedNote : n));
-              setAllNotes(prev => prev.map(n => n.id === savedNote.id ? savedNote : n));
-            } catch (noteErr) {
-              console.warn('Could not update note bono state:', noteErr);
-            }
-
-            // Register bono redemption line in invoices
-            try {
-              const redemptionInvoice = await api.createInvoice({
-                clientId: selectedClient.id,
-                clientName: selectedClient.name,
-                amount: 0,
-                originalAmount: 60,
-                discountAmount: 60,
-                discountType: 'bono',
-                discountLabel: `Décompté sur ${bonoName}`,
-                status: 'paid',
-                paymentMethod: 'not_applicable',
-                date: noteDateStr,
-                paymentDate: noteDateStr,
-                description: `${translations[lang]?.admin?.billing?.deductBonoDesc || "Séance d'Ostéopathie (Prise en compte Bono)"} (${bonoName})`,
-                isBonoRedemption: true,
-                noteId: note.id,
-                eventId: note.eventId,
-                language: lang as any,
-                quantity: 1,
-              });
-              setInvoices(prev => [redemptionInvoice, ...prev]);
-            } catch (invErr) {
-              console.warn('Could not register bono deduction invoice line:', invErr);
-            }
-
-            setCreatingInvoiceForNoteId(null);
-          }
-        });
-        return;
-      }
-
       const isDiscounted = finalDiscount > 0;
       const created = await api.createInvoice({
         clientId: selectedClient.id,
@@ -1615,7 +1438,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
         originalAmount: isDiscounted ? finalOriginal : finalAmount,
         discountAmount: isDiscounted ? finalDiscount : undefined,
         discountType: isDiscounted && finalDiscType !== 'none' ? finalDiscType : undefined,
-        discountLabel: isDiscounted ? (finalDiscLabel || (finalDiscType === 'bono' ? (selectedClient.bonoType || 'Bono') : undefined)) : undefined,
+        discountLabel: isDiscounted ? finalDiscLabel : undefined,
         status: inlineInvoiceStatus,
         paymentMethod: inlineInvoicePaymentMethod,
         date: noteDateStr,
@@ -1624,38 +1447,14 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
         language: 'es',
         quantity: 1,
         noteId: note.id,
-        isBonoRedemption: false,
       });
 
-      // Update state immediately to guarantee invoice persists in UI
       setInvoices(prev => sortInvoicesByDate([created, ...prev.filter(i => i.id !== created.id)], false));
       setCreatingInvoiceForNoteId(null);
-
-      // Update client Bono status safely
-      try {
-        if (inlineBillingPlan === 'bono3' || inlineBillingPlan === 'bono5') {
-          const totalSessions = inlineBillingPlan === 'bono3' ? 3 : 5;
-          const remaining = inlineIncludeToday ? totalSessions - 1 : totalSessions;
-          const bonoTitle = inlineBillingPlan === 'bono3' ? translations[lang].admin.billing.bono3Title : translations[lang].admin.billing.bono5Title;
-          const updatedClient: Client = {
-            ...selectedClient,
-            hasBono: true,
-            bonoType: bonoTitle,
-            defaultDiscount: undefined,
-            bonoSessionsRemaining: remaining,
-          };
-          const savedClient = await api.updateClient(updatedClient);
-          setClients(prev => prev.map(c => c.id === savedClient.id ? savedClient : c));
-          setSelectedClient(savedClient);
-        }
-      } catch (bonoErr) {
-        console.warn('Could not update client bono session count alongside inline invoice:', bonoErr);
-      }
     } catch (err) {
       console.error('Failed to create inline invoice:', err);
     }
   };
-
   // Update Client Handler
   const handleUpdateClient = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1946,32 +1745,18 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
   };
 
   const hasAppointmentNote = (ev: { id?: string; clientId?: string; start?: string }) => {
-    const evDateStr = ev.start ? ev.start.split('T')[0] : '';
-    return allNotes.some(n => 
-      (n.eventId && n.eventId === ev.id) || 
-      (ev.clientId && n.clientId === ev.clientId && n.date.split('T')[0] === evDateStr)
-    );
+    return allNotes.some(n => n.eventId && n.eventId === ev.id);
   };
 
   const getAppointmentInvoice = (ev: { id?: string; clientId?: string; start?: string }) => {
-    const evDateStr = ev.start ? ev.start.split('T')[0] : '';
     return invoices.find(i => 
       (i.eventId && i.eventId === ev.id) || 
-      (i.noteId && i.noteId === ev.id) || 
-      (ev.clientId && i.clientId === ev.clientId && (
-        i.date.split('T')[0] === evDateStr || 
-        (i.paymentDate && i.paymentDate.split('T')[0] === evDateStr)
-      ))
+      (i.noteId && i.noteId === ev.id)
     );
   };
 
   const getEventNote = (ev: { id?: string; clientId?: string; start?: string }) => {
-    const evDateStr = ev.start ? ev.start.split('T')[0] : '';
-    return allNotes.find(n => 
-      (n.eventId && n.eventId === ev.id) || 
-      (ev.clientId && n.clientId === ev.clientId && n.date && n.date.split('T')[0] === evDateStr) ||
-      (ev.clientId && n.clientId === ev.clientId)
-    );
+    return allNotes.find(n => n.eventId && n.eventId === ev.id);
   };
 
   const getEventTypeLabel = (type?: EventType) => {
@@ -2205,7 +1990,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
               phone: '',
               birthDate: '',
               address: '',
-              hasBono: false,
+              
               bonoType: '',
               defaultDiscount: 10,
               bonoSessionsRemaining: 0,
@@ -3566,26 +3351,18 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                 const timeStr = `${evDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} - ${new Date(ev.end).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
                                 const evDateStr = ev.start ? ev.start.split('T')[0] : '';
 
-                                // 1. Associated clinical notes (by eventId or same client & date)
+                                // 1. Associated clinical notes (strictly by eventId)
                                 const associatedNotes = clientNotes.filter(n => {
-                                  if (n.eventId && n.eventId === ev.id) return true;
-                                  const nDateStr = n.date ? n.date.split('T')[0] : '';
-                                  return nDateStr === evDateStr;
+                                  return Boolean(n.eventId && n.eventId === ev.id);
                                 });
                                 const hasNote = associatedNotes.length > 0;
                                 const firstNote = associatedNotes[0];
 
-                                // 2. Associated invoices / payments (by eventId, noteId, or same client & date)
+                                // 2. Associated invoices / payments (strictly by eventId or noteId)
                                 const associatedInvoices = invoices.filter(inv => {
                                   if (inv.eventId && inv.eventId === ev.id) return true;
                                   if (inv.noteId && inv.noteId === ev.id) return true;
                                   if (inv.noteId && associatedNotes.some(n => n.id === inv.noteId)) return true;
-                                  const isSameClient = inv.clientId === (ev.clientId || selectedClient.id);
-                                  if (isSameClient) {
-                                    const invDateStr = inv.date ? inv.date.split('T')[0] : '';
-                                    const invPayDateStr = inv.paymentDate ? inv.paymentDate.split('T')[0] : '';
-                                    if (invDateStr === evDateStr || invPayDateStr === evDateStr) return true;
-                                  }
                                   return false;
                                 });
                                 const bonoInvoice = associatedInvoices.find(inv => 
@@ -4454,7 +4231,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                               setInlineInvoiceOriginalAmount(180);
                                               setInlineInvoiceDiscountAmount(20);
                                               setInlineInvoiceDiscountType('bono');
-                                              setInlineInvoiceDiscountLabel(translations[lang].admin.billing.bono3Title);
+                                              setInlineInvoiceDiscountLabel("");
                                               setInlineInvoiceAmount(160);
                                             }}
                                             className={`p-2.5 rounded-xl border text-left transition-all relative ${
@@ -4466,7 +4243,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                             <div className="flex items-center justify-between">
                                               <span className="text-xs font-bold text-emerald-950 flex items-center gap-1">
                                                 <Sparkles size={11} className="text-emerald-600" />
-                                                {translations[lang].admin.billing.bono3Title}
+                                                {""}
                                               </span>
                                               <span className="text-xs font-bold text-emerald-700">160 €</span>
                                             </div>
@@ -4486,7 +4263,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                               setInlineInvoiceOriginalAmount(300);
                                               setInlineInvoiceDiscountAmount(50);
                                               setInlineInvoiceDiscountType('bono');
-                                              setInlineInvoiceDiscountLabel(translations[lang].admin.billing.bono5Title);
+                                              setInlineInvoiceDiscountLabel("");
                                               setInlineInvoiceAmount(250);
                                             }}
                                             className={`p-2.5 rounded-xl border text-left transition-all relative ${
@@ -4498,7 +4275,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                             <div className="flex items-center justify-between">
                                               <span className="text-xs font-bold text-emerald-950 flex items-center gap-1">
                                                 <Sparkles size={11} className="text-emerald-600" />
-                                                {translations[lang].admin.billing.bono5Title}
+                                                {""}
                                               </span>
                                               <span className="text-xs font-bold text-emerald-700">250 €</span>
                                             </div>
@@ -4529,7 +4306,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                               }`}
                                             >
                                               <div className="flex items-center justify-between">
-                                                <span className="text-xs font-bold text-teal-900">{translations[lang].admin.billing.deductBonoTitle}</span>
+                                                <span className="text-xs font-bold text-teal-900">{""}</span>
                                                 <span className="text-xs font-bold text-teal-700">0 €</span>
                                               </div>
                                               <p className="text-[10px] text-teal-700 font-semibold mt-0.5">
@@ -4567,10 +4344,10 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                           <div className="flex items-center justify-between">
                                             <span className="font-bold flex items-center gap-1.5 text-emerald-800">
                                               <Sparkles size={13} className="text-emerald-600" />
-                                              {inlineBillingPlan === 'bono3' ? translations[lang].admin.billing.bono3Desc : translations[lang].admin.billing.bono5Desc}
+                                              {inlineBillingPlan === 'bono3' ? "" : ""}
                                             </span>
                                             <span className="text-[11px] font-bold bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-md">
-                                              {translations[lang].admin.billing.bonoAutoCredit}
+                                              {""}
                                             </span>
                                           </div>
                                           <label className="flex items-center gap-2 cursor-pointer text-[11px] font-semibold text-emerald-900 select-none">
@@ -4595,7 +4372,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                           <div>
                                             <p className="font-bold text-teal-900 flex items-center gap-1.5">
                                               <BadgePercent size={13} className="text-teal-600" />
-                                              {translations[lang].admin.billing.deductBonoNotice}
+                                              {""}
                                             </p>
                                             <p className="text-[11px] text-teal-800 mt-0.5">
                                               {(translations[lang]?.admin?.billing?.deductBonoRemainingAfter || "Il restera {count} séance(s) sur son forfait").replace('{count}', String(Math.max(0, (selectedClient.bonoSessionsRemaining ?? 1) - 1)))}
@@ -4969,7 +4746,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                   const displayLabel = cleanRemark || ev.summary || (lang === 'fr' ? 'Créneau indisponible' : 'Bloqueado');
                   return (
                     <div
-                      key={cardKey || ev.id}
+                      key={cardKey ? `${cardKey}-${ev.id || 'slot'}` : (ev.id ? `${ev.id}-card` : `card-${Math.random()}`)}
                       onClick={() => setSelectedAppointmentForDetails(ev)}
                       className="rounded-lg p-2 bg-amber-100/90 hover:bg-amber-100 border border-amber-300 text-amber-950 shadow-2xs hover:shadow-sm cursor-pointer transition-all relative group/card"
                       title={lang === 'fr' ? "Cliquer pour voir les détails" : "Click to view details"}
@@ -4992,7 +4769,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
 
                 return (
                   <div
-                    key={cardKey || ev.id}
+                    key={cardKey ? `${cardKey}-${ev.id || 'app'}` : (ev.id ? `${ev.id}-app-card` : `card-${Math.random()}`)}
                     onClick={() => setSelectedAppointmentForDetails(ev)}
                     className="rounded-lg p-2 bg-[#38c9d8] hover:bg-[#2fc0cf] border border-[#20b4c5] text-[#063840] shadow-2xs hover:shadow-md cursor-pointer transition-all relative group/card select-none"
                     title={lang === 'fr' ? "Cliquer pour voir les détails du rendez-vous" : "Click to view appointment details"}
@@ -6615,58 +6392,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                   />
                 </div>
 
-                {/* Bono / Forfait de séances */}
-                <div className="bg-[#f4f4ec] p-3.5 rounded-2xl border border-black/5 space-y-2.5">
-                  <div className="flex items-center justify-between">
-                    <label className="text-xs font-bold text-gray-700 flex items-center gap-1.5 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={newClient.hasBono || false}
-                        onChange={(e) => setNewClient(prev => ({
-                          ...prev,
-                          hasBono: e.target.checked,
-                          defaultDiscount: e.target.checked ? (prev.defaultDiscount || 10) : 0,
-                          bonoSessionsRemaining: e.target.checked ? (prev.bonoSessionsRemaining || 5) : 0,
-                          bonoType: e.target.checked ? (prev.bonoType || translations[lang as Language].admin.billing.bono5Title) : ''
-                        }))}
-                        className="rounded text-primary focus:ring-primary w-4 h-4"
-                      />
-                      <span>{lang === 'fr' ? 'Patient bénéficiaire d’un Bono / Forfait' : 'Patient with Bono / Discount pack'}</span>
-                    </label>
-                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
-                      Bono
-                    </span>
-                  </div>
 
-                  {newClient.hasBono && (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-2 border-t border-black/5">
-                      <div>
-                        <label className="text-[9px] uppercase tracking-wider font-bold text-gray-400 block mb-0.5">
-                          {lang === 'fr' ? 'Type / Intitulé' : 'Bono Type'}
-                        </label>
-                        <input
-                          type="text"
-                          value={newClient.bonoType}
-                          onChange={(e) => setNewClient(prev => ({ ...prev, bonoType: e.target.value }))}
-                          placeholder="Ex: Bono 3 séances"
-                          className="w-full p-2 bg-white rounded-xl border border-black/10 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
-                        />
-                      </div>
-                      <div>
-                        <label className="text-[9px] uppercase tracking-wider font-bold text-gray-400 block mb-0.5">
-                          {lang === 'fr' ? 'Séances créditées' : 'Credited sessions'}
-                        </label>
-                        <input
-                          type="number"
-                          value={newClient.bonoSessionsRemaining}
-                          onChange={(e) => setNewClient(prev => ({ ...prev, bonoSessionsRemaining: Number(e.target.value) }))}
-                          placeholder="3"
-                          className="w-full p-2 bg-white rounded-xl border border-black/10 text-xs font-bold text-primary focus:outline-none focus:ring-1 focus:ring-primary"
-                        />
-                      </div>
-                    </div>
-                  )}
-                </div>
 
                 <div className="flex gap-3 pt-4">
                   <button
@@ -6824,9 +6550,8 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                     const endDate = new Date(ev.end);
                     const startTime = startDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
                     const endTime = endDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-                    const evDateStr = ev.start ? ev.start.split('T')[0] : '';
-                    const hasNote = !isOther && allNotes.some(n => (n.eventId && n.eventId === ev.id) || (ev.clientId && n.clientId === ev.clientId && n.date.split('T')[0] === evDateStr));
-                    const note = !isOther ? allNotes.find(n => (n.eventId && n.eventId === ev.id) || (ev.clientId && n.clientId === ev.clientId && n.date.split('T')[0] === evDateStr) || (ev.clientId && n.clientId === ev.clientId)) : undefined;
+                    const hasNote = !isOther && allNotes.some(n => n.eventId && n.eventId === ev.id);
+                    const note = !isOther ? allNotes.find(n => n.eventId && n.eventId === ev.id) : undefined;
                     const client = !isOther ? (ev.clientId ? clients.find(c => c.id === ev.clientId) : (ev.clientName ? clients.find(c => c.name.toLowerCase() === ev.clientName?.toLowerCase()) : undefined)) : undefined;
                     const clientPhone = client?.phone || '';
 
@@ -7032,7 +6757,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                 birthDate: inlinePatient.birthDate || '',
                                 address: inlinePatient.address || '',
                                 hasBono: inlinePatient.hasBono || false,
-                                bonoType: inlinePatient.bonoType || translations[lang].admin.billing.bono5Title,
+                                bonoType: inlinePatient.bonoType || "",
                                 defaultDiscount: inlinePatient.defaultDiscount || 10,
                                 bonoSessionsRemaining: inlinePatient.bonoSessionsRemaining || 5,
                               });
@@ -7146,58 +6871,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                           />
                         </div>
 
-                        {/* Bono / Forfait */}
-                        <div className="bg-white/80 p-2.5 rounded-xl border border-black/5 space-y-2">
-                          <label className="text-xs font-bold text-gray-700 flex items-center justify-between cursor-pointer select-none">
-                            <span className="flex items-center gap-1.5">
-                              <input
-                                type="checkbox"
-                                checked={inlinePatient.hasBono || false}
-                                onChange={(e) => setInlinePatient(prev => ({
-                                  ...prev,
-                                  hasBono: e.target.checked,
-                                  defaultDiscount: e.target.checked ? (prev.defaultDiscount || 10) : 0,
-                                  bonoSessionsRemaining: e.target.checked ? (prev.bonoSessionsRemaining || 5) : 0,
-                                  bonoType: e.target.checked ? (prev.bonoType || translations[lang as Language].admin.billing.bono5Title) : ''
-                                }))}
-                                className="rounded text-primary focus:ring-primary w-3.5 h-3.5"
-                              />
-                              <span>{lang === 'fr' ? 'Patient avec Bono / Forfait' : 'Patient with Bono / Pack'}</span>
-                            </span>
-                            <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-emerald-100 text-emerald-800">
-                              Bono
-                            </span>
-                          </label>
 
-                          {inlinePatient.hasBono && (
-                            <div className="grid grid-cols-2 gap-2 pt-1 border-t border-black/5">
-                              <div>
-                                <label className="text-[9px] uppercase tracking-wider font-bold text-gray-400 block mb-0.5">
-                                  {lang === 'fr' ? 'Type' : 'Type'}
-                                </label>
-                                <input
-                                  type="text"
-                                  value={inlinePatient.bonoType}
-                                  onChange={(e) => setInlinePatient(prev => ({ ...prev, bonoType: e.target.value }))}
-                                  placeholder={t('admin.billing.bono5Title')}
-                                  className="w-full p-1.5 bg-white rounded-lg border border-black/10 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
-                                />
-                              </div>
-                              <div>
-                                <label className="text-[9px] uppercase tracking-wider font-bold text-gray-400 block mb-0.5">
-                                  {lang === 'fr' ? 'Séances créditées' : 'Sessions'}
-                                </label>
-                                <input
-                                  type="number"
-                                  value={inlinePatient.bonoSessionsRemaining}
-                                  onChange={(e) => setInlinePatient(prev => ({ ...prev, bonoSessionsRemaining: Number(e.target.value) }))}
-                                  placeholder="5"
-                                  className="w-full p-1.5 bg-white rounded-lg border border-black/10 text-xs font-bold text-primary focus:outline-none focus:ring-1 focus:ring-primary"
-                                />
-                              </div>
-                            </div>
-                          )}
-                        </div>
                       </div>
                     ) : (
                       <select
@@ -7582,18 +7256,6 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                             </div>
                           )}
 
-                          {/* Bono Pack Status */}
-                          {client.hasBono && (
-                            <div className="p-2 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-900 text-xs flex items-center justify-between">
-                              <span className="font-bold flex items-center gap-1.5">
-                                <Sparkles size={12} className="text-emerald-600" />
-                                {client.bonoType || 'Bono'}
-                              </span>
-                              <span className="text-[11px] font-bold text-emerald-700">
-                                {client.bonoSessionsRemaining ?? 0} {lang === 'fr' ? 'séances restantes' : 'sesiones restantes'}
-                              </span>
-                            </div>
-                          )}
                         </div>
                       ) : (
                         <div className="p-3 rounded-2xl bg-slate-50 border border-slate-200 text-xs text-slate-600">
@@ -7775,9 +7437,8 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
               
               {/* Direct Link to Clinical Notes & Billing Status (for appointments) */}
               {(!editingEvent.eventType || editingEvent.eventType === 'appointment') && (() => {
-                const evDateStr = editingEvent.date;
-                const associatedNote = clientNotes.find(n => (n.eventId && n.eventId === editingEvent.id) || (editingEvent.clientId && n.clientId === editingEvent.clientId && n.date.split('T')[0] === evDateStr));
-                const associatedInv = invoices.find(i => (i.eventId && i.eventId === editingEvent.id) || (i.noteId && i.noteId === editingEvent.id) || (editingEvent.clientId && i.clientId === editingEvent.clientId && (i.date.split('T')[0] === evDateStr || (i.paymentDate && i.paymentDate.split('T')[0] === evDateStr))));
+                const associatedNote = clientNotes.find(n => n.eventId && n.eventId === editingEvent.id);
+                const associatedInv = invoices.find(i => (i.eventId && i.eventId === editingEvent.id) || (i.noteId && i.noteId === editingEvent.id));
 
                 return (
                   <div className="mb-4 bg-emerald-50 border border-emerald-200/80 rounded-2xl p-3.5 space-y-2.5">
@@ -8067,40 +7728,23 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                     value={newInvoice.clientId}
                     onChange={(e) => {
                       const selectedId = e.target.value;
-                      const patient = clients.find(c => c.id === selectedId);
-                      if (patient && patient.hasBono && (patient.bonoSessionsRemaining ?? 0) > 0) {
-                        setNewInvoiceBillingPlan('deduct_bono');
-                        setNewInvoice(prev => ({
-                          ...prev,
-                          clientId: selectedId,
-                          originalAmount: 60,
-                          discountType: 'bono',
-                          discountAmount: 60,
-                          discountLabel: `Décompté sur ${patient.bonoType || 'Bono'}`,
-                          amount: 0,
-                          description: translations[lang].admin.billing.deductBonoNotice,
-                        }));
-                      } else {
-                        setNewInvoiceBillingPlan('single');
-                        setNewInvoice(prev => ({
-                          ...prev,
-                          clientId: selectedId,
-                          originalAmount: 60,
-                          discountType: 'none',
-                          discountAmount: 0,
-                          discountLabel: '',
-                          amount: 60,
-                          description: 'Sesión de osteopatía',
-                        }));
-                      }
-                      setNewInvoiceIncludeToday(true);
+                      setNewInvoice(prev => ({
+                        ...prev,
+                        clientId: selectedId,
+                        originalAmount: 60,
+                        discountType: 'none',
+                        discountAmount: 0,
+                        discountLabel: '',
+                        amount: 60,
+                        description: 'Sesión de osteopatía',
+                      }));
                     }}
                     className="w-full p-2.5 bg-secondary rounded-xl border border-black/5 text-xs focus:outline-none focus:ring-1 focus:ring-primary focus:bg-white transition-all"
                   >
                     <option value="">-- {lang === 'fr' ? 'Sélectionnez un patient' : lang === 'es' ? 'Seleccione un paciente' : 'Select a patient'} --</option>
                     {clients.map((c, cIdx) => (
                       <option key={c.id ? `${c.id}-${cIdx}` : `inv-client-opt-${cIdx}`} value={c.id}>
-                        {c.name} {c.hasBono ? `★ (${c.bonoType || 'Bono'}${c.bonoSessionsRemaining !== undefined ? ` - ${c.bonoSessionsRemaining} s.` : ''})` : ''}
+                        {c.name}
                       </option>
                     ))}
                   </select>
@@ -8176,10 +7820,11 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                   </div>
                 )}
 
-                {/* Package & Bono Plan Selector */}
+                {/* Pricing Plan Selector */}
                 {(() => {
                   const modalPatient = clients.find(c => c.id === newInvoice.clientId);
-                  const patientHasRemainingBono = !!modalPatient?.hasBono && (modalPatient.bonoSessionsRemaining ?? 0) > 0;
+                  const bonoInfo = getClientActiveBonoInfo(modalPatient || null);
+                  const patientHasRemainingBono = bonoInfo.hasBono && bonoInfo.remaining > 0;
 
                   return (
                     <div className="space-y-3">
@@ -8187,8 +7832,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                         <label className="text-[10px] uppercase tracking-wider font-bold text-gray-400 block mb-1.5">
                           {translations[lang].admin.billing.pricingPlan}
                         </label>
-                        <div className="grid grid-cols-2 sm:grid-cols-2 gap-2">
-                          {/* Option 1: Single Session 60€ */}
+                        <div className="grid grid-cols-2 gap-2">
                           <button
                             type="button"
                             onClick={() => {
@@ -8205,7 +7849,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                             }}
                             className={`p-2.5 rounded-xl border text-left transition-all ${
                               newInvoiceBillingPlan === 'single'
-                                ? 'bg-white border-primary ring-2 ring-primary/20 shadow-xs'
+                                ? 'bg-white border-primary ring-2 ring-primary/25 shadow-xs'
                                 : 'bg-[#f8f8f2] border-black/5 hover:border-black/20 text-gray-600'
                             }`}
                           >
@@ -8213,82 +7857,9 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                               <span className="text-xs font-bold text-gray-800">{translations[lang].admin.billing.singleSession}</span>
                               <span className="text-xs font-bold text-primary">60 €</span>
                             </div>
-                            <p className="text-[10px] text-gray-400 mt-0.5">{translations[lang].admin.billing.singleSessionSubtitle}</p>
+                            <p className="text-[10px] text-gray-400 mt-0.5">Séance standard</p>
                           </button>
 
-                          {/* Option 2: Bono 3 Sessions 160€ */}
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setNewInvoiceBillingPlan('bono3');
-                              setNewInvoice(prev => ({
-                                ...prev,
-                                originalAmount: 180,
-                                discountType: 'bono',
-                                discountAmount: 20,
-                                discountLabel: translations[lang].admin.billing.bono3Title,
-                                amount: 160,
-                                description: translations[lang].admin.billing.bono3Desc,
-                              }));
-                            }}
-                            className={`p-2.5 rounded-xl border text-left transition-all ${
-                              newInvoiceBillingPlan === 'bono3'
-                                ? 'bg-emerald-50/70 border-emerald-500 ring-2 ring-emerald-500/20 shadow-xs'
-                                : 'bg-[#f8f8f2] border-black/5 hover:border-black/20 text-gray-600'
-                            }`}
-                          >
-                            <div className="flex items-center justify-between">
-                              <span className="text-xs font-bold text-emerald-950 flex items-center gap-1">
-                                <Sparkles size={11} className="text-emerald-600" />
-                                {translations[lang].admin.billing.bono3Title}
-                              </span>
-                              <span className="text-xs font-bold text-emerald-700">160 €</span>
-                            </div>
-                            <div className="flex items-center justify-between mt-1 text-[10px]">
-                              <span className="text-emerald-800/80 font-medium">53,33 € / s.</span>
-                              <span className="bg-emerald-600 text-white font-bold px-1.5 py-0.2 rounded-md text-[9px]">
-                                {translations[lang].admin.billing.bono3Saving}
-                              </span>
-                            </div>
-                          </button>
-
-                          {/* Option 3: Bono 5 Sessions 250€ */}
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setNewInvoiceBillingPlan('bono5');
-                              setNewInvoice(prev => ({
-                                ...prev,
-                                originalAmount: 300,
-                                discountType: 'bono',
-                                discountAmount: 50,
-                                discountLabel: translations[lang].admin.billing.bono5Title,
-                                amount: 250,
-                                description: translations[lang].admin.billing.bono5Desc,
-                              }));
-                            }}
-                            className={`p-2.5 rounded-xl border text-left transition-all ${
-                              newInvoiceBillingPlan === 'bono5'
-                                ? 'bg-emerald-50/70 border-emerald-500 ring-2 ring-emerald-500/20 shadow-xs'
-                                : 'bg-[#f8f8f2] border-black/5 hover:border-black/20 text-gray-600'
-                            }`}
-                          >
-                            <div className="flex items-center justify-between">
-                              <span className="text-xs font-bold text-emerald-950 flex items-center gap-1">
-                                <Sparkles size={11} className="text-emerald-600" />
-                                {translations[lang].admin.billing.bono5Title}
-                              </span>
-                              <span className="text-xs font-bold text-emerald-700">250 €</span>
-                            </div>
-                            <div className="flex items-center justify-between mt-1 text-[10px]">
-                              <span className="text-emerald-800/80 font-medium">50,00 € / s.</span>
-                              <span className="bg-emerald-600 text-white font-bold px-1.5 py-0.2 rounded-md text-[9px]">
-                                {translations[lang].admin.billing.bono5Saving}
-                              </span>
-                            </div>
-                          </button>
-
-                          {/* Option 4: Deduct from Bono (if patient has sessions) or Custom */}
                           {patientHasRemainingBono ? (
                             <button
                               type="button"
@@ -8297,11 +7868,11 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                 setNewInvoice(prev => ({
                                   ...prev,
                                   originalAmount: 60,
-                                  discountType: 'bono',
+                                  discountType: 'custom',
                                   discountAmount: 60,
-                                  discountLabel: `Décompté sur ${modalPatient.bonoType || 'Bono'}`,
+                                  discountLabel: `Décompté sur ${bonoInfo.bonoType}`,
                                   amount: 0,
-                                  description: translations[lang].admin.billing.deductBonoNotice,
+                                  description: `Séance décomptée du Bono (${bonoInfo.bonoType})`,
                                 }));
                               }}
                               className={`p-2.5 rounded-xl border text-left transition-all ${
@@ -8311,54 +7882,106 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                               }`}
                             >
                               <div className="flex items-center justify-between">
-                                <span className="text-xs font-bold text-teal-900">{translations[lang].admin.billing.deductBonoTitle}</span>
+                                <span className="text-xs font-bold text-teal-900">Décompte Bono</span>
                                 <span className="text-xs font-bold text-teal-700">0 €</span>
                               </div>
                               <p className="text-[10px] text-teal-700 font-semibold mt-0.5">
-                                {(translations[lang]?.admin?.billing?.bonoSessionsLeft || '{count} séances restantes').replace('{count}', String(modalPatient.bonoSessionsRemaining ?? 0))}
+                                {bonoInfo.remaining} séances restantes
                               </p>
                             </button>
                           ) : (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setNewInvoiceBillingPlan('custom');
-                                const disc = newInvoice.discountAmount > 0 ? newInvoice.discountAmount : 10;
-                                setNewInvoice(prev => ({
-                                  ...prev,
-                                  discountType: 'custom',
-                                  discountAmount: disc,
-                                  amount: Math.max(0, (prev.originalAmount || 60) - disc),
-                                }));
-                              }}
-                              className={`p-2.5 rounded-xl border text-left transition-all ${
-                                newInvoiceBillingPlan === 'custom'
-                                  ? 'bg-white border-primary ring-2 ring-primary/20 shadow-xs'
-                                  : 'bg-[#f8f8f2] border-black/5 hover:border-black/20 text-gray-600'
-                              }`}
-                            >
-                              <div className="flex items-center justify-between">
-                                <span className="text-xs font-bold text-gray-800">{translations[lang].admin.billing.customDiscount}</span>
-                                <span className="text-xs font-bold text-gray-500">{newInvoice.amount} €</span>
-                              </div>
-                              <p className="text-[10px] text-gray-400 mt-0.5">{translations[lang].admin.billing.customDiscountSubtitle}</p>
-                            </button>
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setNewInvoiceBillingPlan('bono3');
+                                  setNewInvoice(prev => ({
+                                    ...prev,
+                                    originalAmount: 180,
+                                    discountType: 'custom',
+                                    discountAmount: 20,
+                                    discountLabel: 'Bono 3 séances',
+                                    amount: 160,
+                                    description: 'Bono Ostéopathie - Forfait 3 séances',
+                                  }));
+                                }}
+                                className={`p-2.5 rounded-xl border text-left transition-all ${
+                                  newInvoiceBillingPlan === 'bono3'
+                                    ? 'bg-emerald-50/70 border-emerald-500 ring-2 ring-emerald-500/20 shadow-xs'
+                                    : 'bg-[#f8f8f2] border-black/5 hover:border-black/20 text-gray-600'
+                                }`}
+                              >
+                                <div className="flex items-center justify-between">
+                                  <span className="text-xs font-bold text-emerald-950 flex items-center gap-1">
+                                    <Sparkles size={11} className="text-emerald-600" />
+                                    Bono 3 séances
+                                  </span>
+                                  <span className="text-xs font-bold text-emerald-700">160 €</span>
+                                </div>
+                                <p className="text-[10px] text-emerald-700 mt-0.5">Forfait prépayé</p>
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setNewInvoiceBillingPlan('bono5');
+                                  setNewInvoice(prev => ({
+                                    ...prev,
+                                    originalAmount: 300,
+                                    discountType: 'custom',
+                                    discountAmount: 50,
+                                    discountLabel: 'Bono 5 séances',
+                                    amount: 250,
+                                    description: 'Bono Ostéopathie - Forfait 5 séances',
+                                  }));
+                                }}
+                                className={`p-2.5 rounded-xl border text-left transition-all ${
+                                  newInvoiceBillingPlan === 'bono5'
+                                    ? 'bg-emerald-50/70 border-emerald-500 ring-2 ring-emerald-500/20 shadow-xs'
+                                    : 'bg-[#f8f8f2] border-black/5 hover:border-black/20 text-gray-600'
+                                }`}
+                              >
+                                <div className="flex items-center justify-between">
+                                  <span className="text-xs font-bold text-emerald-950 flex items-center gap-1">
+                                    <Sparkles size={11} className="text-emerald-600" />
+                                    Bono 5 séances
+                                  </span>
+                                  <span className="text-xs font-bold text-emerald-700">250 €</span>
+                                </div>
+                                <p className="text-[10px] text-emerald-700 mt-0.5">Forfait prépayé</p>
+                              </button>
+                            </>
                           )}
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setNewInvoiceBillingPlan('custom');
+                              const disc = newInvoice.discountAmount > 0 ? newInvoice.discountAmount : 10;
+                              setNewInvoice(prev => ({
+                                ...prev,
+                                discountType: 'custom',
+                                discountAmount: disc,
+                                amount: Math.max(0, (prev.originalAmount || 60) - disc),
+                              }));
+                            }}
+                            className={`p-2.5 rounded-xl border text-left transition-all ${
+                              newInvoiceBillingPlan === 'custom'
+                                ? 'bg-white border-primary ring-2 ring-primary/25 shadow-xs'
+                                : 'bg-[#f8f8f2] border-black/5 hover:border-black/20 text-gray-600'
+                            }`}
+                          >
+                            <div className="flex items-center justify-between">
+                              <span className="text-xs font-bold text-gray-800">{translations[lang].admin.billing.customDiscount}</span>
+                              <span className="text-xs font-bold text-gray-500">{newInvoice.amount} €</span>
+                            </div>
+                            <p className="text-[10px] text-gray-400 mt-0.5">{translations[lang].admin.billing.customDiscountSubtitle}</p>
+                          </button>
                         </div>
                       </div>
 
-                      {/* Information card when Bono 3 or Bono 5 is selected */}
                       {(newInvoiceBillingPlan === 'bono3' || newInvoiceBillingPlan === 'bono5') && (
                         <div className="bg-emerald-50/70 border border-emerald-200/70 rounded-xl p-3 space-y-2 text-xs text-emerald-950">
-                          <div className="flex items-center justify-between">
-                            <span className="font-bold flex items-center gap-1.5 text-emerald-800">
-                              <Sparkles size={13} className="text-emerald-600" />
-                              {newInvoiceBillingPlan === 'bono3' ? translations[lang].admin.billing.bono3Desc : translations[lang].admin.billing.bono5Desc}
-                            </span>
-                            <span className="text-[11px] font-bold bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-md">
-                              {translations[lang].admin.billing.bonoAutoCredit}
-                            </span>
-                          </div>
                           <label className="flex items-center gap-2 cursor-pointer text-[11px] font-semibold text-emerald-900 select-none">
                             <input
                               type="checkbox"
@@ -8368,37 +7991,18 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                             />
                             <span>
                               {newInvoiceIncludeToday
-                                ? (translations[lang]?.admin?.billing?.bonoIncludeTodayYes || "Inclure la séance ({remaining} restantes)").replace('{remaining}', String(newInvoiceBillingPlan === 'bono3' ? 2 : 4))
-                                : (translations[lang]?.admin?.billing?.bonoIncludeTodayNo || "Ne pas inclure ({total} crédités)").replace('{total}', String(newInvoiceBillingPlan === 'bono3' ? 3 : 5))}
+                                ? `Inclure la séance du jour (${newInvoiceBillingPlan === 'bono3' ? 2 : 4} restantes)`
+                                : `Ne pas inclure (${newInvoiceBillingPlan === 'bono3' ? 3 : 5} crédités)`}
                             </span>
                           </label>
                         </div>
                       )}
 
-                      {/* Information card when Deduct from active Bono is selected */}
-                      {newInvoiceBillingPlan === 'deduct_bono' && modalPatient?.hasBono && (
-                        <div className="bg-teal-50/70 border border-teal-200/70 rounded-xl p-3 text-xs text-teal-950 flex items-center justify-between">
-                          <div>
-                            <p className="font-bold text-teal-900 flex items-center gap-1.5">
-                              <BadgePercent size={13} className="text-teal-600" />
-                              {translations[lang].admin.billing.deductBonoNotice}
-                            </p>
-                            <p className="text-[11px] text-teal-800 mt-0.5">
-                              {(translations[lang]?.admin?.billing?.deductBonoRemainingAfter || "Il restera {count} séance(s) sur son forfait").replace('{count}', String(Math.max(0, (modalPatient.bonoSessionsRemaining ?? 1) - 1)))}
-                            </p>
-                          </div>
-                          <span className="text-xs font-bold text-teal-800 bg-teal-100 px-2 py-1 rounded-lg">
-                            {translations[lang].admin.billing.prepaid}
-                          </span>
-                        </div>
-                      )}
-
-                      {/* Custom discount inputs */}
                       {newInvoiceBillingPlan === 'custom' && (
                         <div className="grid grid-cols-2 gap-2 p-2.5 bg-[#f8f8f2] rounded-xl border border-black/5">
                           <div>
                             <label className="text-[9px] uppercase tracking-wider font-bold text-gray-400 block mb-0.5">
-                              {translations[lang].admin.billing.discountAmount || (lang === 'fr' ? 'Montant remise (€)' : 'Discount (€)')}
+                              {translations[lang].admin.billing.discountAmount || 'Descuento (€)'}
                             </label>
                             <input
                               type="number"
@@ -8416,24 +8020,23 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                           </div>
                           <div>
                             <label className="text-[9px] uppercase tracking-wider font-bold text-gray-400 block mb-0.5">
-                              {translations[lang].admin.billing.discountLabel || (lang === 'fr' ? 'Libellé remise' : 'Discount label')}
+                              {translations[lang].admin.billing.discountLabel || 'Motivo'}
                             </label>
                             <input
                               type="text"
                               value={newInvoice.discountLabel}
                               onChange={(e) => setNewInvoice(prev => ({ ...prev, discountLabel: e.target.value }))}
-                              placeholder="Ex: Remise fidélité"
+                              placeholder="Ej: Descuento"
                               className="w-full p-2 bg-white rounded-lg border border-black/10 text-xs"
                             />
                           </div>
                         </div>
                       )}
 
-                      {/* Net Amount to Pay summary card */}
                       <div className="flex items-center justify-between p-3 bg-white rounded-2xl border border-black/10 shadow-xs">
                         <div>
                           <span className="text-xs font-bold text-gray-700 block">
-                            {translations[lang].admin.billing.netAmountToPay || (lang === 'fr' ? 'Net à régler par le patient' : 'Net to pay')}
+                            {translations[lang].admin.billing.netAmountToPay || 'Total a pagar'}
                           </span>
                           {newInvoice.discountAmount > 0 && (
                             <span className="text-[11px] text-gray-400 line-through">
@@ -8664,58 +8267,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                   />
                 </div>
 
-                {/* Bono in Edit Client */}
-                <div className="bg-[#f4f4ec] p-3.5 rounded-2xl border border-black/5 space-y-2.5">
-                  <div className="flex items-center justify-between">
-                    <label className="text-xs font-bold text-gray-700 flex items-center gap-1.5 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={editingClient.hasBono || false}
-                        onChange={(e) => setEditingClient(prev => prev ? ({
-                          ...prev,
-                          hasBono: e.target.checked,
-                          defaultDiscount: e.target.checked ? (prev.defaultDiscount || 10) : 0,
-                          bonoSessionsRemaining: e.target.checked ? (prev.bonoSessionsRemaining || 5) : 0,
-                          bonoType: e.target.checked ? (prev.bonoType || t('admin.billing.bono5Title')) : ''
-                        }) : null)}
-                        className="rounded text-primary focus:ring-primary w-4 h-4"
-                      />
-                      <span>{lang === 'fr' ? 'Patient bénéficiaire d’un Bono / Forfait' : 'Patient with Bono / Discount pack'}</span>
-                    </label>
-                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
-                      Bono
-                    </span>
-                  </div>
 
-                  {editingClient.hasBono && (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-2 border-t border-black/5">
-                      <div>
-                        <label className="text-[9px] uppercase tracking-wider font-bold text-gray-400 block mb-0.5">
-                          {lang === 'fr' ? 'Type / Intitulé' : 'Bono Type'}
-                        </label>
-                        <input
-                          type="text"
-                          value={editingClient.bonoType || ''}
-                          onChange={(e) => setEditingClient(prev => prev ? ({ ...prev, bonoType: e.target.value }) : null)}
-                          placeholder="Ex: Bono 3 séances"
-                          className="w-full p-2 bg-white rounded-xl border border-black/10 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
-                        />
-                      </div>
-                      <div>
-                        <label className="text-[9px] uppercase tracking-wider font-bold text-gray-400 block mb-0.5">
-                          {lang === 'fr' ? 'Séances restantes' : 'Remaining sessions'}
-                        </label>
-                        <input
-                          type="number"
-                          value={editingClient.bonoSessionsRemaining ?? (editingClient.bonoType?.includes('3') ? 3 : 5)}
-                          onChange={(e) => setEditingClient(prev => prev ? ({ ...prev, bonoSessionsRemaining: Number(e.target.value) }) : null)}
-                          placeholder="3"
-                          className="w-full p-2 bg-white rounded-xl border border-black/10 text-xs font-bold text-primary focus:outline-none focus:ring-1 focus:ring-primary"
-                        />
-                      </div>
-                    </div>
-                  )}
-                </div>
 
                 <div className="flex items-center justify-between pt-4 gap-3">
                   <button
@@ -8836,7 +8388,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                   <div className="flex items-center justify-between">
                     <span className="text-[10px] uppercase font-bold tracking-wider text-gray-600 flex items-center gap-1.5">
                       <BadgePercent size={13} className="text-emerald-600" />
-                      {translations[lang].admin.billing.bonoOrDiscount || (lang === 'fr' ? 'Remise Bono / Tarif préférentiel' : 'Bono / Discount')}
+                      {(lang === 'fr' ? 'Tarif préférentiel / Remise' : 'Discount')}
                     </span>
                     <div className="flex items-center gap-1">
                       <button
@@ -8862,7 +8414,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                           const orig = editingInvoice.originalAmount || editingInvoice.amount;
                           setEditingInvoice(prev => prev ? ({
                             ...prev,
-                            discountType: 'bono',
+                            discountType: 'custom',
                             discountAmount: discount,
                             discountLabel: patient?.bonoType || prev.discountLabel || 'Bono séance',
                             amount: Math.max(0, orig - discount),
@@ -8919,7 +8471,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                           type="text"
                           value={editingInvoice.discountLabel || ''}
                           onChange={(e) => setEditingInvoice(prev => prev ? ({ ...prev, discountLabel: e.target.value }) : null)}
-                          placeholder={t('admin.billing.bono5Title')}
+                          placeholder={t('admin.billing.bonoTitle')}
                           className="w-full p-2 bg-white rounded-xl border border-black/10 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
                         />
                       </div>
@@ -9131,7 +8683,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                         </div>
                         <div className="flex items-center gap-0.5 text-amber-400 shrink-0">
                           {[...Array(rev.rating || 5)].map((_, i) => (
-                            <Star key={i} size={13} className="fill-amber-400 text-amber-400" />
+                            <Star key={`star-${index}-${i}`} size={13} className="fill-amber-400 text-amber-400" />
                           ))}
                         </div>
                       </div>
