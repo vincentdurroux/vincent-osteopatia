@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Users, Calendar, FileText, TrendingUp, Plus, Search, Trash2, 
@@ -556,6 +556,57 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
   const [selectedInvoiceForPrint, setSelectedInvoiceForPrint] = useState<Invoice | null>(null);
   const invoiceRef = useRef<HTMLDivElement>(null);
   const recapRef = useRef<HTMLDivElement>(null);
+  const weekScrollContainerRef = useRef<HTMLDivElement>(null);
+
+  const centerOnTodayInWeekView = useCallback((smooth = true) => {
+    if (calendarViewMode !== 'week') return;
+    const container = weekScrollContainerRef.current;
+    if (!container) return;
+
+    const todayEl = container.querySelector<HTMLElement>('[data-is-today="true"]');
+    if (!todayEl) return;
+
+    const stickyAxisWidth = 64;
+    const containerRect = container.getBoundingClientRect();
+    const todayRect = todayEl.getBoundingClientRect();
+
+    const currentRelLeft = todayRect.left - containerRect.left;
+    const todayCenterRel = currentRelLeft + (todayRect.width / 2);
+    const visibleCenter = (containerRect.width + stickyAxisWidth) / 2;
+    const diff = todayCenterRel - visibleCenter;
+    const targetScrollLeft = Math.max(0, container.scrollLeft + diff);
+
+    container.scrollTo({
+      left: targetScrollLeft,
+      behavior: smooth ? 'smooth' : 'auto'
+    });
+  }, [calendarViewMode]);
+
+  // Center horizontally on Today whenever the calendar tab opens or week view is activated
+  useEffect(() => {
+    if (activeTab === 'calendar' && calendarViewMode === 'week') {
+      const t1 = setTimeout(() => {
+        centerOnTodayInWeekView(false);
+      }, 50);
+      const t2 = setTimeout(() => {
+        centerOnTodayInWeekView(true);
+      }, 220);
+      return () => {
+        clearTimeout(t1);
+        clearTimeout(t2);
+      };
+    }
+  }, [activeTab, calendarViewMode, currentCalendarDate, centerOnTodayInWeekView]);
+
+  // Re-center on window resize if viewing calendar in week mode
+  useEffect(() => {
+    if (activeTab !== 'calendar' || calendarViewMode !== 'week') return;
+    const handleResize = () => {
+      centerOnTodayInWeekView(false);
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, [activeTab, calendarViewMode, centerOnTodayInWeekView]);
 
   // Patient list scroll detection
   const patientListRef = useRef<HTMLDivElement>(null);
@@ -937,6 +988,11 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
       if (newNote.treatment.trim()) parts.push(newNote.treatment.trim());
       const combinedContent = parts.join('\n\n') || newNote.motif?.trim() || '';
 
+      const noteDateOnly = new Date(newNote.date).toISOString().split('T')[0];
+      const isAlreadyRedeemed = Boolean(
+        selectedClient.bonoRedeemedDates && selectedClient.bonoRedeemedDates.includes(noteDateOnly)
+      );
+
       const created = await api.createClientNote({
         clientId: selectedClient.id,
         anamnese: newNote.anamnese.trim(),
@@ -946,6 +1002,8 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
         motif: newNote.motif?.trim() || undefined,
         date: new Date(newNote.date).toISOString(),
         eventId: newNote.eventId || undefined,
+        isBonoRedeemed: isAlreadyRedeemed,
+        bonoType: isAlreadyRedeemed ? (selectedClient.bonoType || 'Bono') : undefined,
       });
       setClientNotes(prev => [created, ...prev]);
       setAllNotes(prev => [created, ...prev]);
@@ -1098,16 +1156,44 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
           cancelText: translations[lang]?.admin?.billing?.cancel || (lang === 'fr' ? 'Annuler' : 'Cancel'),
           isDangerous: false,
           onConfirm: async () => {
+            const invDateOnly = newInvoice.date ? newInvoice.date.split('T')[0] : '';
+            const currentRedeemedDates = client.bonoRedeemedDates || [];
+            const updatedRedeemedDates = invDateOnly 
+              ? Array.from(new Set([...currentRedeemedDates, invDateOnly]))
+              : currentRedeemedDates;
+
             const updatedClient: Client = {
               ...client,
               bonoSessionsRemaining: newRemaining,
               lastSessionAt: newInvoice.date ? new Date(newInvoice.date).toISOString() : client.lastSessionAt,
+              bonoRedeemedDates: updatedRedeemedDates,
             };
             const savedClient = await api.updateClient(updatedClient);
             setClients(prev => prev.map(c => c.id === savedClient.id ? savedClient : c));
             if (selectedClient?.id === client.id) {
               setSelectedClient(savedClient);
             }
+
+            // Also find and mark any existing client notes associated with this event/date
+            const matchingNotes = clientNotes.filter(n => 
+              (newInvoice.eventId && n.eventId === newInvoice.eventId) ||
+              (invDateOnly && n.date && n.date.split('T')[0] === invDateOnly)
+            );
+            for (const n of matchingNotes) {
+              const updatedNote: ClientNote = {
+                ...n,
+                isBonoRedeemed: true,
+                bonoType: bonoName,
+              };
+              try {
+                const saved = await api.updateClientNote(updatedNote);
+                setClientNotes(prev => prev.map(item => item.id === saved.id ? saved : item));
+                setAllNotes(prev => prev.map(item => item.id === saved.id ? saved : item));
+              } catch (noteErr) {
+                console.warn('Could not update note bono state:', noteErr);
+              }
+            }
+
             setIsAddInvoiceOpen(false);
             setNewInvoiceBillingPlan('single');
             setNewInvoiceIncludeToday(true);
@@ -1259,14 +1345,33 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
           cancelText: translations[lang]?.admin?.billing?.cancel || (lang === 'fr' ? 'Annuler' : 'Cancel'),
           isDangerous: false,
           onConfirm: async () => {
+            const currentRedeemedDates = selectedClient.bonoRedeemedDates || [];
+            const updatedRedeemedDates = Array.from(new Set([...currentRedeemedDates, noteDateStr]));
+
             const updatedClient: Client = {
               ...selectedClient,
               bonoSessionsRemaining: newRemaining,
               lastSessionAt: note.date,
+              bonoRedeemedDates: updatedRedeemedDates,
             };
             const savedClient = await api.updateClient(updatedClient);
             setClients(prev => prev.map(c => c.id === savedClient.id ? savedClient : c));
             setSelectedClient(savedClient);
+
+            // Update the note itself with isBonoRedeemed = true
+            const updatedNote: ClientNote = {
+              ...note,
+              isBonoRedeemed: true,
+              bonoType: bonoName,
+            };
+            try {
+              const savedNote = await api.updateClientNote(updatedNote);
+              setClientNotes(prev => prev.map(n => n.id === savedNote.id ? savedNote : n));
+              setAllNotes(prev => prev.map(n => n.id === savedNote.id ? savedNote : n));
+            } catch (noteErr) {
+              console.warn('Could not update note bono state:', noteErr);
+            }
+
             setCreatingInvoiceForNoteId(null);
           }
         });
@@ -2237,7 +2342,12 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
               <button
                 key={item.id}
                 type="button"
-                onClick={() => setActiveTab(item.id as TabType)}
+                onClick={() => {
+                  if (item.id === 'calendar') {
+                    setCurrentCalendarDate(new Date());
+                  }
+                  setActiveTab(item.id as TabType);
+                }}
                 className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-bold whitespace-nowrap transition-all cursor-pointer ${
                   isActive
                     ? 'bg-primary text-white shadow-xs'
@@ -2309,7 +2419,12 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
               return (
                 <button
                   key={item.id}
-                  onClick={() => setActiveTab(item.id as TabType)}
+                  onClick={() => {
+                    if (item.id === 'calendar') {
+                      setCurrentCalendarDate(new Date());
+                    }
+                    setActiveTab(item.id as TabType);
+                  }}
                   className={`flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl transition-all whitespace-nowrap w-full text-xs font-semibold uppercase tracking-wider cursor-pointer ${
                     isActive 
                       ? 'bg-primary text-white shadow-md shadow-primary/10' 
@@ -2434,7 +2549,10 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                         <span>{lang === 'fr' ? "Nouveau RDV" : "New Appointment"}</span>
                       </button>
                       <button
-                        onClick={() => setActiveTab('calendar')}
+                        onClick={() => {
+                          setCurrentCalendarDate(new Date());
+                          setActiveTab('calendar');
+                        }}
                         className="flex items-center gap-1.5 px-3.5 py-2 bg-[#f4f4ec] hover:bg-black/5 text-gray-700 rounded-2xl text-xs font-bold transition-all border border-black/5"
                       >
                         <span>{lang === 'fr' ? "Voir l'agenda complet" : "Full calendar"}</span>
@@ -3243,6 +3361,8 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                 });
                                 const paidInvoice = associatedInvoices.find(inv => inv.status === 'paid');
                                 const pendingInvoice = associatedInvoices.find(inv => inv.status === 'pending');
+                                const isBonoRedeemed = associatedNotes.some(n => n.isBonoRedeemed) || 
+                                  Boolean(selectedClient?.bonoRedeemedDates && selectedClient.bonoRedeemedDates.includes(evDateStr));
 
                                 return (
                                   <div 
@@ -3339,7 +3459,15 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                                 </button>
                                               );
                                             })()
-                                          ) : pendingInvoice ? (
+                                          ) : isBonoRedeemed ? (
+                                              <span 
+                                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 shadow-2xs"
+                                                title={lang === 'fr' ? "Séance décomptée du Bono - Réglé" : "Session redeemed from Bono - Settled"}
+                                              >
+                                                <Sparkles size={11} className="text-emerald-700" />
+                                                <span>{translations[lang].admin.billing.bonoRedemptionLabel} (✓ {lang === 'fr' ? 'Réglé' : lang === 'es' ? 'Pagado' : 'Settled'})</span>
+                                              </span>
+                                            ) : pendingInvoice ? (
                                             <button
                                               type="button"
                                               onClick={() => setSelectedInvoiceForPrint(pendingInvoice)}
@@ -3450,7 +3578,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                           </button>
                                         )}
 
-                                        {!paidInvoice && (
+                                        {!paidInvoice && !isBonoRedeemed && (
                                           <button
                                             type="button"
                                             onClick={() => {
@@ -3890,6 +4018,12 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                 }
                               });
 
+                              const noteDateOnly = note.date.includes('T') ? note.date.split('T')[0] : note.date;
+                              const isNoteBonoRedeemed = Boolean(
+                                note.isBonoRedeemed || 
+                                (selectedClient?.bonoRedeemedDates && selectedClient.bonoRedeemedDates.includes(noteDateOnly))
+                              );
+
                               return associatedInvoice ? (
                                 <div className="mt-4 pt-4 border-t border-black/5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-stone-50 p-3.5 rounded-2xl border border-black/5">
                                   <div className="flex items-center gap-2.5">
@@ -3950,6 +4084,28 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                       <Printer size={13} />
                                       <span>{translations[lang].admin.billing.receipt}</span>
                                     </button>
+                                  </div>
+                                </div>
+                              ) : isNoteBonoRedeemed ? (
+                                <div className="mt-4 pt-4 border-t border-black/5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-emerald-50/70 p-3.5 rounded-2xl border border-emerald-200/80 shadow-2xs">
+                                  <div className="flex items-center gap-2.5">
+                                    <div className="w-8 h-8 rounded-xl bg-emerald-100 flex items-center justify-center text-emerald-700 shrink-0 shadow-2xs">
+                                      <Sparkles size={16} />
+                                    </div>
+                                    <div className="text-left">
+                                      <div className="flex items-center gap-2 flex-wrap">
+                                        <span className="text-xs font-bold text-emerald-950">
+                                          {lang === 'fr' ? 'Séance décomptée du Bono' : lang === 'es' ? 'Sesión descontada del Bono' : 'Session redeemed from Bono'}
+                                        </span>
+                                        <span className="text-[10px] px-2 py-0.5 rounded-full font-bold flex items-center gap-1 bg-emerald-600 text-white shadow-2xs">
+                                          <CheckCircle2 size={11} />
+                                          <span>{lang === 'fr' ? 'Réglé' : lang === 'es' ? 'Pagado' : 'Settled'}</span>
+                                        </span>
+                                      </div>
+                                      <p className="text-[10px] text-emerald-800 font-medium mt-0.5">
+                                        {note.bonoType || selectedClient?.bonoType || 'Bono'} • {lang === 'fr' ? 'Forfait prépayé (Décompté du solde · Aucune facture à émettre)' : lang === 'es' ? 'Bono prepagado (Descontado del saldo)' : 'Prepaid package (Redeemed from balance)'}
+                                      </p>
+                                    </div>
                                   </div>
                                 </div>
                               ) : (
@@ -4632,7 +4788,10 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                         </button>
                         
                         <button
-                          onClick={() => setCurrentCalendarDate(new Date())}
+                          onClick={() => {
+                            setCurrentCalendarDate(new Date());
+                            setTimeout(() => centerOnTodayInWeekView(true), 60);
+                          }}
                           className="px-2.5 sm:px-3 py-1 text-xs font-bold text-slate-700 hover:bg-white rounded-lg transition-all shadow-2xs cursor-pointer"
                         >
                           {lang === 'fr' ? "Aujourd'hui" : lang === 'es' ? "Hoy" : "Today"}
@@ -4661,7 +4820,10 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                           <span>{lang === 'fr' ? "Mois" : lang === 'es' ? "Mes" : "Month"}</span>
                         </button>
                         <button
-                          onClick={() => setCalendarViewMode('week')}
+                          onClick={() => {
+                            setCalendarViewMode('week');
+                            setTimeout(() => centerOnTodayInWeekView(true), 60);
+                          }}
                           className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
                             calendarViewMode === 'week' 
                               ? 'bg-white text-[#0e9f8e] shadow-xs' 
@@ -4721,7 +4883,10 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                     }
 
                     return (
-                      <div className="w-full overflow-x-auto rounded-2xl border border-slate-200/90 bg-white shadow-2xs">
+                      <div 
+                        ref={weekScrollContainerRef}
+                        className="w-full overflow-x-auto rounded-2xl border border-slate-200/90 bg-white shadow-2xs scroll-smooth"
+                      >
                         <div className="min-w-[1050px]">
                           {/* Grid Header: Time column + 7 Day Headers with Day Number & Gold Counters */}
                           <div className="grid grid-cols-[64px_repeat(7,minmax(140px,1fr))] border-b border-slate-200 bg-slate-50/95 sticky top-0 z-10 shadow-2xs">
@@ -4738,14 +4903,24 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                               return (
                                 <div
                                   key={dayIdx}
+                                  data-is-today={dayItem.isToday ? "true" : undefined}
                                   className={`p-2.5 border-r border-slate-200/80 last:border-r-0 flex items-center justify-between gap-1.5 transition-colors ${
-                                    dayItem.isToday ? 'bg-[#e0f5f7]/60' : 'bg-white/80'
+                                    dayItem.isToday ? 'bg-[#e0f5f7]/70 ring-1 ring-inset ring-[#009cb2]/30' : 'bg-white/80'
                                   }`}
                                 >
                                   <div>
-                                    <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">
-                                      {dayItem.dayName}
-                                    </span>
+                                    <div className="flex items-center gap-1.5">
+                                      <span className={`text-[11px] font-bold uppercase tracking-wider block ${
+                                        dayItem.isToday ? 'text-[#009cb2]' : 'text-slate-500'
+                                      }`}>
+                                        {dayItem.dayName}
+                                      </span>
+                                      {dayItem.isToday && (
+                                        <span className="text-[9px] font-bold uppercase px-1.5 py-0.2 rounded bg-[#009cb2] text-white tracking-wide">
+                                          {lang === 'fr' ? "Aujourd'hui" : lang === 'es' ? "Hoy" : "Today"}
+                                        </span>
+                                      )}
+                                    </div>
                                     <div className="flex items-center gap-1.5 mt-0.5">
                                       <button
                                         onClick={() => {
@@ -4814,8 +4989,9 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                     return (
                                       <div
                                         key={dayIdx}
+                                        data-is-today={dayItem.isToday ? "true" : undefined}
                                         className={`p-1 border-r border-slate-200/60 last:border-r-0 relative group/slot transition-colors flex flex-col justify-start ${
-                                          dayItem.isToday ? 'bg-[#e0f5f7]/20' : 'bg-white'
+                                          dayItem.isToday ? 'bg-[#e0f5f7]/25' : 'bg-white'
                                         }`}
                                       >
                                         {slotEvents.length > 0 ? (
@@ -5942,7 +6118,12 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
               <button
                 key={item.id}
                 type="button"
-                onClick={() => setActiveTab(item.id as TabType)}
+                onClick={() => {
+                  if (item.id === 'calendar') {
+                    setCurrentCalendarDate(new Date());
+                  }
+                  setActiveTab(item.id as TabType);
+                }}
                 className={`flex-1 flex flex-col items-center justify-center py-1 px-1 rounded-2xl transition-all active:scale-95 touch-manipulation min-h-[48px] cursor-pointer ${
                   isActive ? 'text-primary' : 'text-gray-400 hover:text-gray-600'
                 }`}

@@ -183,6 +183,7 @@ export function mapClientFromDB(c: any): Client {
     defaultDiscount: c.defaultDiscount !== undefined ? Number(c.defaultDiscount) : (c.default_discount !== undefined ? Number(c.default_discount) : undefined),
     bonoSessionsRemaining: c.bonoSessionsRemaining !== undefined ? Number(c.bonoSessionsRemaining) : (c.bono_sessions_remaining !== undefined ? Number(c.bono_sessions_remaining) : undefined),
     profileNote: c.profileNote || c.profile_note || c.remarque || c.note || '',
+    bonoRedeemedDates: Array.isArray(c.bonoRedeemedDates || c.bono_redeemed_dates) ? (c.bonoRedeemedDates || c.bono_redeemed_dates) : [],
   };
 }
 
@@ -197,6 +198,8 @@ export function mapNoteFromDB(n: any): ClientNote {
     content: n.content || `Anamnèse :\n${n.anamnese || ''}\n\nTraitement :\n${n.treatment || ''}`,
     category: n.category || 'treatment',
     eventId: n.eventId || n.event_id || undefined,
+    isBonoRedeemed: Boolean(n.isBonoRedeemed || n.is_bono_redeemed || n.bonoRedeemed),
+    bonoType: n.bonoType || n.bono_type || undefined,
   };
 }
 
@@ -1567,6 +1570,14 @@ export const api = {
         if (newNote.eventId) {
           camelPayload.eventId = newNote.eventId;
         }
+        if (newNote.isBonoRedeemed !== undefined) {
+          snakePayload.is_bono_redeemed = newNote.isBonoRedeemed;
+          camelPayload.isBonoRedeemed = newNote.isBonoRedeemed;
+        }
+        if (newNote.bonoType) {
+          snakePayload.bono_type = newNote.bonoType;
+          camelPayload.bonoType = newNote.bonoType;
+        }
 
         const result = await executeResilientInsert('client_notes', [snakePayload, camelPayload]);
 
@@ -1618,6 +1629,10 @@ export const api = {
           treatment: note.treatment || '',
           content: note.content || '',
           category: note.category || 'treatment',
+          is_bono_redeemed: note.isBonoRedeemed,
+          isBonoRedeemed: note.isBonoRedeemed,
+          bono_type: note.bonoType,
+          bonoType: note.bonoType,
         };
 
         const result = await executeResilientUpdate('client_notes', note.id, [payload]);

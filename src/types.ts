@@ -15,6 +15,7 @@ export interface Client {
   defaultDiscount?: number;
   bonoSessionsRemaining?: number;
   profileNote?: string;
+  bonoRedeemedDates?: string[];
 }
 
 export interface ClientNote {
@@ -27,6 +28,8 @@ export interface ClientNote {
   content: string;
   category: 'evaluation' | 'treatment' | 'follow-up' | 'general';
   eventId?: string;
+  isBonoRedeemed?: boolean;
+  bonoType?: string;
 }
 
 export interface Invoice {
