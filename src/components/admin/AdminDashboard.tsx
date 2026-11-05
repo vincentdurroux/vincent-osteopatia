@@ -1206,7 +1206,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                 discountType: 'bono',
                 discountLabel: `Décompté sur ${bonoName}`,
                 status: 'paid',
-                paymentMethod: newInvoice.paymentMethod || 'transfer',
+                paymentMethod: 'not_applicable',
                 date: sessionDate,
                 paymentDate: newInvoice.paymentDate || sessionDate,
                 description: `${translations[lang]?.admin?.billing?.deductBonoDesc || "Séance d'Ostéopathie (Prise en compte Bono)"} (${bonoName})`,
@@ -1409,7 +1409,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                 discountType: 'bono',
                 discountLabel: `Décompté sur ${bonoName}`,
                 status: 'paid',
-                paymentMethod: 'transfer',
+                paymentMethod: 'not_applicable',
                 date: noteDateStr,
                 paymentDate: noteDateStr,
                 description: `${translations[lang]?.admin?.billing?.deductBonoDesc || "Séance d'Ostéopathie (Prise en compte Bono)"} (${bonoName})`,
@@ -4109,8 +4109,10 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                       </div>
                                       <p className="text-[10px] text-gray-500 mt-0.5">
                                         {associatedInvoice.amount} € • {
-                                          associatedInvoice.paymentMethod === 'card' ? (lang === 'fr' ? 'Carte' : lang === 'es' ? 'Tarjeta' : 'Card') :
-                                          associatedInvoice.paymentMethod === 'cash' ? (lang === 'fr' ? 'Espèces' : lang === 'es' ? 'Efectivo' : 'Cash') : (lang === 'fr' ? 'Virement' : lang === 'es' ? 'Transferencia' : 'Transfer')
+                                          associatedInvoice.isBonoRedemption || associatedInvoice.amount === 0 || associatedInvoice.paymentMethod === 'not_applicable'
+                                            ? (translations[lang]?.admin?.billing?.notApplicable || (lang === 'fr' ? 'Non applicable' : lang === 'es' ? 'No aplicable' : 'Not applicable'))
+                                            : associatedInvoice.paymentMethod === 'card' ? (lang === 'fr' ? 'Carte' : lang === 'es' ? 'Tarjeta' : 'Card') :
+                                              associatedInvoice.paymentMethod === 'cash' ? (lang === 'fr' ? 'Espèces' : lang === 'es' ? 'Efectivo' : 'Cash') : (lang === 'fr' ? 'Virement' : lang === 'es' ? 'Transferencia' : 'Transfer')
                                         }
                                       </p>
                                     </div>
@@ -6023,79 +6025,138 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                   </thead>
                   <tbody>
                     {displayedInvoices.map(inv => (
-                      <tr key={inv.id} className="border-b border-black/5 hover:bg-black/[0.01] transition-colors group">
+                      <tr 
+                        key={inv.id} 
+                        className={`border-b transition-colors group ${
+                          inv.isBonoRedemption 
+                            ? 'bg-emerald-50/40 hover:bg-emerald-50/70 border-emerald-100/60' 
+                            : 'border-black/5 hover:bg-black/[0.01]'
+                        }`}
+                      >
                         <td className="py-4">
                           {inv.isBonoRedemption ? (
-                            <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg bg-emerald-50 text-emerald-700 text-[10px] font-bold border border-emerald-200/50">
-                              <Sparkles size={11} />
-                              {translations[lang].admin.billing.bonoRedemptionLabel}
-                            </span>
+                            <div className="flex flex-col items-start gap-1">
+                              <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-lg bg-emerald-100 text-emerald-900 text-[10px] font-bold border border-emerald-200/90 shadow-2xs">
+                                <Sparkles size={11} className="text-emerald-700 shrink-0" />
+                                {translations[lang]?.admin?.billing?.bonoRedemptionLabel || (lang === 'fr' ? 'Décompté du Bono' : lang === 'es' ? 'Descontado del Bono' : 'Redeemed from Bono')}
+                              </span>
+                              <span className="text-[9px] text-gray-400 font-medium">
+                                {inv.invoiceNumber ? `#${inv.invoiceNumber}` : (lang === 'fr' ? 'Séance décomptée' : lang === 'es' ? 'Sesión descontada' : 'Redeemed session')}
+                              </span>
+                            </div>
                           ) : (
                             <span className="font-bold text-primary">{inv.invoiceNumber}</span>
                           )}
                         </td>
-                        <td className="py-4 font-bold">{inv.clientName}</td>
+                        <td className="py-4 font-bold">
+                          <div>{inv.clientName}</div>
+                          {inv.isBonoRedemption && (
+                            <div className="text-[10px] font-medium text-emerald-800/80 mt-0.5">
+                              {inv.discountLabel || (lang === 'fr' ? 'Forfait Bono' : lang === 'es' ? 'Bono prepagado' : 'Prepaid Bono')}
+                            </div>
+                          )}
+                        </td>
                         <td className="py-4 text-gray-500 text-xs">
                           <div className="font-medium text-gray-700">{new Date(inv.date).toLocaleDateString(lang === 'fr' ? 'fr-FR' : lang === 'es' ? 'es-ES' : 'en-US')}</div>
-                          {inv.status === 'paid' && inv.paymentDate && inv.paymentDate !== inv.date && (
+                          {inv.isBonoRedemption ? (
+                            <div className="text-[10px] text-emerald-700 font-medium mt-0.5">
+                              {lang === 'fr' ? 'Séance effectuée' : lang === 'es' ? 'Sesión efectuada' : 'Session completed'}
+                            </div>
+                          ) : inv.status === 'paid' && inv.paymentDate && inv.paymentDate !== inv.date ? (
                             <div className="text-[10px] text-emerald-700 font-semibold mt-0.5">
                               {lang === 'fr' ? 'Règlement : ' : lang === 'es' ? 'Pago: ' : 'Paid: '}
                               {new Date(inv.paymentDate).toLocaleDateString(lang === 'fr' ? 'fr-FR' : lang === 'es' ? 'es-ES' : 'en-US')}
                             </div>
-                          )}
+                          ) : null}
                         </td>
                         <td className="py-4">
-                          <span className={`text-[9px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-full ${
-                            inv.paymentMethod === 'card' ? 'bg-indigo-50 text-indigo-700' :
-                            inv.paymentMethod === 'cash' ? 'bg-amber-50 text-amber-700' : 'bg-emerald-50 text-emerald-700'
-                          }`}>
-                            {inv.paymentMethod === 'card' ? (lang === 'fr' ? 'Carte' : lang === 'es' ? 'Tarjeta' : 'Card') :
-                             inv.paymentMethod === 'cash' ? (lang === 'fr' ? 'Espèces' : lang === 'es' ? 'Efectivo' : 'Cash') : (lang === 'fr' ? 'Virement' : lang === 'es' ? 'Transferencia' : 'Transfer')}
-                          </span>
+                          {inv.isBonoRedemption || inv.amount === 0 || inv.paymentMethod === 'not_applicable' ? (
+                            <span 
+                              className="text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-stone-100 text-stone-600 border border-stone-200 inline-block"
+                              title={lang === 'fr' ? 'Aucun paiement direct : décompté du Bono précédemment payé' : lang === 'es' ? 'Sin pago directo: descontado del Bono previamente pagado' : 'No direct payment: deducted from previously paid Bono'}
+                            >
+                              {translations[lang]?.admin?.billing?.notApplicable || (lang === 'fr' ? 'Non applicable' : lang === 'es' ? 'No aplicable' : 'Not applicable')}
+                            </span>
+                          ) : (
+                            <span className={`text-[9px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-full ${
+                              inv.paymentMethod === 'card' ? 'bg-indigo-50 text-indigo-700' :
+                              inv.paymentMethod === 'cash' ? 'bg-amber-50 text-amber-700' : 'bg-emerald-50 text-emerald-700'
+                            }`}>
+                              {inv.paymentMethod === 'card' ? (lang === 'fr' ? 'Carte' : lang === 'es' ? 'Tarjeta' : 'Card') :
+                               inv.paymentMethod === 'cash' ? (lang === 'fr' ? 'Espèces' : lang === 'es' ? 'Efectivo' : 'Cash') : (lang === 'fr' ? 'Virement' : lang === 'es' ? 'Transferencia' : 'Transfer')}
+                            </span>
+                          )}
                         </td>
                         <td className="py-4 text-center">
-                          <button
-                            type="button"
-                            onClick={() => handleToggleInvoiceStatus(inv)}
-                            className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold tracking-wider transition-all cursor-pointer ${
-                              inv.status === 'paid'
-                                ? 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200 border border-emerald-300/60'
-                                : 'bg-amber-100 text-amber-900 hover:bg-amber-200 border border-amber-300/80 animate-pulse'
-                            }`}
-                            title={inv.status === 'pending'
-                              ? (lang === 'fr' ? 'Cliquer pour marquer comme payée' : 'Click to mark as paid')
-                              : (lang === 'fr' ? 'Cliquer pour passer en attente' : 'Click to mark as pending')}
-                          >
-                            {inv.status === 'paid' ? (
-                              <>
-                                <CheckCircle2 size={11} className="text-emerald-700" />
-                                <span>{translations[lang].admin.billing.statusPaid || 'Payée'}</span>
-                              </>
-                            ) : (
-                              <>
-                                <Clock size={11} className="text-amber-700" />
-                                <span>{translations[lang].admin.billing.statusPending || 'En attente'}</span>
-                              </>
-                            )}
-                          </button>
+                          {inv.isBonoRedemption ? (
+                            <span 
+                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold tracking-wider bg-emerald-100 text-emerald-800 border border-emerald-300/80 shadow-2xs"
+                              title={lang === 'fr' ? 'Séance réglée par décompte sur forfait' : lang === 'es' ? 'Sesión pagada mediante descuento de bono' : 'Session paid via package deduction'}
+                            >
+                              <CheckCircle2 size={11} className="text-emerald-700" />
+                              <span>{translations[lang]?.admin?.billing?.statusSettledBono || (lang === 'fr' ? 'Réglé (Bono)' : lang === 'es' ? 'Pagado (Bono)' : 'Settled (Bono)')}</span>
+                            </span>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => handleToggleInvoiceStatus(inv)}
+                              className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold tracking-wider transition-all cursor-pointer ${
+                                inv.status === 'paid'
+                                  ? 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200 border border-emerald-300/60'
+                                  : 'bg-amber-100 text-amber-900 hover:bg-amber-200 border border-amber-300/80 animate-pulse'
+                              }`}
+                              title={inv.status === 'pending'
+                                ? (lang === 'fr' ? 'Cliquer pour marquer comme payée' : 'Click to mark as paid')
+                                : (lang === 'fr' ? 'Cliquer pour passer en attente' : 'Click to mark as pending')}
+                            >
+                              {inv.status === 'paid' ? (
+                                <>
+                                  <CheckCircle2 size={11} className="text-emerald-700" />
+                                  <span>{translations[lang].admin.billing.statusPaid || 'Payée'}</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Clock size={11} className="text-amber-700" />
+                                  <span>{translations[lang].admin.billing.statusPending || 'En attente'}</span>
+                                </>
+                              )}
+                            </button>
+                          )}
                         </td>
                         <td className="py-4 text-right">
-                          <div className="flex flex-col items-end">
-                            <div className="flex items-center gap-1.5">
-                              {inv.originalAmount !== undefined && inv.discountAmount !== undefined && inv.discountAmount > 0 ? (
+                          {inv.isBonoRedemption || (inv.amount === 0 && inv.discountType === 'bono') ? (
+                            <div className="flex flex-col items-end">
+                              <div className="flex items-center gap-1.5">
                                 <span className="text-[10px] text-gray-400 line-through">
-                                  {inv.originalAmount} €
+                                  {inv.originalAmount ? `${inv.originalAmount} €` : '60 €'}
+                                </span>
+                                <span className="font-extrabold text-emerald-800 text-xs">0 €</span>
+                              </div>
+                              <span className="text-[10px] font-bold text-emerald-800 text-right mt-0.5 leading-tight">
+                                {translations[lang]?.admin?.billing?.sessionWithoutPayment || (lang === 'fr' ? 'Séance sans paiement' : lang === 'es' ? 'Sesión sin pago' : 'Session without payment')}
+                              </span>
+                              <span className="text-[9px] text-gray-500 text-right leading-tight">
+                                {translations[lang]?.admin?.billing?.redeemedFromPrepaidBono || (lang === 'fr' ? '(Décompté du Bono précédemment payé)' : lang === 'es' ? '(Descontado del Bono previamente pagado)' : '(Deducted from previously paid Bono)')}
+                              </span>
+                            </div>
+                          ) : (
+                            <div className="flex flex-col items-end">
+                              <div className="flex items-center gap-1.5">
+                                {inv.originalAmount !== undefined && inv.discountAmount !== undefined && inv.discountAmount > 0 ? (
+                                  <span className="text-[10px] text-gray-400 line-through">
+                                    {inv.originalAmount} €
+                                  </span>
+                                ) : null}
+                                <span className="font-bold text-primary">{inv.amount} €</span>
+                              </div>
+                              {inv.discountAmount && inv.discountAmount > 0 ? (
+                                <span className="inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded-md bg-emerald-50 text-emerald-700 text-[9px] font-semibold mt-0.5">
+                                  <BadgePercent size={10} />
+                                  {inv.discountLabel || (inv.discountType === 'bono' ? 'Bono' : 'Remise')} -{inv.discountAmount}€
                                 </span>
                               ) : null}
-                              <span className="font-bold text-primary">{inv.amount} €</span>
                             </div>
-                            {inv.discountAmount && inv.discountAmount > 0 ? (
-                              <span className="inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded-md bg-emerald-50 text-emerald-700 text-[9px] font-semibold mt-0.5">
-                                <BadgePercent size={10} />
-                                {inv.discountLabel || (inv.discountType === 'bono' ? 'Bono' : 'Remise')} -{inv.discountAmount}€
-                              </span>
-                            ) : null}
-                          </div>
+                          )}
                         </td>
                         <td className="py-4 text-right">
                           <div className="flex items-center justify-end gap-2">
@@ -6105,22 +6166,29 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                 setIsEditInvoiceOpen(true);
                               }}
                               className="p-1.5 hover:bg-black/5 text-gray-500 hover:text-primary rounded-lg transition-all inline-flex items-center"
-                              title={lang === 'fr' ? "Modifier la facture" : lang === 'es' ? "Editar factura" : "Edit invoice"}
+                              title={lang === 'fr' ? "Modifier" : lang === 'es' ? "Editar" : "Edit"}
                             >
                               <Pencil size={13} />
                             </button>
-                            {!inv.isBonoRedemption && (
-                              <button
-                                onClick={() => setSelectedInvoiceForPrint(inv)}
-                                className="p-1.5 hover:bg-primary/10 text-primary rounded-lg transition-colors inline-flex items-center gap-1.5"
-                                title={translations[lang].admin.billing.print}
-                              >
-                                <Printer size={13} />
-                                <span className="text-[10px] uppercase font-bold tracking-wider">
-                                  {translations[lang].admin.billing.receipt}
-                                </span>
-                              </button>
-                            )}
+                            <button
+                              onClick={() => setSelectedInvoiceForPrint(inv)}
+                              className={`p-1.5 rounded-lg transition-colors inline-flex items-center gap-1.5 ${
+                                inv.isBonoRedemption 
+                                  ? 'hover:bg-emerald-100 text-emerald-800' 
+                                  : 'hover:bg-primary/10 text-primary'
+                              }`}
+                              title={inv.isBonoRedemption 
+                                ? (lang === 'fr' ? "Justificatif de séance décomptée" : lang === 'es' ? "Comprobante de sesión" : "Session voucher")
+                                : translations[lang].admin.billing.print
+                              }
+                            >
+                              <Printer size={13} />
+                              <span className="text-[10px] uppercase font-bold tracking-wider">
+                                {inv.isBonoRedemption 
+                                  ? (translations[lang]?.admin?.billing?.sessionVoucher || (lang === 'fr' ? 'Justificatif' : lang === 'es' ? 'Comprobante' : 'Voucher'))
+                                  : translations[lang].admin.billing.receipt}
+                              </span>
+                            </button>
                             <button
                               onClick={() => handleDeleteInvoice(inv.id)}
                               className="p-1.5 hover:bg-red-50 text-gray-500 hover:text-red-500 rounded-lg transition-all inline-flex items-center"
@@ -9064,13 +9132,15 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                     <p className="text-[10px] text-gray-400 leading-relaxed max-w-sm">
                       {selectedInvoiceForPrint.status === 'pending'
                         ? "Factura pendiente de pago (no saldada)."
-                        : `Recibo de factura pagada el ${new Date(selectedInvoiceForPrint.paymentDate || selectedInvoiceForPrint.date).toLocaleDateString('es-ES', { day: 'numeric', month: 'long', year: 'numeric' })} mediante ${
-                            selectedInvoiceForPrint.paymentMethod === 'card' 
-                              ? 'tarjeta de crédito' 
-                              : selectedInvoiceForPrint.paymentMethod === 'cash' 
-                                ? 'efectivo' 
-                                : 'transferencia bancaria'
-                          }.`
+                        : selectedInvoiceForPrint.isBonoRedemption || selectedInvoiceForPrint.amount === 0 || selectedInvoiceForPrint.paymentMethod === 'not_applicable'
+                          ? `Sesión deducida del Bono prepagado el ${new Date(selectedInvoiceForPrint.paymentDate || selectedInvoiceForPrint.date).toLocaleDateString('es-ES', { day: 'numeric', month: 'long', year: 'numeric' })}. Método de pago: No aplicable (sesión descontada del Bono previamente adquirido).`
+                          : `Recibo de factura pagada el ${new Date(selectedInvoiceForPrint.paymentDate || selectedInvoiceForPrint.date).toLocaleDateString('es-ES', { day: 'numeric', month: 'long', year: 'numeric' })} mediante ${
+                              selectedInvoiceForPrint.paymentMethod === 'card' 
+                                ? 'tarjeta de crédito' 
+                                : selectedInvoiceForPrint.paymentMethod === 'cash' 
+                                  ? 'efectivo' 
+                                  : 'transferencia bancaria'
+                            }.`
                       }
                     </p>
                   </div>
@@ -9225,25 +9295,41 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                     <tbody>
                       {selectedRecapForPrint.invoices.map((inv) => (
                         <tr key={inv.id} className="border-b border-black/5 text-gray-700">
-                          <td className="py-2 font-bold text-primary">{inv.invoiceNumber}</td>
+                          <td className="py-2 font-bold text-primary">
+                            {inv.isBonoRedemption ? (
+                              <span className="text-[10px] font-bold text-emerald-800 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">
+                                Bono
+                              </span>
+                            ) : (
+                              inv.invoiceNumber
+                            )}
+                          </td>
                           <td className="py-2 font-medium">{inv.clientName}</td>
                           <td className="py-2 text-gray-500">{new Date(inv.date).toLocaleDateString('es-ES')}</td>
                           <td className="py-2">
                             <span className="text-[10px] font-medium uppercase">
-                              {inv.paymentMethod === 'card' ? 'Tarjeta' :
-                               inv.paymentMethod === 'cash' ? 'Efectivo' : 'Transferencia'}
+                              {inv.isBonoRedemption || inv.amount === 0 || inv.paymentMethod === 'not_applicable'
+                                ? 'No aplicable'
+                                : inv.paymentMethod === 'card' ? 'Tarjeta' :
+                                  inv.paymentMethod === 'cash' ? 'Efectivo' : 'Transferencia'}
                             </span>
                           </td>
                           <td className="py-2 text-center font-bold">
                             <span className={`text-[9px] px-1.5 py-0.5 rounded-full ${
-                              inv.status === 'paid' 
+                              inv.isBonoRedemption || inv.status === 'paid' 
                                 ? 'bg-emerald-100 text-emerald-800' 
                                 : 'bg-amber-100 text-amber-900 font-bold'
                             }`}>
-                              {inv.status === 'paid' ? 'Pagada' : 'Pendiente'}
+                              {inv.isBonoRedemption ? 'Pagada (Bono)' : inv.status === 'paid' ? 'Pagada' : 'Pendiente'}
                             </span>
                           </td>
-                          <td className="py-2 text-right font-bold">{inv.amount} €</td>
+                          <td className="py-2 text-right font-bold">
+                            {inv.isBonoRedemption || inv.amount === 0 ? (
+                              <span className="text-emerald-800 text-[10px]">0 € (Bono)</span>
+                            ) : (
+                              `${inv.amount} €`
+                            )}
+                          </td>
                         </tr>
                       ))}
                     </tbody>

@@ -275,7 +275,9 @@ export function mapInvoiceFromDB(i: any): Invoice {
     discountType: i.discountType || i.discount_type || undefined,
     discountLabel: i.discountLabel || i.discount_label || undefined,
     status: i.status || 'paid',
-    paymentMethod: i.paymentMethod || i.payment_method || i.paymentmethod || 'card',
+    paymentMethod: (isBonoRedeem || i.paymentMethod === 'not_applicable' || i.payment_method === 'not_applicable')
+      ? 'not_applicable'
+      : (i.paymentMethod || i.payment_method || i.paymentmethod || 'card'),
     description: normalizeInvoiceDescription(i.description),
     language: 'es',
     quantity: Number(i.quantity) || 1,

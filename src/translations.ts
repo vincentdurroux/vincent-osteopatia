@@ -281,6 +281,11 @@ export const translations = {
         confirmBonoDeductionAction: "Confirmer le décompte",
         confirmBonoDeductionTitle: "Confirmer le décompte sur le Bono",
         confirmBonoDeductionMessage: "Voulez-vous décompter 1 séance du forfait {bonoType} de {clientName} ? Aucune facture ne sera générée. Il restera {remaining} séance(s) sur son forfait.",
+        notApplicable: "Non applicable",
+        sessionWithoutPayment: "Séance sans paiement",
+        redeemedFromPrepaidBono: "Décompté du Bono précédemment payé",
+        sessionVoucher: "Justificatif",
+        statusSettledBono: "Réglé (Bono)",
       },
       modals: {
         newPatientTitle: "Nouveau Patient",
@@ -338,7 +343,8 @@ export const translations = {
       methods: {
         card: "carte bancaire",
         cash: "espèces",
-        transfer: "virement bancaire"
+        transfer: "virement bancaire",
+        not_applicable: "non applicable (séance décomptée du Bono)"
       },
       invoiceLang: "Langue du Reçu",
       standardFee: "Tarif de base",
@@ -628,6 +634,11 @@ export const translations = {
         confirmBonoDeductionAction: "Confirm Deduction",
         confirmBonoDeductionTitle: "Confirm Bono Session Deduction",
         confirmBonoDeductionMessage: "Do you want to deduct 1 session from {clientName}'s {bonoType}? No invoice will be generated. {remaining} session(s) will remain on their pack.",
+        notApplicable: "Not applicable",
+        sessionWithoutPayment: "Session without payment",
+        redeemedFromPrepaidBono: "Deducted from previously paid Bono",
+        sessionVoucher: "Voucher",
+        statusSettledBono: "Settled (Bono)",
       },
       modals: {
         newPatientTitle: "New Patient",
@@ -685,7 +696,8 @@ export const translations = {
       methods: {
         card: "credit card",
         cash: "cash",
-        transfer: "bank transfer"
+        transfer: "bank transfer",
+        not_applicable: "not applicable (session redeemed from Bono)"
       },
       invoiceLang: "Receipt Language",
       standardFee: "Standard fee",
@@ -975,6 +987,11 @@ export const translations = {
         confirmBonoDeductionAction: "Confirmar descuento",
         confirmBonoDeductionTitle: "Confirmar descuento de sesión del Bono",
         confirmBonoDeductionMessage: "¿Desea descontar 1 sesión del {bonoType} de {clientName}? No se creará ninguna factura. Quedarán {remaining} sesión(es) en su bono.",
+        notApplicable: "No aplicable",
+        sessionWithoutPayment: "Sesión sin pago",
+        redeemedFromPrepaidBono: "Descontado del Bono previamente pagado",
+        sessionVoucher: "Comprobante",
+        statusSettledBono: "Pagado (Bono)",
       },
       modals: {
         newPatientTitle: "Nuevo Paciente",
@@ -1032,7 +1049,8 @@ export const translations = {
       methods: {
         card: "tarjeta de crédito",
         cash: "efectivo",
-        transfer: "transferencia bancaria"
+        transfer: "transferencia bancaria",
+        not_applicable: "no aplicable (sesión descontada del Bono)"
       },
       invoiceLang: "Idioma del Recibo",
       standardFee: "Tarifa estándar",

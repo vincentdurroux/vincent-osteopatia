@@ -45,7 +45,7 @@ export interface Invoice {
   discountType?: 'bono' | 'custom' | 'none';
   discountLabel?: string;
   status: 'paid' | 'pending';
-  paymentMethod?: 'cash' | 'card' | 'transfer';
+  paymentMethod?: 'cash' | 'card' | 'transfer' | 'not_applicable';
   description: string;
   language?: 'fr' | 'en' | 'es';
   noteId?: string;
