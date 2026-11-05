@@ -1836,7 +1836,9 @@ export const api = {
 
   async createInvoice(invoice: Omit<Invoice, 'id' | 'invoiceNumber'> & { id?: string; invoiceNumber?: string; isBonoRedemption?: boolean }): Promise<Invoice> {
     const isBonoRedeem = invoice.isBonoRedemption || (invoice.amount === 0 && invoice.discountType === 'bono');
-    const nextInvoiceNum = isBonoRedeem ? '' : (invoice.invoiceNumber || await this.getNextInvoiceNumber());
+    const nextInvoiceNum = isBonoRedeem 
+      ? (invoice.invoiceNumber || `BONO-REC-${Math.random().toString(36).substring(2, 8).toUpperCase()}`)
+      : (invoice.invoiceNumber || await this.getNextInvoiceNumber());
     const invoiceId = invoice.id || crypto.randomUUID();
 
     const newInvoice: Invoice = {
