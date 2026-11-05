@@ -131,9 +131,9 @@ const DEFAULT_PATIENT_FORM = {
   birthDate: '',
   address: '',
   hasBono: false,
-  bonoType: 'Bono 5 séances',
+  bonoType: '',
   defaultDiscount: 10,
-  bonoSessionsRemaining: 5,
+  bonoSessionsRemaining: 0,
 };
 
 export default function AdminDashboard({ onClose }: AdminDashboardProps) {
@@ -1284,7 +1284,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
         finalOriginal = 300;
         finalDiscount = 50;
         finalDiscType = 'bono';
-        finalDiscLabel = 'Bono 5 séances (250€)';
+        finalDiscLabel = t('admin.billing.bono5');
       } else if (newInvoiceBillingPlan === 'deduct_bono') {
         finalDescription = `${translations[lang as Language].admin.billing.deductBonoDesc || "Séance d'Ostéopathie (Prise en compte Bono)"} (${client.bonoType || 'Bono'})`;
         finalAmount = 0;
@@ -1451,7 +1451,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
         if (newInvoiceBillingPlan === 'bono3' || newInvoiceBillingPlan === 'bono5') {
           const totalSessions = newInvoiceBillingPlan === 'bono3' ? 3 : 5;
           const remaining = newInvoiceIncludeToday ? totalSessions - 1 : totalSessions;
-          const bonoTitle = newInvoiceBillingPlan === 'bono3' ? 'Bono 3 séances' : 'Bono 5 séances';
+          const bonoTitle = newInvoiceBillingPlan === 'bono3' ? translations[lang].admin.billing.bono3Title : translations[lang].admin.billing.bono5Title;
           const updatedClient: Client = {
             ...client,
             hasBono: true,
@@ -1499,7 +1499,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
         finalOriginal = 300;
         finalDiscount = 50;
         finalDiscType = 'bono';
-        finalDiscLabel = 'Bono 5 séances (250€)';
+        finalDiscLabel = t('admin.billing.bono5');
       } else if (inlineBillingPlan === 'deduct_bono') {
         finalDescription = `${translations[lang as Language].admin.billing.deductBonoDesc || "Séance d'Ostéopathie (Prise en compte Bono)"} (${selectedClient.bonoType || 'Bono'})`;
         finalAmount = 0;
@@ -1619,7 +1619,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
         if (inlineBillingPlan === 'bono3' || inlineBillingPlan === 'bono5') {
           const totalSessions = inlineBillingPlan === 'bono3' ? 3 : 5;
           const remaining = inlineIncludeToday ? totalSessions - 1 : totalSessions;
-          const bonoTitle = inlineBillingPlan === 'bono3' ? 'Bono 3 séances' : 'Bono 5 séances';
+          const bonoTitle = inlineBillingPlan === 'bono3' ? translations[lang].admin.billing.bono3Title : translations[lang].admin.billing.bono5Title;
           const updatedClient: Client = {
             ...selectedClient,
             hasBono: true,
@@ -2189,9 +2189,9 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
               birthDate: '',
               address: '',
               hasBono: false,
-              bonoType: 'Bono 5 séances',
+              bonoType: '',
               defaultDiscount: 10,
-              bonoSessionsRemaining: 5,
+              bonoSessionsRemaining: 0,
             });
             setClients(prev => {
               const filtered = prev.filter(c => c.id !== createdCl.id);
@@ -6610,7 +6610,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                           hasBono: e.target.checked,
                           defaultDiscount: e.target.checked ? (prev.defaultDiscount || 10) : 0,
                           bonoSessionsRemaining: e.target.checked ? (prev.bonoSessionsRemaining || 5) : 0,
-                          bonoType: e.target.checked ? (prev.bonoType || 'Bono 5 séances') : ''
+                          bonoType: e.target.checked ? (prev.bonoType || t('admin.billing.bono5Title')) : ''
                         }))}
                         className="rounded text-primary focus:ring-primary w-4 h-4"
                       />
@@ -7015,7 +7015,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                 birthDate: inlinePatient.birthDate || '',
                                 address: inlinePatient.address || '',
                                 hasBono: inlinePatient.hasBono || false,
-                                bonoType: inlinePatient.bonoType || 'Bono 5 séances',
+                                bonoType: inlinePatient.bonoType || translations[lang].admin.billing.bono5Title,
                                 defaultDiscount: inlinePatient.defaultDiscount || 10,
                                 bonoSessionsRemaining: inlinePatient.bonoSessionsRemaining || 5,
                               });
@@ -7141,7 +7141,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                   hasBono: e.target.checked,
                                   defaultDiscount: e.target.checked ? (prev.defaultDiscount || 10) : 0,
                                   bonoSessionsRemaining: e.target.checked ? (prev.bonoSessionsRemaining || 5) : 0,
-                                  bonoType: e.target.checked ? (prev.bonoType || 'Bono 5 séances') : ''
+                                  bonoType: e.target.checked ? (prev.bonoType || t('admin.billing.bono5Title')) : ''
                                 }))}
                                 className="rounded text-primary focus:ring-primary w-3.5 h-3.5"
                               />
@@ -7162,7 +7162,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                   type="text"
                                   value={inlinePatient.bonoType}
                                   onChange={(e) => setInlinePatient(prev => ({ ...prev, bonoType: e.target.value }))}
-                                  placeholder="Ex: Bono 5 séances"
+                                  placeholder={t('admin.billing.bono5Title')}
                                   className="w-full p-1.5 bg-white rounded-lg border border-black/10 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
                                 />
                               </div>
@@ -8659,7 +8659,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                           hasBono: e.target.checked,
                           defaultDiscount: e.target.checked ? (prev.defaultDiscount || 10) : 0,
                           bonoSessionsRemaining: e.target.checked ? (prev.bonoSessionsRemaining || 5) : 0,
-                          bonoType: e.target.checked ? (prev.bonoType || 'Bono 5 séances') : ''
+                          bonoType: e.target.checked ? (prev.bonoType || t('admin.billing.bono5Title')) : ''
                         }) : null)}
                         className="rounded text-primary focus:ring-primary w-4 h-4"
                       />
@@ -8902,7 +8902,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                           type="text"
                           value={editingInvoice.discountLabel || ''}
                           onChange={(e) => setEditingInvoice(prev => prev ? ({ ...prev, discountLabel: e.target.value }) : null)}
-                          placeholder="Ex: Bono 5 séances"
+                          placeholder={t('admin.billing.bono5Title')}
                           className="w-full p-2 bg-white rounded-xl border border-black/10 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
                         />
                       </div>

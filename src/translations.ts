@@ -107,8 +107,8 @@ export const translations = {
       address: 'Adresse',
       fees: 'Tarifs',
       session: 'La séance (1h) : 60€',
-      bono3: 'Forfait 3 séances : 160€',
-      bono5: 'Forfait 5 séances : 250€',
+      bono3: 'Bono 3 séances : 160€',
+      bono5: 'Bono 5 séances : 250€',
       fullAddress: 'Calle General Pastor, 25, 46183 L\'Eliana, Valence',
     },
     about: {

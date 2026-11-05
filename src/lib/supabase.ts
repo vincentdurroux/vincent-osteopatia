@@ -29,9 +29,14 @@ export const isSupabaseConfigured = !!(supabaseUrl && supabaseAnonKey);
 
 if (typeof window !== 'undefined' && isSupabaseConfigured) {
   try {
-    ['clients', 'invoices', 'notes', 'events', 'google_reviews'].forEach(k => {
-      localStorage.removeItem(`vincent_osteo_${k}`);
-    });
+    const keysToRemove: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && (key.startsWith('vincent_osteo_') || key.startsWith('vincent_'))) {
+        keysToRemove.push(key);
+      }
+    }
+    keysToRemove.forEach(k => localStorage.removeItem(k));
   } catch {}
 }
 
@@ -116,7 +121,7 @@ export const removeDeletedTombstone = (entity: string, ...keys: (string | undefi
   } catch {}
 };
 
-// Helper to load or initialize from LocalStorage (with legacy mock filtering & tombstone support)
+// Helper to load or initialize from LocalStorage (bypassed entirely when Supabase is configured)
 const loadLocal = <T>(key: string, seed: T[] = []): T[] => {
   if (isSupabaseConfigured) return [];
   if (typeof window === 'undefined' || typeof localStorage === 'undefined') return seed;
@@ -136,9 +141,6 @@ const loadLocal = <T>(key: string, seed: T[] = []): T[] => {
         if (isDeletedTombstone(key, item.id, item.invoiceNumber, item.invoice_number, item.name)) return false;
         return true;
       });
-      if (cleaned.length !== parsed.length) {
-        localStorage.setItem(`vincent_osteo_${key}`, JSON.stringify(cleaned));
-      }
       return cleaned as T[];
     }
     return parsed;
@@ -147,10 +149,12 @@ const loadLocal = <T>(key: string, seed: T[] = []): T[] => {
   }
 };
 
-const saveLocal = <T>(key: string, data: T[]) => {
+const saveLocal = <T>(_key: string, _data: T[]) => {
   if (isSupabaseConfigured) return;
   if (typeof window === 'undefined' || typeof localStorage === 'undefined') return;
-  localStorage.setItem(`vincent_osteo_${key}`, JSON.stringify(data));
+  try {
+    localStorage.setItem(`vincent_osteo_${_key}`, JSON.stringify(_data));
+  } catch {}
 };
 
 // ==========================================
@@ -772,28 +776,18 @@ DO $$
 BEGIN
     BEGIN ALTER TABLE public.clients ADD COLUMN first_name TEXT; EXCEPTION WHEN duplicate_column THEN END;
     BEGIN ALTER TABLE public.clients ADD COLUMN last_name TEXT; EXCEPTION WHEN duplicate_column THEN END;
-    BEGIN ALTER TABLE public.clients ADD COLUMN "firstName" TEXT; EXCEPTION WHEN duplicate_column THEN END;
-    BEGIN ALTER TABLE public.clients ADD COLUMN "lastName" TEXT; EXCEPTION WHEN duplicate_column THEN END;
     BEGIN ALTER TABLE public.clients ADD COLUMN dni TEXT; EXCEPTION WHEN duplicate_column THEN END;
     BEGIN ALTER TABLE public.clients ADD COLUMN email TEXT; EXCEPTION WHEN duplicate_column THEN END;
     BEGIN ALTER TABLE public.clients ADD COLUMN phone TEXT; EXCEPTION WHEN duplicate_column THEN END;
     BEGIN ALTER TABLE public.clients ADD COLUMN birth_date TEXT; EXCEPTION WHEN duplicate_column THEN END;
-    BEGIN ALTER TABLE public.clients ADD COLUMN "birthDate" TEXT; EXCEPTION WHEN duplicate_column THEN END;
     BEGIN ALTER TABLE public.clients ADD COLUMN address TEXT; EXCEPTION WHEN duplicate_column THEN END;
     BEGIN ALTER TABLE public.clients ADD COLUMN created_at TIMESTAMPTZ DEFAULT NOW(); EXCEPTION WHEN duplicate_column THEN END;
-    BEGIN ALTER TABLE public.clients ADD COLUMN "createdAt" TIMESTAMPTZ DEFAULT NOW(); EXCEPTION WHEN duplicate_column THEN END;
     BEGIN ALTER TABLE public.clients ADD COLUMN last_session_at TIMESTAMPTZ; EXCEPTION WHEN duplicate_column THEN END;
-    BEGIN ALTER TABLE public.clients ADD COLUMN "lastSessionAt" TIMESTAMPTZ; EXCEPTION WHEN duplicate_column THEN END;
     BEGIN ALTER TABLE public.clients ADD COLUMN has_bono BOOLEAN DEFAULT FALSE; EXCEPTION WHEN duplicate_column THEN END;
-    BEGIN ALTER TABLE public.clients ADD COLUMN "hasBono" BOOLEAN DEFAULT FALSE; EXCEPTION WHEN duplicate_column THEN END;
     BEGIN ALTER TABLE public.clients ADD COLUMN bono_type TEXT; EXCEPTION WHEN duplicate_column THEN END;
-    BEGIN ALTER TABLE public.clients ADD COLUMN "bonoType" TEXT; EXCEPTION WHEN duplicate_column THEN END;
     BEGIN ALTER TABLE public.clients ADD COLUMN default_discount NUMERIC DEFAULT 0; EXCEPTION WHEN duplicate_column THEN END;
-    BEGIN ALTER TABLE public.clients ADD COLUMN "defaultDiscount" NUMERIC DEFAULT 0; EXCEPTION WHEN duplicate_column THEN END;
     BEGIN ALTER TABLE public.clients ADD COLUMN bono_sessions_remaining NUMERIC DEFAULT 0; EXCEPTION WHEN duplicate_column THEN END;
-    BEGIN ALTER TABLE public.clients ADD COLUMN "bonoSessionsRemaining" NUMERIC DEFAULT 0; EXCEPTION WHEN duplicate_column THEN END;
     BEGIN ALTER TABLE public.clients ADD COLUMN profile_note TEXT; EXCEPTION WHEN duplicate_column THEN END;
-    BEGIN ALTER TABLE public.clients ADD COLUMN "profileNote" TEXT; EXCEPTION WHEN duplicate_column THEN END;
 END $$;
 
 -- 2. TABLE DES NOTES CLINIQUES & DOSSIERS PATIENTS
@@ -1598,10 +1592,27 @@ export const api = {
 
     if (isSupabaseConfigured && supabase) {
       try {
+        const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+        let validClientId: string | null = null;
+        if (newNote.clientId && UUID_REGEX.test(newNote.clientId)) {
+          validClientId = newNote.clientId;
+        } else if (newNote.clientId) {
+          try {
+            const { data: dbClients } = await supabase.from('clients').select('id');
+            if (dbClients && dbClients.some(c => c.id === newNote.clientId)) {
+              validClientId = newNote.clientId;
+            } else {
+              validClientId = newNote.clientId;
+            }
+          } catch {
+            validClientId = newNote.clientId;
+          }
+        }
+
         const effectiveCategory = (newNote.isBonoRedeemed && (!newNote.category || newNote.category === 'treatment')) ? 'treatment_bono' : (newNote.category || 'treatment');
         const snakePayload: Record<string, any> = {
           id: newNote.id,
-          client_id: newNote.clientId,
+          client_id: validClientId,
           date: newNote.date,
           motif: newNote.motif || '',
           anamnese: newNote.anamnese || '',
@@ -1615,7 +1626,7 @@ export const api = {
 
         const camelPayload: Record<string, any> = {
           id: newNote.id,
-          clientId: newNote.clientId,
+          clientId: validClientId,
           date: newNote.date,
           motif: newNote.motif || '',
           anamnese: newNote.anamnese || '',
