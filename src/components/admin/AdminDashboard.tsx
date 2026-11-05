@@ -52,72 +52,86 @@ const formatSpanishDateStr = (dateStr?: string) => {
   return dateStr;
 };
 
-const formatRecapPeriodTitle = (recap: {
-  periodType: 'monthly' | 'annual' | 'custom';
-  year?: number;
-  month?: number;
-  startDate?: string;
-  endDate?: string;
-}) => {
-  const spanishMonths = [
-    'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
-    'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'
-  ];
+const formatRecapPeriodTitle = (
+  recap: {
+    periodType: 'monthly' | 'annual' | 'custom';
+    year?: number;
+    month?: number;
+    startDate?: string;
+    endDate?: string;
+  },
+  lang: 'fr' | 'es' | 'en' = 'fr'
+) => {
+  const monthsByLang = {
+    fr: ['Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin', 'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre'],
+    es: ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'],
+    en: ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'],
+  };
+
+  const months = monthsByLang[lang] || monthsByLang.fr;
+  const year = recap.year || new Date().getFullYear();
 
   if (recap.periodType === 'annual') {
-    return `Balance Anual ${recap.year || new Date().getFullYear()}`;
+    return lang === 'fr' ? `Bilan Annuel ${year}` : lang === 'es' ? `Balance Anual ${year}` : `Annual Summary ${year}`;
   }
 
   if (recap.periodType === 'custom') {
-    const start = formatSpanishDateStr(recap.startDate);
-    const end = formatSpanishDateStr(recap.endDate);
+    const start = recap.startDate ? formatSpanishDateStr(recap.startDate) : '';
+    const end = recap.endDate ? formatSpanishDateStr(recap.endDate) : '';
     if (start && end) {
       if (start === end) {
-        return `Balance del ${start}`;
+        return lang === 'fr' ? `Bilan du ${start}` : lang === 'es' ? `Balance del ${start}` : `Summary of ${start}`;
       }
-      return `Balance del ${start} al ${end}`;
+      return lang === 'fr' ? `Bilan du ${start} au ${end}` : lang === 'es' ? `Balance del ${start} al ${end}` : `Summary from ${start} to ${end}`;
     }
-    return 'Balance - Período personalizado';
+    return lang === 'fr' ? 'Bilan - Période personnalisée' : lang === 'es' ? 'Balance - Período personalizado' : 'Summary - Custom period';
   }
 
   const mIdx = typeof recap.month === 'number' && recap.month >= 0 && recap.month <= 11 
     ? recap.month 
     : new Date().getMonth();
-  const yVal = recap.year || new Date().getFullYear();
-  return `Balance Mensual - ${spanishMonths[mIdx]} ${yVal}`;
+
+  return lang === 'fr' ? `Bilan Mensuel - ${months[mIdx]} ${year}` : lang === 'es' ? `Balance Mensual - ${months[mIdx]} ${year}` : `Monthly Summary - ${months[mIdx]} ${year}`;
 };
 
-const formatRecapSubtitle = (recap: {
-  periodType: 'monthly' | 'annual' | 'custom';
-  year?: number;
-  month?: number;
-  startDate?: string;
-  endDate?: string;
-}) => {
-  const spanishMonths = [
-    'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
-    'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'
-  ];
+const formatRecapSubtitle = (
+  recap: {
+    periodType: 'monthly' | 'annual' | 'custom';
+    year?: number;
+    month?: number;
+    startDate?: string;
+    endDate?: string;
+  },
+  lang: 'fr' | 'es' | 'en' = 'fr'
+) => {
+  const monthsByLang = {
+    fr: ['Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin', 'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre'],
+    es: ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'],
+    en: ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'],
+  };
+
+  const months = monthsByLang[lang] || monthsByLang.fr;
+  const year = recap.year || new Date().getFullYear();
 
   if (recap.periodType === 'annual') {
-    return `Año ${recap.year || new Date().getFullYear()}`;
+    return lang === 'fr' ? `Année ${year}` : lang === 'es' ? `Año ${year}` : `Year ${year}`;
   }
 
   if (recap.periodType === 'custom') {
-    const start = formatSpanishDateStr(recap.startDate);
-    const end = formatSpanishDateStr(recap.endDate);
+    const start = recap.startDate ? formatSpanishDateStr(recap.startDate) : '';
+    const end = recap.endDate ? formatSpanishDateStr(recap.endDate) : '';
     if (start && end) {
-      if (start === end) return `Fecha: ${start}`;
-      return `Del ${start} al ${end}`;
+      if (start === end) return lang === 'fr' ? `Date : ${start}` : lang === 'es' ? `Fecha: ${start}` : `Date: ${start}`;
+      return lang === 'fr' ? `Du ${start} au ${end}` : lang === 'es' ? `Del ${start} al ${end}` : `From ${start} to ${end}`;
     }
-    return 'Período personalizado';
+    return lang === 'fr' ? 'Période personnalisée' : lang === 'es' ? 'Período personalizado' : 'Custom period';
   }
 
   const mIdx = typeof recap.month === 'number' && recap.month >= 0 && recap.month <= 11 
     ? recap.month 
     : new Date().getMonth();
-  const yVal = recap.year || new Date().getFullYear();
-  return `${spanishMonths[mIdx]} ${yVal}`;
+
+  return `${months[mIdx]} ${year}`;
 };
 
 type TabType = 'overview' | 'clients' | 'calendar' | 'billing' | 'reviews';
@@ -1207,39 +1221,48 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
 
           if (isSingleRedemption && (clientId || clientName)) {
             const targetDateStr = inv?.date ? inv.date.split('T')[0] : '';
+            const targetClient = clients.find(c => (clientId && c.id === clientId) || (clientName && c.name?.trim().toLowerCase() === clientName.trim().toLowerCase()));
+
+            if (targetClient) {
+              const maxSessions = targetClient.bonoTotalSessions || 5;
+              const currentRemaining = targetClient.bonoSessionsRemaining !== undefined ? targetClient.bonoSessionsRemaining : 0;
+              const newRemaining = Math.min(maxSessions, currentRemaining + 1);
+              const newDates = (targetClient.bonoRedeemedDates || []).filter(d => d !== targetDateStr);
+
+              const updatedClient: Client = {
+                ...targetClient,
+                hasBono: true,
+                bonoSessionsRemaining: newRemaining,
+                bonoRedeemedDates: newDates,
+              };
+
+              // Persist re-credited session count to DB / Supabase & local storage
+              try {
+                await api.updateClient(updatedClient);
+              } catch (err) {
+                console.warn('Could not persist updated client bono to DB:', err);
+              }
+
+              // Update React state for clients
+              setClients(prev => prev.map(c => c.id === updatedClient.id ? updatedClient : c));
+
+              if (selectedClient && selectedClient.id === updatedClient.id) {
+                setSelectedClient(updatedClient);
+              }
+            }
 
             // Update invoices state
             setInvoices(prev => prev.filter(i => i.id !== invoiceId && (!inv?.invoiceNumber || i.invoiceNumber !== inv.invoiceNumber)));
 
-            // Refund +1 session to client
-            setClients(prev => prev.map(c => {
-              const isMatch = (clientId && c.id === clientId) || (clientName && c.name?.trim().toLowerCase() === clientName.trim().toLowerCase());
-              if (isMatch && c.hasBono) {
-                const maxSessions = c.bonoTotalSessions || 5;
-                const newRemaining = Math.min(maxSessions, (c.bonoSessionsRemaining || 0) + 1);
-                const newDates = (c.bonoRedeemedDates || []).filter(d => d !== targetDateStr);
-                return { ...c, bonoSessionsRemaining: newRemaining, bonoRedeemedDates: newDates };
-              }
-              return c;
-            }));
-
-            if (selectedClient && ((clientId && selectedClient.id === clientId) || (clientName && selectedClient.name?.trim().toLowerCase() === clientName.trim().toLowerCase()))) {
-              setSelectedClient(prev => {
-                if (!prev || !prev.hasBono) return prev;
-                const maxSessions = prev.bonoTotalSessions || 5;
-                const newRemaining = Math.min(maxSessions, (prev.bonoSessionsRemaining || 0) + 1);
-                const newDates = (prev.bonoRedeemedDates || []).filter(d => d !== targetDateStr);
-                return { ...prev, bonoSessionsRemaining: newRemaining, bonoRedeemedDates: newDates };
-              });
-            }
-
-            // Reset isBonoRedeemed on associated note
+            // Reset isBonoRedeemed on associated notes
             setClientNotes(prev => prev.map(n => {
               const isEventMatch = inv?.eventId && n.eventId === inv.eventId;
               const isNoteMatch = inv?.noteId && n.id === inv.noteId;
               const isDateMatch = targetDateStr && n.date.split('T')[0] === targetDateStr;
               if (isEventMatch || isNoteMatch || isDateMatch) {
-                return { ...n, isBonoRedeemed: false };
+                const updatedNote = { ...n, isBonoRedeemed: false };
+                api.updateClientNote(updatedNote).catch(() => {});
+                return updatedNote;
               }
               return n;
             }));
@@ -1254,6 +1277,32 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
               }
               return n;
             }));
+
+          } else if (isPaidBono && (clientId || clientName)) {
+            const targetClient = clients.find(c => (clientId && c.id === clientId) || (clientName && c.name?.trim().toLowerCase() === clientName.trim().toLowerCase()));
+
+            if (targetClient) {
+              const updatedClient: Client = {
+                ...targetClient,
+                hasBono: false,
+                bonoSessionsRemaining: 0,
+                bonoRedeemedDates: [],
+                bonoType: '',
+              };
+
+              try {
+                await api.updateClient(updatedClient);
+              } catch (err) {
+                console.warn('Could not reset client bono in DB:', err);
+              }
+
+              setClients(prev => prev.map(c => c.id === updatedClient.id ? updatedClient : c));
+              if (selectedClient && selectedClient.id === updatedClient.id) {
+                setSelectedClient(updatedClient);
+              }
+            }
+
+            setInvoices(prev => prev.filter(i => i.id !== invoiceId && (!inv?.invoiceNumber || i.invoiceNumber !== inv.invoiceNumber)));
 
           } else {
             setInvoices(prev => prev.filter(i => i.id !== invoiceId && (!inv?.invoiceNumber || i.invoiceNumber !== inv.invoiceNumber)));
@@ -5731,6 +5780,18 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                   {/* Filtered statistics */}
                   {(() => {
                     const filtered = invoices.filter(inv => {
+                      // Exclude 0 € Bono package session deductions from accounting recap!
+                      const isRedemption = Boolean(
+                        inv.amount === 0 ||
+                        inv.isBonoRedemption ||
+                        inv.paymentMethod === 'not_applicable' ||
+                        (inv.discountType === 'bono' && inv.amount === 0) ||
+                        (inv.discountLabel && inv.discountLabel.toLowerCase().includes('décompté')) ||
+                        (inv.description && inv.description.toLowerCase().includes('décompté'))
+                      );
+
+                      if (isRedemption) return false;
+
                       try {
                         const d = new Date(inv.date);
                         if (recapPeriodType === 'annual') {
@@ -7924,7 +7985,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                               <span className="text-xs font-bold text-gray-800">{translations[lang].admin.billing.singleSession}</span>
                               <span className="text-xs font-bold text-primary">60 €</span>
                             </div>
-                            <p className="text-[10px] text-gray-400 mt-0.5">Séance standard</p>
+                            <p className="text-[10px] text-gray-400 mt-0.5">{translations[lang].admin.billing.standardSessionSub}</p>
                           </button>
 
                           {patientHasRemainingBono ? (
@@ -7937,9 +7998,9 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                   originalAmount: 60,
                                   discountType: 'custom',
                                   discountAmount: 60,
-                                  discountLabel: `Décompté sur ${bonoInfo.bonoType}`,
+                                  discountLabel: translations[lang].admin.billing.deductedFromBono.replace('{bonoType}', bonoInfo.bonoType),
                                   amount: 0,
-                                  description: `Séance décomptée du Bono (${bonoInfo.bonoType})`,
+                                  description: translations[lang].admin.billing.sessionDeductedFromBono.replace('{bonoType}', bonoInfo.bonoType),
                                 }));
                               }}
                               className={`p-2.5 rounded-xl border text-left transition-all ${
@@ -7949,11 +8010,11 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                               }`}
                             >
                               <div className="flex items-center justify-between">
-                                <span className="text-xs font-bold text-teal-900">Décompte Bono</span>
+                                <span className="text-xs font-bold text-teal-900">{translations[lang].admin.billing.deductBonoLabel}</span>
                                 <span className="text-xs font-bold text-teal-700">0 €</span>
                               </div>
                               <p className="text-[10px] text-teal-700 font-semibold mt-0.5">
-                                {bonoInfo.remaining} séances restantes
+                                {translations[lang].admin.billing.bonoSessionsLeft.replace('{count}', String(bonoInfo.remaining))}
                               </p>
                             </button>
                           ) : (
@@ -7967,9 +8028,9 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                     originalAmount: 180,
                                     discountType: 'custom',
                                     discountAmount: 20,
-                                    discountLabel: 'Bono 3 séances',
+                                    discountLabel: translations[lang].admin.billing.bono3Label,
                                     amount: 160,
-                                    description: 'Bono Ostéopathie - Forfait 3 séances',
+                                    description: translations[lang].admin.billing.bono3Description,
                                   }));
                                 }}
                                 className={`p-2.5 rounded-xl border text-left transition-all ${
@@ -7981,11 +8042,11 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                 <div className="flex items-center justify-between">
                                   <span className="text-xs font-bold text-emerald-950 flex items-center gap-1">
                                     <Sparkles size={11} className="text-emerald-600" />
-                                    Bono 3 séances
+                                    {translations[lang].admin.billing.bono3Label}
                                   </span>
                                   <span className="text-xs font-bold text-emerald-700">160 €</span>
                                 </div>
-                                <p className="text-[10px] text-emerald-700 mt-0.5">Forfait prépayé</p>
+                                <p className="text-[10px] text-emerald-700 mt-0.5">{translations[lang].admin.billing.prepaidPackage}</p>
                               </button>
 
                               <button
@@ -7997,9 +8058,9 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                     originalAmount: 300,
                                     discountType: 'custom',
                                     discountAmount: 50,
-                                    discountLabel: 'Bono 5 séances',
+                                    discountLabel: translations[lang].admin.billing.bono5Label,
                                     amount: 250,
-                                    description: 'Bono Ostéopathie - Forfait 5 séances',
+                                    description: translations[lang].admin.billing.bono5Description,
                                   }));
                                 }}
                                 className={`p-2.5 rounded-xl border text-left transition-all ${
@@ -8011,11 +8072,11 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                 <div className="flex items-center justify-between">
                                   <span className="text-xs font-bold text-emerald-950 flex items-center gap-1">
                                     <Sparkles size={11} className="text-emerald-600" />
-                                    Bono 5 séances
+                                    {translations[lang].admin.billing.bono5Label}
                                   </span>
                                   <span className="text-xs font-bold text-emerald-700">250 €</span>
                                 </div>
-                                <p className="text-[10px] text-emerald-700 mt-0.5">Forfait prépayé</p>
+                                <p className="text-[10px] text-emerald-700 mt-0.5">{translations[lang].admin.billing.prepaidPackage}</p>
                               </button>
                             </>
                           )}
@@ -8058,8 +8119,8 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                             />
                             <span>
                               {newInvoiceIncludeToday
-                                ? `Inclure la séance du jour (${newInvoiceBillingPlan === 'bono3' ? 2 : 4} restantes)`
-                                : `Ne pas inclure (${newInvoiceBillingPlan === 'bono3' ? 3 : 5} crédités)`}
+                                ? translations[lang].admin.billing.includeTodaySession.replace('{remaining}', String(newInvoiceBillingPlan === 'bono3' ? 2 : 4))
+                                : translations[lang].admin.billing.doNotIncludeTodaySession.replace('{total}', String(newInvoiceBillingPlan === 'bono3' ? 3 : 5))}
                             </span>
                           </label>
                         </div>
@@ -9044,13 +9105,13 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                     className="flex items-center gap-2 px-4 py-2 bg-primary text-white rounded-xl text-xs font-bold uppercase tracking-wider hover:bg-primary/95 transition-all shadow-sm active:scale-95"
                   >
                     <Printer size={14} /> 
-                    Imprimir resumen
+                    {lang === 'fr' ? 'Imprimer le récapitulatif' : lang === 'es' ? 'Imprimir resumen' : 'Print summary'}
                   </button>
                   <button
                     onClick={() => setSelectedRecapForPrint(null)}
                     className="px-4 py-2 bg-secondary text-gray-600 rounded-xl text-xs font-bold uppercase tracking-wider hover:bg-black/5 transition-all shadow-sm active:scale-95"
                   >
-                    Cerrar
+                    {lang === 'fr' ? 'Fermer' : lang === 'es' ? 'Cerrar' : 'Close'}
                   </button>
                 </div>
               </div>
@@ -9072,13 +9133,14 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                   </div>
                   <div className="text-right">
                     <span className="text-[10px] uppercase font-bold tracking-widest text-primary/60 block">
-                      INFORME FINANCIERO
+                      {lang === 'fr' ? 'RAPPORT FINANCIER' : lang === 'es' ? 'INFORME FINANCIERO' : 'FINANCIAL REPORT'}
                     </span>
                     <p className="text-sm font-serif font-bold text-gray-800 mt-1">
-                      {formatRecapPeriodTitle(selectedRecapForPrint)}
+                      {formatRecapPeriodTitle(selectedRecapForPrint, lang)}
                     </p>
                     <p className="text-[9px] text-gray-400 mt-1">
-                      Generado el : {new Date().toLocaleDateString('es-ES', { day: 'numeric', month: 'long', year: 'numeric' })}
+                      {lang === 'fr' ? 'Généré le : ' : lang === 'es' ? 'Generado el : ' : 'Generated on: '}
+                      {new Date().toLocaleDateString(lang === 'fr' ? 'fr-FR' : lang === 'es' ? 'es-ES' : 'en-US', { day: 'numeric', month: 'long', year: 'numeric' })}
                     </p>
                   </div>
                 </div>
@@ -9087,46 +9149,46 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                 <div className="grid grid-cols-4 gap-3">
                   <div className="bg-[#f4f4ec] p-3.5 rounded-2xl border border-black/5">
                     <p className="text-[9px] uppercase font-bold text-emerald-800">
-                      Total Cobrado
+                      {lang === 'fr' ? 'Chiffre d\'affaires Encaissé' : lang === 'es' ? 'Total Cobrado' : 'Total Collected'}
                     </p>
                     <p className="text-lg font-bold font-serif text-emerald-700 mt-1">
                       {selectedRecapForPrint.collectedTotal !== undefined ? selectedRecapForPrint.collectedTotal : selectedRecapForPrint.total} €
                     </p>
                     <p className="text-[8px] text-emerald-600 font-medium mt-0.5">
-                      {selectedRecapForPrint.collectedCount !== undefined ? selectedRecapForPrint.collectedCount : selectedRecapForPrint.count} pagadas
+                      {selectedRecapForPrint.collectedCount !== undefined ? selectedRecapForPrint.collectedCount : selectedRecapForPrint.count} {lang === 'fr' ? 'réglées' : lang === 'es' ? 'pagadas' : 'paid'}
                     </p>
                   </div>
                   <div className="bg-[#f4f4ec] p-3.5 rounded-2xl border border-black/5">
                     <p className="text-[9px] uppercase font-bold text-amber-800">
-                      Pendiente
+                      {lang === 'fr' ? 'En attente' : lang === 'es' ? 'Pendiente' : 'Pending'}
                     </p>
                     <p className="text-lg font-bold font-serif text-amber-700 mt-1">
                       {selectedRecapForPrint.pendingTotal || 0} €
                     </p>
                     <p className="text-[8px] text-amber-600 font-medium mt-0.5">
-                      {selectedRecapForPrint.invoices.filter(i => i.status === 'pending').length} pendientes
+                      {selectedRecapForPrint.invoices.filter(i => i.status === 'pending').length} {lang === 'fr' ? 'en attente' : lang === 'es' ? 'pendientes' : 'pending'}
                     </p>
                   </div>
                   <div className="bg-[#f4f4ec] p-3.5 rounded-2xl border border-black/5">
                     <p className="text-[9px] uppercase font-bold text-gray-400">
-                      Total Facturado
+                      {lang === 'fr' ? 'Total Facturé' : lang === 'es' ? 'Total Facturado' : 'Total Invoiced'}
                     </p>
                     <p className="text-lg font-bold font-serif text-primary mt-1">
                       {selectedRecapForPrint.total} €
                     </p>
                     <p className="text-[8px] text-gray-400 font-medium mt-0.5">
-                      {selectedRecapForPrint.count} consultas
+                      {selectedRecapForPrint.count} {lang === 'fr' ? 'consultations' : lang === 'es' ? 'consultas' : 'consultations'}
                     </p>
                   </div>
                   <div className="bg-[#f4f4ec] p-3.5 rounded-2xl border border-black/5">
                     <p className="text-[9px] uppercase font-bold text-gray-400">
-                      Ticket Promedio
+                      {lang === 'fr' ? 'Ticket Moyen' : lang === 'es' ? 'Ticket Promedio' : 'Average Ticket'}
                     </p>
                     <p className="text-lg font-bold font-serif text-primary mt-1">
                       {selectedRecapForPrint.count > 0 ? Math.round(selectedRecapForPrint.total / selectedRecapForPrint.count) : 0} €
                     </p>
                     <p className="text-[8px] text-gray-400 font-medium mt-0.5">
-                      por sesión
+                      {lang === 'fr' ? 'par séance' : lang === 'es' ? 'por sesión' : 'per session'}
                     </p>
                   </div>
                 </div>
@@ -9134,17 +9196,17 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                 {/* Detailed Invoices List */}
                 <div className="space-y-3">
                   <h3 className="text-xs font-bold uppercase tracking-wider text-primary">
-                    Detalle de facturas ({selectedRecapForPrint.invoices.length})
+                    {lang === 'fr' ? `Détail des factures (${selectedRecapForPrint.invoices.length})` : lang === 'es' ? `Detalle de facturas (${selectedRecapForPrint.invoices.length})` : `Invoice details (${selectedRecapForPrint.invoices.length})`}
                   </h3>
                   <table className="w-full border-collapse text-xs">
                     <thead>
                       <tr className="border-b-2 border-primary/20 text-left font-bold text-gray-400 uppercase text-[9px] tracking-wider">
-                        <th className="py-2">Factura</th>
-                        <th className="py-2">Paciente</th>
-                        <th className="py-2">Fecha</th>
-                        <th className="py-2">Pago</th>
-                        <th className="py-2 text-center">Estado</th>
-                        <th className="py-2 text-right">Importe</th>
+                        <th className="py-2">{lang === 'fr' ? 'N° Facture' : lang === 'es' ? 'Factura' : 'Invoice'}</th>
+                        <th className="py-2">{lang === 'fr' ? 'Patient' : lang === 'es' ? 'Paciente' : 'Patient'}</th>
+                        <th className="py-2">{lang === 'fr' ? 'Date' : lang === 'es' ? 'Fecha' : 'Date'}</th>
+                        <th className="py-2">{lang === 'fr' ? 'Règlement' : lang === 'es' ? 'Pago' : 'Payment'}</th>
+                        <th className="py-2 text-center">{lang === 'fr' ? 'Statut' : lang === 'es' ? 'Estado' : 'Status'}</th>
+                        <th className="py-2 text-right">{lang === 'fr' ? 'Montant' : lang === 'es' ? 'Importe' : 'Amount'}</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -9162,13 +9224,13 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                             )}
                           </td>
                           <td className="py-2 font-medium">{inv.clientName}</td>
-                          <td className="py-2 text-gray-500">{new Date(inv.date).toLocaleDateString('es-ES')}</td>
+                          <td className="py-2 text-gray-500">{new Date(inv.date).toLocaleDateString(lang === 'fr' ? 'fr-FR' : lang === 'es' ? 'es-ES' : 'en-US')}</td>
                           <td className="py-2">
                             <span className="text-[10px] font-medium uppercase">
                               {isZeroBono || inv.paymentMethod === 'not_applicable'
-                                ? 'No aplicable'
-                                : inv.paymentMethod === 'card' ? 'Tarjeta' :
-                                  inv.paymentMethod === 'cash' ? 'Efectivo' : 'Transferencia'}
+                                ? (lang === 'fr' ? 'Non applicable' : lang === 'es' ? 'No aplicable' : 'N/A')
+                                : inv.paymentMethod === 'card' ? (lang === 'fr' ? 'Carte' : lang === 'es' ? 'Tarjeta' : 'Card') :
+                                  inv.paymentMethod === 'cash' ? (lang === 'fr' ? 'Espèces' : lang === 'es' ? 'Efectivo' : 'Cash') : (lang === 'fr' ? 'Virement' : lang === 'es' ? 'Transferencia' : 'Transfer')}
                             </span>
                           </td>
                           <td className="py-2 text-center font-bold">
@@ -9177,7 +9239,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                 ? 'bg-emerald-100 text-emerald-800' 
                                 : 'bg-amber-100 text-amber-900 font-bold'
                             }`}>
-                              {isZeroBono ? 'Pagada (Bono)' : inv.status === 'paid' ? 'Pagada' : 'Pendiente'}
+                              {isZeroBono ? (lang === 'fr' ? 'Réglé (Bono)' : lang === 'es' ? 'Pagada (Bono)' : 'Settled (Bono)') : inv.status === 'paid' ? (lang === 'fr' ? 'Réglée' : lang === 'es' ? 'Pagada' : 'Paid') : (lang === 'fr' ? 'En attente' : lang === 'es' ? 'Pendiente' : 'Pending')}
                             </span>
                           </td>
                           <td className="py-2 text-right font-bold">
