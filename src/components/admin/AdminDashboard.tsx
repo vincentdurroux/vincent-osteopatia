@@ -1076,6 +1076,62 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
         finalDiscLabel = `Décompté sur ${client.bonoType || 'Bono'}`;
       }
 
+      // If this is a Bono session deduction, do not create an invoice; prompt confirmation and update client bono balance
+      if (newInvoiceBillingPlan === 'deduct_bono') {
+        const currentRem = typeof client.bonoSessionsRemaining === 'number' 
+          ? client.bonoSessionsRemaining 
+          : (client.bonoType?.includes('3') ? 3 : 5);
+        const newRemaining = Math.max(0, currentRem - 1);
+        const bonoName = client.bonoType || 'Bono';
+
+        const confirmMsg = (translations[lang]?.admin?.billing?.confirmBonoDeductionMessage || 
+          "Voulez-vous décompter 1 séance du forfait {bonoType} de {clientName} ? Aucune facture ne sera générée. Il restera {remaining} séance(s) sur son forfait.")
+          .replace('{bonoType}', bonoName)
+          .replace('{clientName}', client.name)
+          .replace('{remaining}', String(newRemaining));
+
+        setConfirmDialog({
+          isOpen: true,
+          title: translations[lang]?.admin?.billing?.confirmBonoDeductionTitle || (lang === 'fr' ? 'Confirmer le décompte sur le Bono' : 'Confirm Bono session deduction'),
+          message: confirmMsg,
+          confirmText: translations[lang]?.admin?.billing?.confirmBonoDeductionAction || (lang === 'fr' ? 'Confirmer le décompte' : 'Confirm'),
+          cancelText: translations[lang]?.admin?.billing?.cancel || (lang === 'fr' ? 'Annuler' : 'Cancel'),
+          isDangerous: false,
+          onConfirm: async () => {
+            const updatedClient: Client = {
+              ...client,
+              bonoSessionsRemaining: newRemaining,
+              lastSessionAt: newInvoice.date ? new Date(newInvoice.date).toISOString() : client.lastSessionAt,
+            };
+            const savedClient = await api.updateClient(updatedClient);
+            setClients(prev => prev.map(c => c.id === savedClient.id ? savedClient : c));
+            if (selectedClient?.id === client.id) {
+              setSelectedClient(savedClient);
+            }
+            setIsAddInvoiceOpen(false);
+            setNewInvoiceBillingPlan('single');
+            setNewInvoiceIncludeToday(true);
+            setNewInvoice({
+              clientId: '',
+              amount: 60,
+              originalAmount: 60,
+              discountAmount: 0,
+              discountType: 'none',
+              discountLabel: '',
+              status: 'paid',
+              paymentMethod: 'card',
+              description: "Sesión de osteopatía",
+              language: 'es',
+              quantity: 1,
+              date: new Date().toISOString().split('T')[0],
+              paymentDate: new Date().toISOString().split('T')[0],
+              eventId: '',
+            });
+          }
+        });
+        return;
+      }
+
       const isDiscounted = finalDiscount > 0;
       const created = await api.createInvoice({
         clientId: client.id,
@@ -1093,7 +1149,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
         language: 'es',
         quantity: 1,
         noteId: newInvoice.eventId || undefined,
-        isBonoRedemption: newInvoiceBillingPlan === 'deduct_bono',
+        isBonoRedemption: false,
       });
 
       // Update state immediately to guarantee invoice persists in UI
@@ -1118,7 +1174,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
         eventId: '',
       });
 
-      // Update client Bono status safely without risking invoice creation
+      // Update client Bono status safely when purchasing a new pack
       try {
         if (newInvoiceBillingPlan === 'bono3' || newInvoiceBillingPlan === 'bono5') {
           const totalSessions = newInvoiceBillingPlan === 'bono3' ? 3 : 5;
@@ -1130,20 +1186,6 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
             bonoType: bonoTitle,
             defaultDiscount: undefined,
             bonoSessionsRemaining: remaining,
-          };
-          const savedClient = await api.updateClient(updatedClient);
-          setClients(prev => prev.map(c => c.id === savedClient.id ? savedClient : c));
-          if (selectedClient?.id === client.id) {
-            setSelectedClient(savedClient);
-          }
-        } else if ((newInvoiceBillingPlan === 'deduct_bono' || newInvoice.discountType === 'bono') && client.hasBono) {
-          const currentRem = typeof client.bonoSessionsRemaining === 'number' 
-            ? client.bonoSessionsRemaining 
-            : (client.bonoType?.includes('3') ? 3 : 5);
-          const newRemaining = Math.max(0, currentRem - 1);
-          const updatedClient: Client = {
-            ...client,
-            bonoSessionsRemaining: newRemaining,
           };
           const savedClient = await api.updateClient(updatedClient);
           setClients(prev => prev.map(c => c.id === savedClient.id ? savedClient : c));
@@ -1195,6 +1237,42 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
         finalDiscLabel = `Décompté sur ${selectedClient.bonoType || 'Bono'}`;
       }
 
+      // If this is a Bono session deduction, do not create an invoice; prompt confirmation and update client bono balance
+      if (inlineBillingPlan === 'deduct_bono') {
+        const currentRem = typeof selectedClient.bonoSessionsRemaining === 'number' 
+          ? selectedClient.bonoSessionsRemaining 
+          : (selectedClient.bonoType?.includes('3') ? 3 : 5);
+        const newRemaining = Math.max(0, currentRem - 1);
+        const bonoName = selectedClient.bonoType || 'Bono';
+
+        const confirmMsg = (translations[lang]?.admin?.billing?.confirmBonoDeductionMessage || 
+          "Voulez-vous décompter 1 séance du forfait {bonoType} de {clientName} ? Aucune facture ne sera générée. Il restera {remaining} séance(s) sur son forfait.")
+          .replace('{bonoType}', bonoName)
+          .replace('{clientName}', selectedClient.name)
+          .replace('{remaining}', String(newRemaining));
+
+        setConfirmDialog({
+          isOpen: true,
+          title: translations[lang]?.admin?.billing?.confirmBonoDeductionTitle || (lang === 'fr' ? 'Confirmer le décompte sur le Bono' : 'Confirm Bono session deduction'),
+          message: confirmMsg,
+          confirmText: translations[lang]?.admin?.billing?.confirmBonoDeductionAction || (lang === 'fr' ? 'Confirmer le décompte' : 'Confirm'),
+          cancelText: translations[lang]?.admin?.billing?.cancel || (lang === 'fr' ? 'Annuler' : 'Cancel'),
+          isDangerous: false,
+          onConfirm: async () => {
+            const updatedClient: Client = {
+              ...selectedClient,
+              bonoSessionsRemaining: newRemaining,
+              lastSessionAt: note.date,
+            };
+            const savedClient = await api.updateClient(updatedClient);
+            setClients(prev => prev.map(c => c.id === savedClient.id ? savedClient : c));
+            setSelectedClient(savedClient);
+            setCreatingInvoiceForNoteId(null);
+          }
+        });
+        return;
+      }
+
       const isDiscounted = finalDiscount > 0;
       const created = await api.createInvoice({
         clientId: selectedClient.id,
@@ -1212,7 +1290,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
         language: 'es',
         quantity: 1,
         noteId: note.id,
-        isBonoRedemption: inlineBillingPlan === 'deduct_bono',
+        isBonoRedemption: false,
       });
 
       // Update state immediately to guarantee invoice persists in UI
@@ -1231,18 +1309,6 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
             bonoType: bonoTitle,
             defaultDiscount: undefined,
             bonoSessionsRemaining: remaining,
-          };
-          const savedClient = await api.updateClient(updatedClient);
-          setClients(prev => prev.map(c => c.id === savedClient.id ? savedClient : c));
-          setSelectedClient(savedClient);
-        } else if ((inlineBillingPlan === 'deduct_bono' || inlineInvoiceDiscountType === 'bono') && selectedClient.hasBono) {
-          const currentRem = typeof selectedClient.bonoSessionsRemaining === 'number' 
-            ? selectedClient.bonoSessionsRemaining 
-            : (selectedClient.bonoType?.includes('3') ? 3 : 5);
-          const newRemaining = Math.max(0, currentRem - 1);
-          const updatedClient: Client = {
-            ...selectedClient,
-            bonoSessionsRemaining: newRemaining,
           };
           const savedClient = await api.updateClient(updatedClient);
           setClients(prev => prev.map(c => c.id === savedClient.id ? savedClient : c));
@@ -4180,9 +4246,15 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                         <button
                                           type="button"
                                           onClick={() => handleCreateInlineInvoice(note)}
-                                          className="flex-1 py-2.5 bg-primary text-white text-xs font-bold rounded-xl hover:bg-primary/95 transition-all shadow-sm"
+                                          className={`flex-1 py-2.5 text-white text-xs font-bold rounded-xl transition-all shadow-sm ${
+                                            inlineBillingPlan === 'deduct_bono'
+                                              ? 'bg-emerald-600 hover:bg-emerald-700'
+                                              : 'bg-primary hover:bg-primary/95'
+                                          }`}
                                         >
-                                          {translations[lang].admin.billing.issueInvoiceAction}
+                                          {inlineBillingPlan === 'deduct_bono'
+                                            ? (translations[lang]?.admin?.billing?.confirmBonoDeductionAction || (lang === 'fr' ? 'Confirmer le décompte' : lang === 'es' ? 'Confirmar descuento' : 'Confirm Deduction'))
+                                            : translations[lang].admin.billing.issueInvoiceAction}
                                         </button>
                                         <button
                                           type="button"
@@ -6616,10 +6688,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                       >
                         <option value="">-- {lang === 'fr' ? 'Aucun ou patient non répertorié' : lang === 'es' ? 'Ninguno o no registrado' : 'None or unlisted'} --</option>
                         <option value="__new__" className="font-bold text-primary">
-                          ✨ + {lang === 'fr' ? 'Nouveau patient (fiche complète ici)' : lang === 'es' ? 'Nuevo paciente (ficha aquí)' : 'New patient (inline file)'}
-                        </option>
-                        <option value="__new_modal__" className="font-bold text-primary">
-                          📋 + {lang === 'fr' ? 'Nouveau patient (formulaire complet)' : lang === 'es' ? 'Nuevo paciente (formulario completo)' : 'New patient (full modal)'}
+                          ✨ + {lang === 'fr' ? 'Nouveau patient' : lang === 'es' ? 'Nuevo paciente' : 'New patient'}
                         </option>
                         {clients.map(c => (
                           <option key={c.id} value={c.id}>{c.name} ({c.phone || c.email || 'N/A'})</option>
@@ -7915,9 +7984,15 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                   </button>
                   <button
                     type="submit"
-                    className="flex-1 py-3 bg-primary text-white rounded-2xl text-xs font-bold uppercase tracking-wider hover:bg-primary/95 transition-all shadow-md"
+                    className={`flex-1 py-3 text-white rounded-2xl text-xs font-bold uppercase tracking-wider transition-all shadow-md ${
+                      newInvoiceBillingPlan === 'deduct_bono'
+                        ? 'bg-emerald-600 hover:bg-emerald-700'
+                        : 'bg-primary hover:bg-primary/95'
+                    }`}
                   >
-                    {lang === 'fr' ? 'Générer la facture' : lang === 'es' ? 'Generar factura' : 'Generate invoice'}
+                    {newInvoiceBillingPlan === 'deduct_bono'
+                      ? (translations[lang]?.admin?.billing?.confirmBonoDeductionAction || (lang === 'fr' ? 'Confirmer le décompte' : lang === 'es' ? 'Confirmar descuento' : 'Confirm Deduction'))
+                      : (lang === 'fr' ? 'Générer la facture' : lang === 'es' ? 'Generar factura' : 'Generate invoice')}
                   </button>
                 </div>
               </form>

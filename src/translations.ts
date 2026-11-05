@@ -278,6 +278,9 @@ export const translations = {
         discountLabel: "Libellé de la remise",
         netAmountToPay: "Net à régler",
         prepaid: "Déjà réglé",
+        confirmBonoDeductionAction: "Confirmer le décompte",
+        confirmBonoDeductionTitle: "Confirmer le décompte sur le Bono",
+        confirmBonoDeductionMessage: "Voulez-vous décompter 1 séance du forfait {bonoType} de {clientName} ? Aucune facture ne sera générée. Il restera {remaining} séance(s) sur son forfait.",
       },
       modals: {
         newPatientTitle: "Nouveau Patient",
@@ -622,6 +625,9 @@ export const translations = {
         discountLabel: "Discount label",
         netAmountToPay: "Net amount to pay",
         prepaid: "Prepaid",
+        confirmBonoDeductionAction: "Confirm Deduction",
+        confirmBonoDeductionTitle: "Confirm Bono Session Deduction",
+        confirmBonoDeductionMessage: "Do you want to deduct 1 session from {clientName}'s {bonoType}? No invoice will be generated. {remaining} session(s) will remain on their pack.",
       },
       modals: {
         newPatientTitle: "New Patient",
@@ -966,6 +972,9 @@ export const translations = {
         discountLabel: "Concepto del descuento",
         netAmountToPay: "Neto a abonar",
         prepaid: "Ya abonado",
+        confirmBonoDeductionAction: "Confirmar descuento",
+        confirmBonoDeductionTitle: "Confirmar descuento de sesión del Bono",
+        confirmBonoDeductionMessage: "¿Desea descontar 1 sesión del {bonoType} de {clientName}? No se creará ninguna factura. Quedarán {remaining} sesión(es) en su bono.",
       },
       modals: {
         newPatientTitle: "Nuevo Paciente",
