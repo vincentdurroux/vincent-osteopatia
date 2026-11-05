@@ -1194,6 +1194,32 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
               }
             }
 
+            // Register bono redemption line in invoices
+            try {
+              const sessionDate = invDateOnly || new Date().toISOString().split('T')[0];
+              const redemptionInvoice = await api.createInvoice({
+                clientId: client.id,
+                clientName: client.name,
+                amount: 0,
+                originalAmount: 60,
+                discountAmount: 60,
+                discountType: 'bono',
+                discountLabel: `Décompté sur ${bonoName}`,
+                status: 'paid',
+                paymentMethod: newInvoice.paymentMethod || 'transfer',
+                date: sessionDate,
+                paymentDate: newInvoice.paymentDate || sessionDate,
+                description: `${translations[lang]?.admin?.billing?.deductBonoDesc || "Séance d'Ostéopathie (Prise en compte Bono)"} (${bonoName})`,
+                isBonoRedemption: true,
+                eventId: newInvoice.eventId,
+                language: lang as any,
+                quantity: 1,
+              });
+              setInvoices(prev => [redemptionInvoice, ...prev]);
+            } catch (invErr) {
+              console.warn('Could not register bono deduction invoice line:', invErr);
+            }
+
             setIsAddInvoiceOpen(false);
             setNewInvoiceBillingPlan('single');
             setNewInvoiceIncludeToday(true);
@@ -1370,6 +1396,32 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
               setAllNotes(prev => prev.map(n => n.id === savedNote.id ? savedNote : n));
             } catch (noteErr) {
               console.warn('Could not update note bono state:', noteErr);
+            }
+
+            // Register bono redemption line in invoices
+            try {
+              const redemptionInvoice = await api.createInvoice({
+                clientId: selectedClient.id,
+                clientName: selectedClient.name,
+                amount: 0,
+                originalAmount: 60,
+                discountAmount: 60,
+                discountType: 'bono',
+                discountLabel: `Décompté sur ${bonoName}`,
+                status: 'paid',
+                paymentMethod: 'transfer',
+                date: noteDateStr,
+                paymentDate: noteDateStr,
+                description: `${translations[lang]?.admin?.billing?.deductBonoDesc || "Séance d'Ostéopathie (Prise en compte Bono)"} (${bonoName})`,
+                isBonoRedemption: true,
+                noteId: note.id,
+                eventId: note.eventId,
+                language: lang as any,
+                quantity: 1,
+              });
+              setInvoices(prev => [redemptionInvoice, ...prev]);
+            } catch (invErr) {
+              console.warn('Could not register bono deduction invoice line:', invErr);
             }
 
             setCreatingInvoiceForNoteId(null);
@@ -4021,10 +4073,11 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                               const noteDateOnly = note.date.includes('T') ? note.date.split('T')[0] : note.date;
                               const isNoteBonoRedeemed = Boolean(
                                 note.isBonoRedeemed || 
+                                (associatedInvoice && (associatedInvoice.isBonoRedemption || associatedInvoice.discountType === 'bono' || associatedInvoice.amount === 0)) ||
                                 (selectedClient?.bonoRedeemedDates && selectedClient.bonoRedeemedDates.includes(noteDateOnly))
                               );
 
-                              return associatedInvoice ? (
+                              return associatedInvoice && !associatedInvoice.isBonoRedemption && associatedInvoice.amount > 0 ? (
                                 <div className="mt-4 pt-4 border-t border-black/5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-stone-50 p-3.5 rounded-2xl border border-black/5">
                                   <div className="flex items-center gap-2.5">
                                     <CreditCard size={15} className="text-primary shrink-0" />

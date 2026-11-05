@@ -1090,6 +1090,10 @@ export const api = {
               if (local.profileNote && !mapped.profileNote) {
                 mapped.profileNote = local.profileNote;
               }
+              // Preserve bonoRedeemedDates
+              if (local.bonoRedeemedDates && local.bonoRedeemedDates.length > 0) {
+                mapped.bonoRedeemedDates = local.bonoRedeemedDates;
+              }
             }
             return mapped;
           });
@@ -1414,6 +1418,7 @@ export const api = {
             profileNote: normalizedClient.profileNote !== undefined
               ? normalizedClient.profileNote
               : mapped.profileNote,
+            bonoRedeemedDates: normalizedClient.bonoRedeemedDates || mapped.bonoRedeemedDates || [],
           };
           const current = loadLocal('clients', mockClients);
           const index = current.findIndex(c => c.id === finalClient.id);
@@ -1503,7 +1508,16 @@ export const api = {
       try {
         const { data, error } = await supabase.from('client_notes').select('*').order('date', { ascending: false });
         if (!error && data) {
-          return data.map(mapNoteFromDB);
+          const localMap = new Map(localNotes.map(n => [n.id, n]));
+          return data.map(row => {
+            const mapped = mapNoteFromDB(row);
+            const local = localMap.get(mapped.id);
+            if (local) {
+              if (local.isBonoRedeemed) mapped.isBonoRedeemed = true;
+              if (local.bonoType) mapped.bonoType = local.bonoType;
+            }
+            return mapped;
+          });
         }
       } catch (err) {
         console.warn('Supabase getAllNotes exception:', err);
@@ -1520,12 +1534,30 @@ export const api = {
         let { data, error } = await supabase.from('client_notes').select('*').eq('client_id', clientId).order('date', { ascending: false });
         
         if (!error && data && data.length > 0) {
-          return data.map(mapNoteFromDB);
+          const localMap = new Map(localNotes.map(n => [n.id, n]));
+          return data.map(row => {
+            const mapped = mapNoteFromDB(row);
+            const local = localMap.get(mapped.id);
+            if (local) {
+              if (local.isBonoRedeemed) mapped.isBonoRedeemed = true;
+              if (local.bonoType) mapped.bonoType = local.bonoType;
+            }
+            return mapped;
+          });
         }
 
         const res = await supabase.from('client_notes').select('*').eq('clientId', clientId).order('date', { ascending: false });
         if (!res.error && res.data) {
-          return res.data.map(mapNoteFromDB);
+          const localMap = new Map(localNotes.map(n => [n.id, n]));
+          return res.data.map(row => {
+            const mapped = mapNoteFromDB(row);
+            const local = localMap.get(mapped.id);
+            if (local) {
+              if (local.isBonoRedeemed) mapped.isBonoRedeemed = true;
+              if (local.bonoType) mapped.bonoType = local.bonoType;
+            }
+            return mapped;
+          });
         }
       } catch (err) {
         console.warn('Supabase getClientNotes exception:', err);
@@ -1638,11 +1670,18 @@ export const api = {
         const result = await executeResilientUpdate('client_notes', note.id, [payload]);
         if (result.success && result.data) {
           const mapped = mapNoteFromDB(result.data);
+          const finalNote: ClientNote = {
+            ...note,
+            ...mapped,
+            isBonoRedeemed: note.isBonoRedeemed !== undefined ? note.isBonoRedeemed : mapped.isBonoRedeemed,
+            bonoType: note.bonoType || mapped.bonoType,
+          };
           const current = loadLocal('notes', mockNotes);
           const index = current.findIndex(n => n.id === note.id);
-          if (index !== -1) current[index] = mapped;
+          if (index !== -1) current[index] = finalNote;
+          else current.push(finalNote);
           saveLocal('notes', current);
-          return mapped;
+          return finalNote;
         }
       } catch (err) {
         console.warn('Supabase updateClientNote exception:', err);
