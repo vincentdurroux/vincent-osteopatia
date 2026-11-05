@@ -3424,6 +3424,8 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                     (selectedClient?.bonoRedeemedDates && selectedClient.bonoRedeemedDates.includes(evDateStr))
                                   )
                                 );
+                                const isPaymentSettled = Boolean(paidInvoice || isBonoRedeemed);
+                                const isComplete = Boolean(hasNote && isPaymentSettled);
 
                                 return (
                                   <div 
@@ -3431,10 +3433,10 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                     className={`p-3.5 rounded-2xl border transition-all flex flex-col justify-between gap-2.5 ${
                                       isOngoing
                                         ? 'bg-teal-50/80 border-teal-300 ring-2 ring-teal-400/40 shadow-xs'
-                                        : isPast
+                                        : isComplete
+                                        ? 'bg-sky-50/90 border-sky-300/80 hover:bg-sky-100/60 shadow-xs'
+                                        : (isPast || evDateStr === todayStr)
                                         ? 'bg-amber-50/90 border-amber-200 hover:bg-amber-50 shadow-xs'
-                                        : hasNote
-                                        ? 'bg-sky-50/90 border-sky-200 hover:bg-sky-50 shadow-xs'
                                         : 'bg-[#fafafa] border-black/5 hover:bg-white'
                                     }`}
                                   >
@@ -3834,8 +3836,60 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
 
                       {clientNotes.map(note => {
                         const isEditing = editingNoteId === note.id;
+                        const associatedInvoice = invoices.find(inv => {
+                          if (inv.noteId === note.id) return true;
+                          if (!selectedClient) return false;
+                          const isSameClient = inv.clientId === selectedClient.id || (
+                            inv.clientName && selectedClient.name && (
+                              inv.clientName.toLowerCase() === selectedClient.name.toLowerCase() ||
+                              (selectedClient.lastName && inv.clientName.toLowerCase().includes(selectedClient.lastName.toLowerCase()))
+                            )
+                          );
+                          if (!isSameClient) return false;
+                          try {
+                            const invDateStr = new Date(inv.date).toISOString().split('T')[0];
+                            const noteDateStr = new Date(note.date).toISOString().split('T')[0];
+                            return invDateStr === noteDateStr;
+                          } catch (e) {
+                            return false;
+                          }
+                        });
+
+                        const noteDateOnly = note.date.includes('T') ? note.date.split('T')[0] : note.date;
+                        const isZeroBonoInvoice = Boolean(
+                          associatedInvoice && (
+                            associatedInvoice.isBonoRedemption || 
+                            (associatedInvoice.amount === 0 && associatedInvoice.discountType === 'bono') ||
+                            associatedInvoice.amount === 0
+                          )
+                        );
+
+                        const isNoteBonoRedeemed = Boolean(
+                          note.isBonoRedeemed || 
+                          isZeroBonoInvoice ||
+                          (selectedClient?.bonoRedeemedDates && selectedClient.bonoRedeemedDates.includes(noteDateOnly))
+                        );
+
+                        const isNotePaid = Boolean(associatedInvoice && associatedInvoice.status === 'paid' && associatedInvoice.amount > 0);
+                        const isNotePaymentSettled = Boolean(isNotePaid || isNoteBonoRedeemed);
+                        const hasNoteContent = Boolean(
+                          (note.content && note.content.trim()) || 
+                          (note.anamnese && note.anamnese.trim()) || 
+                          (note.treatment && note.treatment.trim()) || 
+                          (note.motif && note.motif.trim())
+                        );
+                        const isNoteComplete = Boolean(hasNoteContent && isNotePaymentSettled);
+
                         return (
-                          <div key={note.id} id={`note-${note.id}`} className="bg-white p-5 rounded-3xl border border-black/5 shadow-sm space-y-3 relative group transition-all">
+                          <div 
+                            key={note.id} 
+                            id={`note-${note.id}`} 
+                            className={`p-5 rounded-3xl border shadow-sm space-y-3 relative group transition-all ${
+                              isNoteComplete
+                                ? 'bg-sky-50/70 border-sky-200/90 hover:border-sky-300 hover:bg-sky-50'
+                                : 'bg-amber-50/70 border-amber-200/90 hover:border-amber-300 hover:bg-amber-50'
+                            }`}
+                          >
                             {isEditing ? (
                               <div className="space-y-3 bg-[#fafaf7] p-4 rounded-2xl border border-primary/20 shadow-inner">
                                 <div className="flex items-center justify-between gap-4">
