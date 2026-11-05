@@ -775,8 +775,23 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
         api.getAllNotes(),
       ]);
       
-      const clientMap = new Map(allClients.map(c => [c.id, c.name]));
-      const enrichedEvents = allEvents.map(ev => {
+      const dedupe = <T extends { id?: string }>(items: T[]): T[] => {
+        const seen = new Set<string>();
+        return items.filter((item, idx) => {
+          const key = item.id ? String(item.id).trim() : `idx-${idx}`;
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        });
+      };
+
+      const cleanClients = dedupe(allClients);
+      const cleanEvents = dedupe(allEvents);
+      const cleanInvoices = dedupe(allInvoices);
+      const cleanNotes = dedupe(fetchedNotes);
+      
+      const clientMap = new Map(cleanClients.map(c => [c.id, c.name]));
+      const enrichedEvents = cleanEvents.map(ev => {
         let name = ev.clientName;
         if (!name && ev.clientId && clientMap.has(ev.clientId)) {
           name = clientMap.get(ev.clientId);
@@ -787,9 +802,9 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
         };
       });
 
-      setClients(allClients);
-      setAllNotes(fetchedNotes);
-      const enrichedInvoices = allInvoices.map(inv => {
+      setClients(cleanClients);
+      setAllNotes(cleanNotes);
+      const enrichedInvoices = cleanInvoices.map(inv => {
         let name = inv.clientName;
         if ((!name || name.trim() === '') && inv.clientId && clientMap.has(inv.clientId)) {
           name = clientMap.get(inv.clientId)!;
@@ -1064,26 +1079,171 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
     }
   };
 
-  // Delete Invoice with confirmation
+  // Delete Invoice with confirmation and Bono cascade deletion
   const handleDeleteInvoice = (invoiceId: string) => {
-    const inv = invoices.find(i => i.id === invoiceId);
+    const inv = invoices.find(i => i.id === invoiceId || i.invoiceNumber === invoiceId);
     const invLabel = inv ? `#${inv.invoiceNumber} (${inv.clientName} - ${inv.amount}€)` : '';
+
+    const isPaidBono = Boolean(
+      inv &&
+      inv.amount > 0 &&
+      (
+        inv.discountType === 'bono' ||
+        (inv.discountLabel && inv.discountLabel.toLowerCase().includes('bono')) ||
+        (inv.description && inv.description.toLowerCase().includes('bono'))
+      )
+    );
+
+    const isSingleRedemption = Boolean(
+      inv &&
+      inv.amount === 0 &&
+      (
+        inv.isBonoRedemption ||
+        inv.discountType === 'bono' ||
+        (inv.discountLabel && inv.discountLabel.toLowerCase().includes('bono'))
+      )
+    );
+
+    let confirmMsg = lang === 'fr' 
+      ? `Êtes-vous certain de vouloir supprimer définitivement la facture ${invLabel} ? Cette action est irréversible.`
+      : lang === 'es'
+      ? `¿Está seguro de que desea eliminar definitivamente la factura ${invLabel}?`
+      : `Are you sure you want to permanently delete invoice ${invLabel}?`;
+
+    if (isPaidBono) {
+      confirmMsg = lang === 'fr'
+        ? `Attention : La suppression de cette facture d'achat de Bono (${invLabel}) va automatiquement supprimer toutes les séances décomptées en cascade et réinitialiser le Bono du patient. Souhaitez-vous continuer ?`
+        : lang === 'es'
+        ? `Atención: Al eliminar esta factura de Bono (${invLabel}) se eliminarán automáticamente todas las sesiones descontadas asociadas y se reiniciará el Bono del paciente. ¿Desea continuar?`
+        : `Warning: Deleting this Bono purchase invoice (${invLabel}) will automatically delete all associated redeemed sessions and reset the patient's Bono. Continue?`;
+    } else if (isSingleRedemption) {
+      confirmMsg = lang === 'fr'
+        ? `Supprimer ce décompte de séance récréditera 1 séance sur le forfait du patient. Souhaitez-vous continuer ?`
+        : lang === 'es'
+        ? `¿Eliminar este descuento de sesión y récreditar 1 sesión al Bono del paciente?`
+        : `Delete this session redemption and credit 1 session back to the patient's package?`;
+    }
 
     setConfirmDialog({
       isOpen: true,
       title: lang === 'fr' ? 'Supprimer la facture' : lang === 'es' ? 'Eliminar factura' : 'Delete invoice',
-      message: lang === 'fr' 
-        ? `Êtes-vous certain de vouloir supprimer définitivement la facture ${invLabel} ? Cette action est irréversible.`
-        : lang === 'es'
-        ? `¿Está seguro de que desea eliminar definitivamente la factura ${invLabel}?`
-        : `Are you sure you want to permanently delete invoice ${invLabel}?`,
-      confirmText: lang === 'fr' ? 'Supprimer la facture' : lang === 'es' ? 'Eliminar' : 'Delete invoice',
+      message: confirmMsg,
+      confirmText: lang === 'fr' ? 'Supprimer' : lang === 'es' ? 'Eliminar' : 'Delete',
       cancelText: lang === 'fr' ? 'Annuler' : lang === 'es' ? 'Cancelar' : 'Cancel',
       isDangerous: true,
       onConfirm: async () => {
         try {
+          const clientId = inv?.clientId;
+          const clientName = inv?.clientName;
+
+          // Perform API deletion (which executes database cascade & tombstones)
           await api.deleteInvoice(invoiceId, inv?.invoiceNumber);
-          setInvoices(prev => prev.filter(i => i.id !== invoiceId && (!inv?.invoiceNumber || i.invoiceNumber !== inv.invoiceNumber)));
+
+          if (isPaidBono && (clientId || clientName)) {
+            // Cascade cleanup in local React states
+            const redemptions = invoices.filter(i => {
+              if (i.id === invoiceId || (inv?.invoiceNumber && i.invoiceNumber === inv.invoiceNumber)) return false;
+              const isRed = i.amount === 0 && (i.isBonoRedemption || i.discountType === 'bono' || (i.discountLabel && i.discountLabel.toLowerCase().includes('bono')));
+              if (!isRed) return false;
+              if (clientId && i.clientId === clientId) return true;
+              if (clientName && i.clientName && i.clientName.trim().toLowerCase() === clientName.trim().toLowerCase()) return true;
+              return false;
+            });
+
+            const redIds = new Set(redemptions.map(r => r.id));
+            const redNums = new Set(redemptions.map(r => r.invoiceNumber).filter(Boolean));
+
+            // 1. Update invoices state
+            setInvoices(prev => prev.filter(i => {
+              if (i.id === invoiceId || (inv?.invoiceNumber && i.invoiceNumber === inv.invoiceNumber)) return false;
+              if (redIds.has(i.id)) return false;
+              if (i.invoiceNumber && redNums.has(i.invoiceNumber)) return false;
+              return true;
+            }));
+
+            // 2. Update clients state
+            const resetFields = {
+              hasBono: false,
+              bonoType: undefined,
+              bonoTotalSessions: 0,
+              bonoSessionsRemaining: 0,
+              bonoRedeemedDates: [],
+              bonoPurchaseDate: undefined,
+              defaultDiscount: 0,
+            };
+
+            setClients(prev => prev.map(c => {
+              const isMatch = (clientId && c.id === clientId) || (clientName && c.name?.trim().toLowerCase() === clientName.trim().toLowerCase());
+              if (isMatch) return { ...c, ...resetFields };
+              return c;
+            }));
+
+            if (selectedClient && ((clientId && selectedClient.id === clientId) || (clientName && selectedClient.name?.trim().toLowerCase() === clientName.trim().toLowerCase()))) {
+              setSelectedClient(prev => prev ? { ...prev, ...resetFields } : null);
+            }
+
+            // 3. Update notes state
+            setClientNotes(prev => prev.map(n => ({ ...n, isBonoRedeemed: false, bonoType: undefined })));
+            setAllNotes(prev => prev.map(n => {
+              const isMatch = (clientId && n.clientId === clientId) || (clientName && n.clientName?.trim().toLowerCase() === clientName.trim().toLowerCase());
+              if (isMatch) return { ...n, isBonoRedeemed: false, bonoType: undefined };
+              return n;
+            }));
+
+          } else if (isSingleRedemption && (clientId || clientName)) {
+            const targetDateStr = inv?.date ? inv.date.split('T')[0] : '';
+
+            // Update invoices state
+            setInvoices(prev => prev.filter(i => i.id !== invoiceId && (!inv?.invoiceNumber || i.invoiceNumber !== inv.invoiceNumber)));
+
+            // Refund +1 session to client
+            setClients(prev => prev.map(c => {
+              const isMatch = (clientId && c.id === clientId) || (clientName && c.name?.trim().toLowerCase() === clientName.trim().toLowerCase());
+              if (isMatch && c.hasBono) {
+                const maxSessions = c.bonoTotalSessions || 5;
+                const newRemaining = Math.min(maxSessions, (c.bonoSessionsRemaining || 0) + 1);
+                const newDates = (c.bonoRedeemedDates || []).filter(d => d !== targetDateStr);
+                return { ...c, bonoSessionsRemaining: newRemaining, bonoRedeemedDates: newDates };
+              }
+              return c;
+            }));
+
+            if (selectedClient && ((clientId && selectedClient.id === clientId) || (clientName && selectedClient.name?.trim().toLowerCase() === clientName.trim().toLowerCase()))) {
+              setSelectedClient(prev => {
+                if (!prev || !prev.hasBono) return prev;
+                const maxSessions = prev.bonoTotalSessions || 5;
+                const newRemaining = Math.min(maxSessions, (prev.bonoSessionsRemaining || 0) + 1);
+                const newDates = (prev.bonoRedeemedDates || []).filter(d => d !== targetDateStr);
+                return { ...prev, bonoSessionsRemaining: newRemaining, bonoRedeemedDates: newDates };
+              });
+            }
+
+            // Reset isBonoRedeemed on associated note
+            setClientNotes(prev => prev.map(n => {
+              const isEventMatch = inv?.eventId && n.eventId === inv.eventId;
+              const isNoteMatch = inv?.noteId && n.id === inv.noteId;
+              const isDateMatch = targetDateStr && n.date.split('T')[0] === targetDateStr;
+              if (isEventMatch || isNoteMatch || isDateMatch) {
+                return { ...n, isBonoRedeemed: false };
+              }
+              return n;
+            }));
+
+            setAllNotes(prev => prev.map(n => {
+              const isClientMatch = (clientId && n.clientId === clientId) || (clientName && n.clientName?.trim().toLowerCase() === clientName.trim().toLowerCase());
+              const isEventMatch = inv?.eventId && n.eventId === inv.eventId;
+              const isNoteMatch = inv?.noteId && n.id === inv.noteId;
+              const isDateMatch = targetDateStr && n.date.split('T')[0] === targetDateStr;
+              if (isClientMatch && (isEventMatch || isNoteMatch || isDateMatch)) {
+                return { ...n, isBonoRedeemed: false };
+              }
+              return n;
+            }));
+
+          } else {
+            setInvoices(prev => prev.filter(i => i.id !== invoiceId && (!inv?.invoiceNumber || i.invoiceNumber !== inv.invoiceNumber)));
+          }
+
           if (isEditInvoiceOpen && editingInvoice?.id === invoiceId) {
             setIsEditInvoiceOpen(false);
             setEditingInvoice(null);
@@ -2621,7 +2781,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                         {lang === 'fr' ? "Consultations prévues aujourd'hui" : "Appointments scheduled today"} ({todayAppointmentsCount})
                       </p>
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                        {todayEvents.map(event => {
+                        {todayEvents.map((event, idx) => {
                           const isOther = event.eventType && event.eventType !== 'appointment';
                           const timeStatus = getAppointmentTimeStatus(event);
                           const startTime = new Date(event.start).toLocaleTimeString(lang === 'fr' ? 'fr-FR' : 'es-ES', { hour: '2-digit', minute: '2-digit' });
@@ -2629,7 +2789,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
 
                           return (
                             <div 
-                              key={event.id} 
+                              key={event.id ? `${event.id}-${idx}` : `today-${idx}`} 
                               className={`p-4 rounded-2xl border transition-all flex flex-col justify-between gap-3 group ${
                                 isOther 
                                   ? 'bg-amber-50/50 hover:bg-amber-50/80 border-amber-200/80' 
@@ -2771,11 +2931,11 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                             {lang === 'fr' ? "Prochaines consultations à venir" : "Upcoming appointments"}
                           </p>
                           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                            {upcomingEvents.map(event => {
+                            {upcomingEvents.map((event, idx) => {
                               const isOther = event.eventType && event.eventType !== 'appointment';
                               return (
                                 <div
-                                  key={event.id}
+                                  key={event.id ? `${event.id}-${idx}` : `upcoming-${idx}`}
                                   className={`p-3.5 rounded-2xl border transition-all flex flex-col justify-between gap-2 shadow-2xs group ${
                                     isOther 
                                       ? 'bg-amber-50/40 hover:bg-amber-50/80 border-amber-200/70' 
@@ -2939,11 +3099,11 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                       <ChevronDown size={16} />
                     </button>
                   )}
-                  {filteredClients.map(c => {
+                  {filteredClients.map((c, idx) => {
                     const isSelected = selectedClient?.id === c.id;
                     return (
                       <div
-                        key={c.id}
+                        key={c.id ? `${c.id}-${idx}` : `client-${idx}`}
                         className={`group w-full flex items-center justify-between p-3 rounded-2xl transition-all border ${
                           isSelected 
                             ? 'bg-primary/5 border-primary/20 shadow-sm' 
@@ -3333,7 +3493,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                               <span>{lang === 'fr' ? 'Rendez-vous à venir' : lang === 'es' ? 'Próximas citas' : 'Upcoming appointments'} ({upcomingAppointments.length})</span>
                             </h5>
                             <div className="space-y-2">
-                              {upcomingAppointments.map(ev => {
+                              {upcomingAppointments.map((ev, idx) => {
                                 const evDate = new Date(ev.start);
                                 const dateStr = evDate.toLocaleDateString(lang === 'fr' ? 'fr-FR' : lang === 'es' ? 'es-ES' : 'en-US', {
                                   weekday: 'short',
@@ -3343,7 +3503,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                 });
                                 const timeStr = `${evDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} - ${new Date(ev.end).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
                                 return (
-                                  <div key={ev.id} className="p-3 bg-emerald-50/70 border border-emerald-200/60 rounded-xl flex items-center justify-between gap-3 text-xs">
+                                  <div key={ev.id ? `${ev.id}-${idx}` : `up-app-${idx}`} className="p-3 bg-emerald-50/70 border border-emerald-200/60 rounded-xl flex items-center justify-between gap-3 text-xs">
                                     <div className="flex items-center gap-2.5 min-w-0">
                                       <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0"></span>
                                       <div className="min-w-0">
@@ -3374,7 +3534,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                               <span>{lang === 'fr' ? "Rendez-vous du jour et passés" : lang === 'es' ? "Citas de hoy y pasadas" : "Today and past appointments"} ({pastOrTodayAppointments.length})</span>
                             </h5>
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                              {pastOrTodayAppointments.map(ev => {
+                              {pastOrTodayAppointments.map((ev, idx) => {
                                 const evDate = new Date(ev.start);
                                 const timeStatus = getAppointmentTimeStatus(ev);
                                 const isOngoing = timeStatus.isOngoing;
@@ -3429,7 +3589,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
 
                                 return (
                                   <div 
-                                    key={ev.id}
+                                    key={ev.id ? `${ev.id}-${idx}` : `past-app-${idx}`}
                                     className={`p-3.5 rounded-2xl border transition-all flex flex-col justify-between gap-2.5 ${
                                       isOngoing
                                         ? 'bg-teal-50/80 border-teal-300 ring-2 ring-teal-400/40 shadow-xs'
@@ -3834,7 +3994,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                         {lang === 'fr' ? 'Historique des fiches' : lang === 'es' ? 'Historial de fichas' : 'Record history'} ({clientNotes.length})
                       </h4>
 
-                      {clientNotes.map(note => {
+                      {clientNotes.map((note, noteIdx) => {
                         const isEditing = editingNoteId === note.id;
                         const associatedInvoice = invoices.find(inv => {
                           if (inv.noteId === note.id) return true;
@@ -3882,7 +4042,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
 
                         return (
                           <div 
-                            key={note.id} 
+                            key={note.id ? `${note.id}-${noteIdx}` : `note-${noteIdx}`} 
                             id={`note-${note.id}`} 
                             className={`p-5 rounded-3xl border shadow-sm space-y-3 relative group transition-all ${
                               isNoteComplete
@@ -4778,7 +4938,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
               };
 
               // Clean Medical Cyan Appointment Card (Heure, Nom Prénom, Profile Note)
-              const renderAppointmentCard = (ev: CalendarEvent) => {
+              const renderAppointmentCard = (ev: CalendarEvent, cardKey?: string) => {
                 const isOther = ev.eventType && ev.eventType !== 'appointment';
                 const startStr = new Date(ev.start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
                 const endStr = new Date(ev.end).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -4792,7 +4952,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                   const displayLabel = cleanRemark || ev.summary || (lang === 'fr' ? 'Créneau indisponible' : 'Bloqueado');
                   return (
                     <div
-                      key={ev.id}
+                      key={cardKey || ev.id}
                       onClick={() => setSelectedAppointmentForDetails(ev)}
                       className="rounded-lg p-2 bg-amber-100/90 hover:bg-amber-100 border border-amber-300 text-amber-950 shadow-2xs hover:shadow-sm cursor-pointer transition-all relative group/card"
                       title={lang === 'fr' ? "Cliquer pour voir les détails" : "Click to view details"}
@@ -4815,7 +4975,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
 
                 return (
                   <div
-                    key={ev.id}
+                    key={cardKey || ev.id}
                     onClick={() => setSelectedAppointmentForDetails(ev)}
                     className="rounded-lg p-2 bg-[#38c9d8] hover:bg-[#2fc0cf] border border-[#20b4c5] text-[#063840] shadow-2xs hover:shadow-md cursor-pointer transition-all relative group/card select-none"
                     title={lang === 'fr' ? "Cliquer pour voir les détails du rendez-vous" : "Click to view appointment details"}
@@ -5109,7 +5269,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                       >
                                         {slotEvents.length > 0 ? (
                                           <div className="space-y-1 w-full">
-                                            {slotEvents.map(ev => renderAppointmentCard(ev))}
+                                            {slotEvents.map((ev, sIdx) => renderAppointmentCard(ev, `${dayItem.dateString}-${hourNum}-${ev.id || sIdx}-${sIdx}`))}
                                             <button
                                               type="button"
                                               onClick={() => handleQuickAddEvent(dayItem.dateString, hourStr)}
@@ -5229,7 +5389,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                       <div className="flex-1 space-y-2">
                                         {slotEvents.length > 0 ? (
                                           <div className="space-y-1.5">
-                                            {slotEvents.map(ev => renderAppointmentCard(ev))}
+                                            {slotEvents.map((ev, sIdx) => renderAppointmentCard(ev, `${currentDateStr}-${hourNum}-${ev.id || sIdx}-${sIdx}`))}
                                             <button
                                               type="button"
                                               onClick={() => handleQuickAddEvent(currentDateStr, hourStr)}
@@ -5270,13 +5430,13 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                 </h4>
                                 
                                 <div className="space-y-2">
-                                  {dayEvents.filter(ev => !ev.eventType || ev.eventType === 'appointment').map(ev => {
+                                  {dayEvents.filter(ev => !ev.eventType || ev.eventType === 'appointment').map((ev, evIdx) => {
                                     const client = getEventClient(ev);
                                     const profileNote = client?.profileNote?.trim();
 
                                     return (
                                       <div 
-                                        key={ev.id}
+                                        key={ev.id ? `${ev.id}-${evIdx}` : `patient-ev-${evIdx}`}
                                         onClick={() => setSelectedAppointmentForDetails(ev)}
                                         className="p-3 rounded-xl bg-white border border-slate-200/80 flex items-center justify-between gap-2 shadow-2xs hover:border-[#009cb2] transition-all cursor-pointer"
                                       >
@@ -5472,7 +5632,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
 
                                         return (
                                           <div
-                                            key={evIdx}
+                                            key={`${cell.dateString}-${ev.id || evIdx}`}
                                             onClick={(e) => {
                                               e.stopPropagation();
                                               setSelectedAppointmentForDetails(ev);
@@ -6084,14 +6244,14 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                     </tr>
                   </thead>
                   <tbody>
-                    {displayedInvoices.map(inv => {
+                    {displayedInvoices.map((inv, invIdx) => {
                       const isZeroBonoRedemption = Boolean(
                         (inv.isBonoRedemption && inv.amount === 0) || 
                         (inv.amount === 0 && inv.discountType === 'bono')
                       );
                       return (
                       <tr 
-                        key={inv.id} 
+                        key={inv.id ? `${inv.id}-${invIdx}` : `inv-${invIdx}`} 
                         className={`border-b transition-colors group ${
                           isZeroBonoRedemption 
                             ? 'bg-emerald-50/40 hover:bg-emerald-50/70 border-emerald-100/60' 
@@ -6641,7 +6801,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                     );
                   }
 
-                  return dayEvents.map((ev) => {
+                  return dayEvents.map((ev, evIdx) => {
                     const isOther = ev.eventType && ev.eventType !== 'appointment';
                     const startDate = new Date(ev.start);
                     const endDate = new Date(ev.end);
@@ -6655,7 +6815,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
 
                     return (
                       <div
-                        key={ev.id}
+                        key={ev.id ? `${ev.id}-${evIdx}` : `agenda-ev-${evIdx}`}
                         className={`p-3.5 rounded-2xl border shadow-2xs transition-all space-y-2 group ${
                           isOther 
                             ? 'bg-amber-50 border-amber-200 text-amber-950' 
@@ -7049,8 +7209,8 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                         <option value="__new__" className="font-bold text-primary">
                           ✨ + {lang === 'fr' ? 'Nouveau patient' : lang === 'es' ? 'Nuevo paciente' : 'New patient'}
                         </option>
-                        {clients.map(c => (
-                          <option key={c.id} value={c.id}>{c.name} ({c.phone || c.email || 'N/A'})</option>
+                        {clients.map((c, cIdx) => (
+                          <option key={c.id ? `${c.id}-${cIdx}` : `client-opt-${cIdx}`} value={c.id}>{c.name} ({c.phone || c.email || 'N/A'})</option>
                         ))}
                       </select>
                     )}
@@ -7686,8 +7846,8 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                       className="w-full p-2.5 bg-secondary rounded-xl border border-black/5 text-xs focus:outline-none focus:ring-1 focus:ring-primary focus:bg-white transition-all font-medium"
                     >
                       <option value="">-- {lang === 'fr' ? 'Aucun ou patient non répertorié' : lang === 'es' ? 'Ninguno o no registrado' : 'None or unlisted'} --</option>
-                      {clients.map(c => (
-                        <option key={c.id} value={c.id}>{c.name} ({c.phone || c.email || 'N/A'})</option>
+                      {clients.map((c, cIdx) => (
+                        <option key={c.id ? `${c.id}-${cIdx}` : `edit-client-opt-${cIdx}`} value={c.id}>{c.name} ({c.phone || c.email || 'N/A'})</option>
                       ))}
                     </select>
                   </div>
@@ -7921,8 +8081,8 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                     className="w-full p-2.5 bg-secondary rounded-xl border border-black/5 text-xs focus:outline-none focus:ring-1 focus:ring-primary focus:bg-white transition-all"
                   >
                     <option value="">-- {lang === 'fr' ? 'Sélectionnez un patient' : lang === 'es' ? 'Seleccione un paciente' : 'Select a patient'} --</option>
-                    {clients.map(c => (
-                      <option key={c.id} value={c.id}>
+                    {clients.map((c, cIdx) => (
+                      <option key={c.id ? `${c.id}-${cIdx}` : `inv-client-opt-${cIdx}`} value={c.id}>
                         {c.name} {c.hasBono ? `★ (${c.bonoType || 'Bono'}${c.bonoSessionsRemaining !== undefined ? ` - ${c.bonoSessionsRemaining} s.` : ''})` : ''}
                       </option>
                     ))}
@@ -7970,11 +8130,11 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                             className="w-full p-2.5 bg-white rounded-xl border border-black/10 text-xs focus:outline-none focus:ring-1 focus:ring-primary transition-all"
                           >
                             <option value="">-- {lang === 'fr' ? 'Ne pas associer (Date libre)' : lang === 'es' ? 'No asociar (Fecha libre)' : 'Do not link (Free date)'} --</option>
-                            {clientEvents.map(ev => {
+                            {clientEvents.map((ev, evIdx) => {
                               const evDate = new Date(ev.start).toLocaleDateString(lang === 'fr' ? 'fr-FR' : 'es-ES', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
                               const evTime = new Date(ev.start).toLocaleTimeString(lang === 'fr' ? 'fr-FR' : 'es-ES', { hour: '2-digit', minute: '2-digit' });
                               return (
-                                <option key={ev.id} value={ev.id}>
+                                <option key={ev.id ? `${ev.id}-${evIdx}` : `client-ev-opt-${evIdx}`} value={ev.id}>
                                   {lang === 'fr' ? `${evDate} à ${evTime}` : lang === 'es' ? `${evDate} a las ${evTime}` : `${evDate} at ${evTime}`}
                                 </option>
                               );
@@ -8613,8 +8773,8 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                     className="w-full p-2.5 bg-secondary rounded-xl border border-black/5 text-xs focus:outline-none focus:ring-1 focus:ring-primary focus:bg-white transition-all"
                   >
                     <option value="">-- {lang === 'fr' ? 'Sélectionnez un patient' : lang === 'es' ? 'Seleccione un paciente' : 'Select a patient'} --</option>
-                    {clients.map(c => (
-                      <option key={c.id} value={c.id}>{c.name}</option>
+                    {clients.map((c, cIdx) => (
+                      <option key={c.id ? `${c.id}-${cIdx}` : `edit-inv-client-${cIdx}`} value={c.id}>{c.name}</option>
                     ))}
                   </select>
                 </div>
@@ -8938,7 +9098,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
             <div className="flex-1 overflow-y-auto min-h-0 pr-2">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6">
                 {customReviews.map((rev: any, index: number) => (
-                  <div key={index} className="bg-white rounded-2xl p-4 sm:p-5 border border-black/5 shadow-2xs flex flex-col justify-between gap-4 relative group">
+                  <div key={rev.id ? `${rev.id}-${index}` : `rev-${index}`} className="bg-white rounded-2xl p-4 sm:p-5 border border-black/5 shadow-2xs flex flex-col justify-between gap-4 relative group">
                     <div>
                       <div className="flex items-start justify-between gap-3 mb-3">
                         <div className="flex items-center gap-2.5 min-w-0">
@@ -9352,10 +9512,10 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                       </tr>
                     </thead>
                     <tbody>
-                      {selectedRecapForPrint.invoices.map((inv) => {
+                      {selectedRecapForPrint.invoices.map((inv, invIdx) => {
                         const isZeroBono = Boolean((inv.isBonoRedemption && inv.amount === 0) || (inv.amount === 0 && inv.discountType === 'bono'));
                         return (
-                        <tr key={inv.id} className="border-b border-black/5 text-gray-700">
+                        <tr key={inv.id ? `${inv.id}-${invIdx}` : `recap-inv-${invIdx}`} className="border-b border-black/5 text-gray-700">
                           <td className="py-2 font-bold text-primary">
                             {isZeroBono ? (
                               <span className="text-[10px] font-bold text-emerald-800 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">

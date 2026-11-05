@@ -2101,21 +2101,63 @@ export const api = {
     const targetNum = invoiceNumber || target?.invoiceNumber || (id.startsWith('FAC-') ? id : undefined);
     const targetId = target?.id || id;
 
+    // Check if target is a paid Bono invoice (purchase of a Bono)
+    const isPaidBono = Boolean(
+      target &&
+      target.amount > 0 &&
+      (
+        target.discountType === 'bono' ||
+        (target.discountLabel && target.discountLabel.toLowerCase().includes('bono')) ||
+        (target.description && target.description.toLowerCase().includes('bono'))
+      )
+    );
+
+    // Check if target is a single 0€ Bono redemption invoice
+    const isSingleRedemption = Boolean(
+      target &&
+      target.amount === 0 &&
+      (
+        target.isBonoRedemption ||
+        target.discountType === 'bono' ||
+        (target.discountLabel && target.discountLabel.toLowerCase().includes('bono'))
+      )
+    );
+
+    const clientId = target?.clientId;
+    const clientName = target?.clientName;
+
     // Record tombstones immediately so it can never resurrect
     addDeletedTombstone('invoices', targetId);
     if (targetNum) addDeletedTombstone('invoices', targetNum);
+
+    // Cascade 1: If deleting a paid Bono invoice, find and delete all 0€ Bono redemption invoices for this client
+    let redemptionsToDelete: Invoice[] = [];
+    if (isPaidBono && (clientId || clientName)) {
+      redemptionsToDelete = current.filter(i => {
+        if (i.id === targetId || (targetNum && i.invoiceNumber === targetNum)) return false;
+        const isRed = i.amount === 0 && (i.isBonoRedemption || i.discountType === 'bono' || (i.discountLabel && i.discountLabel.toLowerCase().includes('bono')));
+        if (!isRed) return false;
+        if (clientId && i.clientId === clientId) return true;
+        if (clientName && i.clientName && i.clientName.trim().toLowerCase() === clientName.trim().toLowerCase()) return true;
+        return false;
+      });
+
+      for (const red of redemptionsToDelete) {
+        addDeletedTombstone('invoices', red.id);
+        if (red.invoiceNumber) addDeletedTombstone('invoices', red.invoiceNumber);
+      }
+    }
 
     if (isSupabaseConfigured && supabase) {
       try {
         let deletedRemoteCount = 0;
 
-        // 1. Delete by UUID if valid
+        // Delete primary target invoice
         if (UUID_REGEX.test(targetId)) {
           const res = await supabase.from('invoices').delete().eq('id', targetId).select();
           if (res.data && res.data.length > 0) deletedRemoteCount += res.data.length;
         }
 
-        // 2. Delete by invoiceNumber and invoice_number columns
         if (targetNum) {
           const res1 = await supabase.from('invoices').delete().eq('invoiceNumber', targetNum).select();
           if (res1.data && res1.data.length > 0) deletedRemoteCount += res1.data.length;
@@ -2124,21 +2166,14 @@ export const api = {
           if (res2.data && res2.data.length > 0) deletedRemoteCount += res2.data.length;
         }
 
-        // 3. Fallback: query remote DB to find any rows matching targetNum or targetId and delete their specific IDs
-        if (targetNum) {
-          const { data: rows1 } = await supabase.from('invoices').select('id').eq('invoiceNumber', targetNum);
-          if (rows1 && rows1.length > 0) {
-            for (const r of rows1) {
-              await supabase.from('invoices').delete().eq('id', r.id);
-              deletedRemoteCount++;
-            }
+        // Delete cascade redemptions in Supabase
+        for (const red of redemptionsToDelete) {
+          if (UUID_REGEX.test(red.id)) {
+            await supabase.from('invoices').delete().eq('id', red.id);
           }
-          const { data: rows2 } = await supabase.from('invoices').select('id').eq('invoice_number', targetNum);
-          if (rows2 && rows2.length > 0) {
-            for (const r of rows2) {
-              await supabase.from('invoices').delete().eq('id', r.id);
-              deletedRemoteCount++;
-            }
+          if (red.invoiceNumber) {
+            await supabase.from('invoices').delete().eq('invoiceNumber', red.invoiceNumber);
+            await supabase.from('invoices').delete().eq('invoice_number', red.invoiceNumber);
           }
         }
 
@@ -2158,7 +2193,148 @@ export const api = {
       }
     }
 
-    const filtered = current.filter(i => i.id !== targetId && (!targetNum || i.invoiceNumber !== targetNum));
+    // Cascade 2: If deleting a paid Bono invoice, reset client profile & clinical notes
+    if (isPaidBono && (clientId || clientName)) {
+      const localClients = loadLocal('clients', []);
+      let updatedClientTargetId: string | undefined = clientId;
+      const updatedClients = localClients.map(c => {
+        const isMatch = (clientId && c.id === clientId) || (clientName && c.name?.trim().toLowerCase() === clientName.trim().toLowerCase());
+        if (isMatch) {
+          updatedClientTargetId = c.id;
+          return {
+            ...c,
+            hasBono: false,
+            bonoType: undefined,
+            bonoTotalSessions: 0,
+            bonoSessionsRemaining: 0,
+            bonoRedeemedDates: [],
+            bonoPurchaseDate: undefined,
+            defaultDiscount: 0,
+          };
+        }
+        return c;
+      });
+      saveLocal('clients', updatedClients);
+
+      if (isSupabaseConfigured && supabase && updatedClientTargetId) {
+        try {
+          await supabase.from('clients').update({
+            has_bono: false,
+            bono_type: null,
+            bono_total_sessions: 0,
+            bono_sessions_remaining: 0,
+            bono_redeemed_dates: [],
+            bono_purchase_date: null,
+            default_discount: 0,
+            hasBono: false,
+            bonoType: null,
+            bonoTotalSessions: 0,
+            bonoSessionsRemaining: 0,
+            bonoRedeemedDates: [],
+            bonoPurchaseDate: null,
+            defaultDiscount: 0
+          }).eq('id', updatedClientTargetId);
+        } catch (e) {
+          console.warn('Supabase update client reset bono exception:', e);
+        }
+      }
+
+      // Reset isBonoRedeemed on client notes
+      const localNotes = loadLocal('notes', []);
+      const updatedNotes = localNotes.map(n => {
+        const isMatch = (clientId && n.clientId === clientId) || (clientName && n.clientName?.trim().toLowerCase() === clientName.trim().toLowerCase());
+        if (isMatch) {
+          return {
+            ...n,
+            isBonoRedeemed: false,
+            bonoType: undefined,
+          };
+        }
+        return n;
+      });
+      saveLocal('notes', updatedNotes);
+
+      if (isSupabaseConfigured && supabase && updatedClientTargetId) {
+        try {
+          await supabase.from('client_notes').update({
+            is_bono_redeemed: false,
+            isBonoRedeemed: false,
+            bono_type: null,
+            bonoType: null
+          }).eq('clientId', updatedClientTargetId);
+
+          await supabase.from('client_notes').update({
+            is_bono_redeemed: false,
+            isBonoRedeemed: false,
+            bono_type: null,
+            bonoType: null
+          }).eq('client_id', updatedClientTargetId);
+        } catch (e) {
+          console.warn('Supabase update client notes reset bono exception:', e);
+        }
+      }
+    } else if (isSingleRedemption && (clientId || clientName)) {
+      // Cascade 3: If deleting a single 0€ redemption, refund +1 session back to client
+      const targetDateStr = target?.date ? target.date.split('T')[0] : '';
+      const localClients = loadLocal('clients', []);
+      let targetClientId: string | undefined = clientId;
+      const updatedClients = localClients.map(c => {
+        const isMatch = (clientId && c.id === clientId) || (clientName && c.name?.trim().toLowerCase() === clientName.trim().toLowerCase());
+        if (isMatch && c.hasBono) {
+          targetClientId = c.id;
+          const maxSessions = c.bonoTotalSessions || 5;
+          const newRemaining = Math.min(maxSessions, (c.bonoSessionsRemaining || 0) + 1);
+          const newDates = (c.bonoRedeemedDates || []).filter(d => d !== targetDateStr);
+          return {
+            ...c,
+            bonoSessionsRemaining: newRemaining,
+            bonoRedeemedDates: newDates,
+          };
+        }
+        return c;
+      });
+      saveLocal('clients', updatedClients);
+
+      if (isSupabaseConfigured && supabase && targetClientId) {
+        try {
+          const matchedC = updatedClients.find(c => c.id === targetClientId);
+          if (matchedC) {
+            await supabase.from('clients').update({
+              bono_sessions_remaining: matchedC.bonoSessionsRemaining,
+              bonoSessionsRemaining: matchedC.bonoSessionsRemaining,
+              bono_redeemed_dates: matchedC.bonoRedeemedDates,
+              bonoRedeemedDates: matchedC.bonoRedeemedDates,
+            }).eq('id', targetClientId);
+          }
+        } catch (e) {
+          console.warn('Supabase update client refund bono session exception:', e);
+        }
+      }
+
+      // Reset isBonoRedeemed on associated note
+      const localNotes = loadLocal('notes', []);
+      const updatedNotes = localNotes.map(n => {
+        const isClientMatch = (clientId && n.clientId === clientId) || (clientName && n.clientName?.trim().toLowerCase() === clientName.trim().toLowerCase());
+        const isEventMatch = target?.eventId && n.eventId === target.eventId;
+        const isNoteMatch = target?.noteId && n.id === target.noteId;
+        const isDateMatch = targetDateStr && n.date.split('T')[0] === targetDateStr;
+        if (isClientMatch && (isEventMatch || isNoteMatch || isDateMatch)) {
+          return { ...n, isBonoRedeemed: false };
+        }
+        return n;
+      });
+      saveLocal('notes', updatedNotes);
+    }
+
+    const redIds = new Set(redemptionsToDelete.map(r => r.id));
+    const redNums = new Set(redemptionsToDelete.map(r => r.invoiceNumber).filter(Boolean));
+
+    const filtered = current.filter(i => {
+      if (i.id === targetId || (targetNum && i.invoiceNumber === targetNum)) return false;
+      if (redIds.has(i.id)) return false;
+      if (i.invoiceNumber && redNums.has(i.invoiceNumber as string)) return false;
+      return true;
+    });
     saveLocal('invoices', filtered);
     return true;
   },
