@@ -27,6 +27,14 @@ export const supabaseAnonKey =
 
 export const isSupabaseConfigured = !!(supabaseUrl && supabaseAnonKey);
 
+if (typeof window !== 'undefined' && isSupabaseConfigured) {
+  try {
+    ['clients', 'invoices', 'notes', 'events', 'google_reviews'].forEach(k => {
+      localStorage.removeItem(`vincent_osteo_${k}`);
+    });
+  } catch {}
+}
+
 export const supabase = isSupabaseConfigured
   ? createClient(supabaseUrl, supabaseAnonKey, {
       auth: { persistSession: true, autoRefreshToken: true },
@@ -110,6 +118,7 @@ export const removeDeletedTombstone = (entity: string, ...keys: (string | undefi
 
 // Helper to load or initialize from LocalStorage (with legacy mock filtering & tombstone support)
 const loadLocal = <T>(key: string, seed: T[] = []): T[] => {
+  if (isSupabaseConfigured) return [];
   if (typeof window === 'undefined' || typeof localStorage === 'undefined') return seed;
   const data = localStorage.getItem(`vincent_osteo_${key}`);
   if (!data) {
@@ -139,6 +148,8 @@ const loadLocal = <T>(key: string, seed: T[] = []): T[] => {
 };
 
 const saveLocal = <T>(key: string, data: T[]) => {
+  if (isSupabaseConfigured) return;
+  if (typeof window === 'undefined' || typeof localStorage === 'undefined') return;
   localStorage.setItem(`vincent_osteo_${key}`, JSON.stringify(data));
 };
 
@@ -1103,62 +1114,29 @@ export const api = {
   // CLIENTS
   // ==========================================
   async getClients(): Promise<Client[]> {
-    const localClients = loadLocal('clients', mockClients);
-    const localMap = new Map(localClients.map(c => [c.id, c]));
-
     if (isSupabaseConfigured && supabase) {
       try {
         const { data, error } = await supabase.from('clients').select('*');
         if (!error && data) {
-          const remoteClients = data.map(row => {
-            const mapped = mapClientFromDB(row);
-            const local = localMap.get(mapped.id);
-            if (local) {
-              // If remote is missing name or is 'Patient sans nom', restore from local cache if known
-              if ((mapped.name === 'Patient sans nom' || !mapped.name) && local.name && local.name !== 'Patient sans nom') {
-                mapped.name = local.name;
-                mapped.firstName = mapped.firstName || local.firstName;
-                mapped.lastName = mapped.lastName || local.lastName;
-              }
-              // Preserve profile note if local has it and remote is blank
-              if (local.profileNote && !mapped.profileNote) {
-                mapped.profileNote = local.profileNote;
-              }
-              // Preserve bonoRedeemedDates if remote doesn't have it
-              if (local.bonoRedeemedDates && local.bonoRedeemedDates.length > 0 && (!mapped.bonoRedeemedDates || mapped.bonoRedeemedDates.length === 0)) {
-                mapped.bonoRedeemedDates = local.bonoRedeemedDates;
-              }
-            }
-            return mapped;
-          });
-          
+          const remoteClients = data.map(row => mapClientFromDB(row));
           const activeRemoteClients = remoteClients.filter(c => !isDeletedTombstone('clients', c.id, c.name));
+          
           // Clean up any deleted client that still lingers in Supabase in the background
           const deletedRemotes = remoteClients.filter(c => isDeletedTombstone('clients', c.id, c.name));
           for (const d of deletedRemotes) {
             supabase.from('clients').delete().eq('id', d.id).then(() => {});
           }
 
-          // Merge local clients that haven't synced to remote yet
-          const remoteIds = new Set(activeRemoteClients.map(c => c.id));
-          const mergedClients = [...activeRemoteClients];
-          for (const loc of localClients) {
-            if (isDeletedTombstone('clients', loc.id, loc.name)) continue;
-            if (!remoteIds.has(loc.id)) {
-              mergedClients.push(loc);
-            }
-          }
-
-          saveLocal('clients', mergedClients);
-          return mergedClients.sort((a, b) => a.name.localeCompare(b.name));
+          return activeRemoteClients.sort((a, b) => a.name.localeCompare(b.name));
         }
         if (error) {
-          console.warn('Supabase clients fetch failed, using local storage:', error.message);
+          console.warn('Supabase clients fetch failed:', error.message);
         }
       } catch (err: any) {
         console.warn('Supabase clients fetch exception:', err);
       }
     }
+    const localClients = loadLocal('clients', mockClients);
     return localClients.sort((a, b) => a.name.localeCompare(b.name));
   },
 
@@ -1573,66 +1551,41 @@ export const api = {
   // CLIENT NOTES & CLINICAL RECORDS
   // ==========================================
   async getAllNotes(): Promise<ClientNote[]> {
-    const localNotes = loadLocal('notes', mockNotes);
     if (isSupabaseConfigured && supabase) {
       try {
         const { data, error } = await supabase.from('client_notes').select('*').order('date', { ascending: false });
         if (!error && data) {
-          const localMap = new Map(localNotes.map(n => [n.id, n]));
-          return data.map(row => {
-            const mapped = mapNoteFromDB(row);
-            const local = localMap.get(mapped.id);
-            if (local) {
-              if (local.isBonoRedeemed) mapped.isBonoRedeemed = true;
-              if (local.bonoType) mapped.bonoType = local.bonoType;
-            }
-            return mapped;
-          });
+          const notes = data.map(mapNoteFromDB);
+          return notes.filter(n => !isDeletedTombstone('notes', n.id));
         }
       } catch (err) {
         console.warn('Supabase getAllNotes exception:', err);
       }
     }
+    const localNotes = loadLocal('notes', mockNotes);
     return localNotes.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
   },
 
   async getClientNotes(clientId: string): Promise<ClientNote[]> {
-    const localNotes = loadLocal('notes', mockNotes).filter(n => n.clientId === clientId);
-
     if (isSupabaseConfigured && supabase) {
       try {
         let { data, error } = await supabase.from('client_notes').select('*').eq('client_id', clientId).order('date', { ascending: false });
         
         if (!error && data && data.length > 0) {
-          const localMap = new Map(localNotes.map(n => [n.id, n]));
-          return data.map(row => {
-            const mapped = mapNoteFromDB(row);
-            const local = localMap.get(mapped.id);
-            if (local) {
-              if (local.isBonoRedeemed) mapped.isBonoRedeemed = true;
-              if (local.bonoType) mapped.bonoType = local.bonoType;
-            }
-            return mapped;
-          });
+          const notes = data.map(mapNoteFromDB);
+          return notes.filter(n => !isDeletedTombstone('notes', n.id));
         }
 
         const res = await supabase.from('client_notes').select('*').eq('clientId', clientId).order('date', { ascending: false });
         if (!res.error && res.data) {
-          const localMap = new Map(localNotes.map(n => [n.id, n]));
-          return res.data.map(row => {
-            const mapped = mapNoteFromDB(row);
-            const local = localMap.get(mapped.id);
-            if (local) {
-              if (local.isBonoRedeemed) mapped.isBonoRedeemed = true;
-              if (local.bonoType) mapped.bonoType = local.bonoType;
-            }
-            return mapped;
-          });
+          const notes = res.data.map(mapNoteFromDB);
+          return notes.filter(n => !isDeletedTombstone('notes', n.id));
         }
       } catch (err) {
         console.warn('Supabase getClientNotes exception:', err);
       }
     }
+    const localNotes = loadLocal('notes', mockNotes).filter(n => n.clientId === clientId);
     return localNotes.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
   },
 
@@ -1827,29 +1780,12 @@ export const api = {
   },
 
   async getInvoices(): Promise<Invoice[]> {
-    const rawLocal = loadLocal('invoices', mockInvoices);
-    const localInvoices: Invoice[] = rawLocal.map(loc => ({
-      ...loc,
-      description: normalizeInvoiceDescription(loc.description),
-      language: 'es' as const,
-      quantity: 1,
-    }));
-    const localMap = new Map(localInvoices.map(i => [i.id, i]));
-    const localNumMap = new Map(localInvoices.map(i => [i.invoiceNumber, i]));
-
     if (isSupabaseConfigured && supabase) {
       try {
         const { data, error } = await supabase.from('invoices').select('*').order('date', { ascending: false });
         if (!error && data) {
           const remoteInvoices = data.map(row => {
             const mapped = mapInvoiceFromDB(row);
-            const local = localMap.get(mapped.id) || (mapped.invoiceNumber ? localNumMap.get(mapped.invoiceNumber) : undefined);
-            if (local) {
-              if (!mapped.clientId && local.clientId) mapped.clientId = local.clientId;
-              if (!mapped.clientName && local.clientName) mapped.clientName = local.clientName;
-              if (!mapped.paymentDate && local.paymentDate) mapped.paymentDate = local.paymentDate;
-              if (!mapped.noteId && local.noteId) mapped.noteId = local.noteId;
-            }
             return {
               ...mapped,
               description: normalizeInvoiceDescription(mapped.description),
@@ -1868,36 +1804,22 @@ export const api = {
             if (d.invoiceNumber) supabase.from('invoices').delete().eq('invoiceNumber', d.invoiceNumber).then(() => {});
           }
 
-          // Smart merge: retain local invoices that haven't synced yet or have distinct IDs
-          const remoteIds = new Set(activeRemoteInvoices.map(r => r.id));
-          const remoteNums = new Set(activeRemoteInvoices.map(r => r.invoiceNumber).filter(Boolean));
-          const merged = [...activeRemoteInvoices];
-
-          for (const loc of localInvoices) {
-            if (isDeletedTombstone('invoices', loc.id, loc.invoiceNumber)) continue;
-            // Never re-add if invoice number is already in remote records
-            if (loc.invoiceNumber && remoteNums.has(loc.invoiceNumber)) continue;
-            if (!remoteIds.has(loc.id)) {
-              merged.push({
-                ...loc,
-                description: normalizeInvoiceDescription(loc.description),
-                language: 'es',
-                quantity: 1,
-              });
-            }
-          }
-
-          saveLocal('invoices', merged);
-          return sortInvoicesByDate(merged, false);
+          return sortInvoicesByDate(activeRemoteInvoices, false);
         }
         if (error) {
-          console.warn('Supabase invoices fetch failed, using local storage:', error.message);
+          console.warn('Supabase invoices fetch failed:', error.message);
         }
       } catch (err: any) {
         console.warn('Supabase invoices fetch exception:', err);
       }
     }
-    saveLocal('invoices', localInvoices);
+    const rawLocal = loadLocal('invoices', mockInvoices);
+    const localInvoices: Invoice[] = rawLocal.map(loc => ({
+      ...loc,
+      description: normalizeInvoiceDescription(loc.description),
+      language: 'es' as const,
+      quantity: 1,
+    }));
     return sortInvoicesByDate(localInvoices, false);
   },
 
@@ -2414,11 +2336,7 @@ export const api = {
 
         if (!error && data) {
           const remoteEvents = data.map(row => enrichEvent(mapEventFromDB(row)));
-          const sortedEvents = remoteEvents.sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
-
-          // If Supabase is active, it is the single source of truth.
-          saveLocal('events', sortedEvents);
-          return sortedEvents;
+          return remoteEvents.sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
         }
       } catch (err) {
         console.warn('Supabase getLocalEvents exception:', err);
@@ -2496,11 +2414,6 @@ export const api = {
             summary: mapped.summary || newEvent.summary,
             eventType: mapped.eventType || newEvent.eventType,
           };
-          const current = loadLocal('events', mockEvents);
-          const idx = current.findIndex(e => e.id === finalEvent.id);
-          if (idx !== -1) current[idx] = finalEvent;
-          else current.push(finalEvent);
-          saveLocal('events', current);
           return finalEvent;
         } else {
           console.error('[Supabase createLocalEvent error]', result.error);
@@ -2567,10 +2480,6 @@ export const api = {
             summary: mapped.summary || event.summary,
             eventType: mapped.eventType || event.eventType,
           };
-          const current = loadLocal('events', mockEvents);
-          const index = current.findIndex(e => e.id === event.id);
-          if (index !== -1) current[index] = finalEvent;
-          saveLocal('events', current);
           return finalEvent;
         } else {
           console.error('[Supabase updateLocalEvent error]', result.error);
@@ -2621,9 +2530,7 @@ export const api = {
       try {
         const { data, error } = await supabase.from('google_reviews').select('*').order('date', { ascending: false });
         if (!error && data) {
-          const mapped = data.map(mapReviewFromDB);
-          saveLocal('google_reviews', mapped);
-          return mapped;
+          return data.map(mapReviewFromDB);
         }
       } catch (err) {
         console.warn('Supabase getGoogleReviews exception:', err);
@@ -2652,11 +2559,6 @@ export const api = {
         const result = await executeResilientInsert('google_reviews', [payload]);
         if (result.success && result.data) {
           const mapped = mapReviewFromDB(result.data);
-          const current = loadLocal<GoogleReview>('google_reviews', []);
-          const idx = current.findIndex(r => r.id === mapped.id);
-          if (idx !== -1) current[idx] = mapped;
-          else current.unshift(mapped);
-          saveLocal('google_reviews', current);
           return mapped;
         }
       } catch (err) {
