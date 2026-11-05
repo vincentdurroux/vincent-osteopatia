@@ -3412,17 +3412,17 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                   return false;
                                 });
                                 const bonoInvoice = associatedInvoices.find(inv => 
-                                  inv.isBonoRedemption || 
-                                  inv.discountType === 'bono' || 
-                                  (inv.amount === 0 && inv.status === 'paid')
+                                  inv.amount === 0 && (inv.isBonoRedemption || inv.discountType === 'bono' || inv.status === 'paid')
                                 );
-                                const standardPaidInvoice = associatedInvoices.find(inv => inv.status === 'paid' && inv.amount > 0 && !inv.isBonoRedemption && inv.discountType !== 'bono');
+                                const standardPaidInvoice = associatedInvoices.find(inv => inv.status === 'paid' && inv.amount > 0);
                                 const paidInvoice = standardPaidInvoice;
                                 const pendingInvoice = associatedInvoices.find(inv => inv.status === 'pending');
                                 const isBonoRedeemed = Boolean(
-                                  bonoInvoice ||
-                                  associatedNotes.some(n => n.isBonoRedeemed) || 
-                                  (selectedClient?.bonoRedeemedDates && selectedClient.bonoRedeemedDates.includes(evDateStr))
+                                  !standardPaidInvoice && (
+                                    bonoInvoice ||
+                                    associatedNotes.some(n => n.isBonoRedeemed) || 
+                                    (selectedClient?.bonoRedeemedDates && selectedClient.bonoRedeemedDates.includes(evDateStr))
+                                  )
                                 );
 
                                 return (
@@ -3498,9 +3498,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                             </span>
                                           ) : paidInvoice ? (
                                             (() => {
-                                              const methodLabel = paidInvoice.discountType === 'bono'
-                                                ? 'Bono'
-                                                : paidInvoice.paymentMethod === 'card'
+                                              const methodLabel = paidInvoice.paymentMethod === 'card'
                                                 ? (lang === 'fr' ? 'CB' : lang === 'es' ? 'Tarjeta' : 'Card')
                                                 : paidInvoice.paymentMethod === 'cash'
                                                 ? (lang === 'fr' ? 'Espèces' : lang === 'es' ? 'Efectivo' : 'Cash')
@@ -4069,13 +4067,21 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                               });
 
                               const noteDateOnly = note.date.includes('T') ? note.date.split('T')[0] : note.date;
+                              const isZeroBonoInvoice = Boolean(
+                                associatedInvoice && (
+                                  associatedInvoice.isBonoRedemption || 
+                                  (associatedInvoice.amount === 0 && associatedInvoice.discountType === 'bono') ||
+                                  associatedInvoice.amount === 0
+                                )
+                              );
+
                               const isNoteBonoRedeemed = Boolean(
                                 note.isBonoRedeemed || 
-                                (associatedInvoice && (associatedInvoice.isBonoRedemption || associatedInvoice.discountType === 'bono' || associatedInvoice.amount === 0)) ||
+                                isZeroBonoInvoice ||
                                 (selectedClient?.bonoRedeemedDates && selectedClient.bonoRedeemedDates.includes(noteDateOnly))
                               );
 
-                              return associatedInvoice && !associatedInvoice.isBonoRedemption && associatedInvoice.amount > 0 ? (
+                              return associatedInvoice && associatedInvoice.amount > 0 ? (
                                 <div className="mt-4 pt-4 border-t border-black/5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-stone-50 p-3.5 rounded-2xl border border-black/5">
                                   <div className="flex items-center gap-2.5">
                                     <CreditCard size={15} className="text-primary shrink-0" />
@@ -6024,17 +6030,22 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                     </tr>
                   </thead>
                   <tbody>
-                    {displayedInvoices.map(inv => (
+                    {displayedInvoices.map(inv => {
+                      const isZeroBonoRedemption = Boolean(
+                        (inv.isBonoRedemption && inv.amount === 0) || 
+                        (inv.amount === 0 && inv.discountType === 'bono')
+                      );
+                      return (
                       <tr 
                         key={inv.id} 
                         className={`border-b transition-colors group ${
-                          inv.isBonoRedemption 
+                          isZeroBonoRedemption 
                             ? 'bg-emerald-50/40 hover:bg-emerald-50/70 border-emerald-100/60' 
                             : 'border-black/5 hover:bg-black/[0.01]'
                         }`}
                       >
                         <td className="py-4">
-                          {inv.isBonoRedemption ? (
+                          {isZeroBonoRedemption ? (
                             <div className="flex flex-col items-start gap-1">
                               <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-lg bg-emerald-100 text-emerald-900 text-[10px] font-bold border border-emerald-200/90 shadow-2xs">
                                 <Sparkles size={11} className="text-emerald-700 shrink-0" />
@@ -6050,7 +6061,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                         </td>
                         <td className="py-4 font-bold">
                           <div>{inv.clientName}</div>
-                          {inv.isBonoRedemption && (
+                          {isZeroBonoRedemption && (
                             <div className="text-[10px] font-medium text-emerald-800/80 mt-0.5">
                               {inv.discountLabel || (lang === 'fr' ? 'Forfait Bono' : lang === 'es' ? 'Bono prepagado' : 'Prepaid Bono')}
                             </div>
@@ -6058,11 +6069,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                         </td>
                         <td className="py-4 text-gray-500 text-xs">
                           <div className="font-medium text-gray-700">{new Date(inv.date).toLocaleDateString(lang === 'fr' ? 'fr-FR' : lang === 'es' ? 'es-ES' : 'en-US')}</div>
-                          {inv.isBonoRedemption ? (
-                            <div className="text-[10px] text-emerald-700 font-medium mt-0.5">
-                              {lang === 'fr' ? 'Séance effectuée' : lang === 'es' ? 'Sesión efectuada' : 'Session completed'}
-                            </div>
-                          ) : inv.status === 'paid' && inv.paymentDate && inv.paymentDate !== inv.date ? (
+                          {inv.status === 'paid' && inv.paymentDate && inv.paymentDate !== inv.date ? (
                             <div className="text-[10px] text-emerald-700 font-semibold mt-0.5">
                               {lang === 'fr' ? 'Règlement : ' : lang === 'es' ? 'Pago: ' : 'Paid: '}
                               {new Date(inv.paymentDate).toLocaleDateString(lang === 'fr' ? 'fr-FR' : lang === 'es' ? 'es-ES' : 'en-US')}
@@ -6070,7 +6077,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                           ) : null}
                         </td>
                         <td className="py-4">
-                          {inv.isBonoRedemption || inv.amount === 0 || inv.paymentMethod === 'not_applicable' ? (
+                          {isZeroBonoRedemption || inv.paymentMethod === 'not_applicable' ? (
                             <span 
                               className="text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-stone-100 text-stone-600 border border-stone-200 inline-block"
                               title={lang === 'fr' ? 'Aucun paiement direct : décompté du Bono précédemment payé' : lang === 'es' ? 'Sin pago directo: descontado del Bono previamente pagado' : 'No direct payment: deducted from previously paid Bono'}
@@ -6088,7 +6095,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                           )}
                         </td>
                         <td className="py-4 text-center">
-                          {inv.isBonoRedemption ? (
+                          {isZeroBonoRedemption ? (
                             <span 
                               className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold tracking-wider bg-emerald-100 text-emerald-800 border border-emerald-300/80 shadow-2xs"
                               title={lang === 'fr' ? 'Séance réglée par décompte sur forfait' : lang === 'es' ? 'Sesión pagada mediante descuento de bono' : 'Session paid via package deduction'}
@@ -6124,7 +6131,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                           )}
                         </td>
                         <td className="py-4 text-right">
-                          {inv.isBonoRedemption || (inv.amount === 0 && inv.discountType === 'bono') ? (
+                          {isZeroBonoRedemption ? (
                             <div className="flex flex-col items-end">
                               <div className="flex items-center gap-1.5">
                                 <span className="text-[10px] text-gray-400 line-through">
@@ -6132,10 +6139,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                 </span>
                                 <span className="font-extrabold text-emerald-800 text-xs">0 €</span>
                               </div>
-                              <span className="text-[10px] font-bold text-emerald-800 text-right mt-0.5 leading-tight">
-                                {translations[lang]?.admin?.billing?.sessionWithoutPayment || (lang === 'fr' ? 'Séance sans paiement' : lang === 'es' ? 'Sesión sin pago' : 'Session without payment')}
-                              </span>
-                              <span className="text-[9px] text-gray-500 text-right leading-tight">
+                              <span className="text-[9px] text-gray-500 text-right leading-tight mt-0.5">
                                 {translations[lang]?.admin?.billing?.redeemedFromPrepaidBono || (lang === 'fr' ? '(Décompté du Bono précédemment payé)' : lang === 'es' ? '(Descontado del Bono previamente pagado)' : '(Deducted from previously paid Bono)')}
                               </span>
                             </div>
@@ -6173,18 +6177,18 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                             <button
                               onClick={() => setSelectedInvoiceForPrint(inv)}
                               className={`p-1.5 rounded-lg transition-colors inline-flex items-center gap-1.5 ${
-                                inv.isBonoRedemption 
+                                isZeroBonoRedemption 
                                   ? 'hover:bg-emerald-100 text-emerald-800' 
                                   : 'hover:bg-primary/10 text-primary'
                               }`}
-                              title={inv.isBonoRedemption 
+                              title={isZeroBonoRedemption 
                                 ? (lang === 'fr' ? "Justificatif de séance décomptée" : lang === 'es' ? "Comprobante de sesión" : "Session voucher")
                                 : translations[lang].admin.billing.print
                               }
                             >
                               <Printer size={13} />
                               <span className="text-[10px] uppercase font-bold tracking-wider">
-                                {inv.isBonoRedemption 
+                                {isZeroBonoRedemption 
                                   ? (translations[lang]?.admin?.billing?.sessionVoucher || (lang === 'fr' ? 'Justificatif' : lang === 'es' ? 'Comprobante' : 'Voucher'))
                                   : translations[lang].admin.billing.receipt}
                               </span>
@@ -6199,7 +6203,8 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                           </div>
                         </td>
                       </tr>
-                    ))}
+                      );
+                    })}
                     {displayedInvoices.length === 0 && (
                       <tr>
                         <td colSpan={7} className="text-center py-12 text-gray-400">
@@ -8537,7 +8542,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
               className="relative w-full max-w-md bg-white rounded-3xl shadow-2xl p-8 z-10 border border-black/5"
             >
               <h3 className="text-xl font-serif font-bold text-primary mb-6">
-                {editingInvoice.isBonoRedemption 
+                {editingInvoice.isBonoRedemption && editingInvoice.amount === 0 
                   ? (lang === 'fr' ? 'Modifier le suivi Bono' : lang === 'es' ? 'Editar uso de Bono' : 'Edit Bono usage')
                   : (lang === 'fr' ? 'Modifier la Facture' : lang === 'es' ? 'Editar Factura' : 'Edit Invoice')}
               </h3>
@@ -9293,10 +9298,12 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                       </tr>
                     </thead>
                     <tbody>
-                      {selectedRecapForPrint.invoices.map((inv) => (
+                      {selectedRecapForPrint.invoices.map((inv) => {
+                        const isZeroBono = Boolean((inv.isBonoRedemption && inv.amount === 0) || (inv.amount === 0 && inv.discountType === 'bono'));
+                        return (
                         <tr key={inv.id} className="border-b border-black/5 text-gray-700">
                           <td className="py-2 font-bold text-primary">
-                            {inv.isBonoRedemption ? (
+                            {isZeroBono ? (
                               <span className="text-[10px] font-bold text-emerald-800 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">
                                 Bono
                               </span>
@@ -9308,7 +9315,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                           <td className="py-2 text-gray-500">{new Date(inv.date).toLocaleDateString('es-ES')}</td>
                           <td className="py-2">
                             <span className="text-[10px] font-medium uppercase">
-                              {inv.isBonoRedemption || inv.amount === 0 || inv.paymentMethod === 'not_applicable'
+                              {isZeroBono || inv.paymentMethod === 'not_applicable'
                                 ? 'No aplicable'
                                 : inv.paymentMethod === 'card' ? 'Tarjeta' :
                                   inv.paymentMethod === 'cash' ? 'Efectivo' : 'Transferencia'}
@@ -9316,22 +9323,23 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                           </td>
                           <td className="py-2 text-center font-bold">
                             <span className={`text-[9px] px-1.5 py-0.5 rounded-full ${
-                              inv.isBonoRedemption || inv.status === 'paid' 
+                              isZeroBono || inv.status === 'paid' 
                                 ? 'bg-emerald-100 text-emerald-800' 
                                 : 'bg-amber-100 text-amber-900 font-bold'
                             }`}>
-                              {inv.isBonoRedemption ? 'Pagada (Bono)' : inv.status === 'paid' ? 'Pagada' : 'Pendiente'}
+                              {isZeroBono ? 'Pagada (Bono)' : inv.status === 'paid' ? 'Pagada' : 'Pendiente'}
                             </span>
                           </td>
                           <td className="py-2 text-right font-bold">
-                            {inv.isBonoRedemption || inv.amount === 0 ? (
+                            {isZeroBono ? (
                               <span className="text-emerald-800 text-[10px]">0 € (Bono)</span>
                             ) : (
                               `${inv.amount} €`
                             )}
                           </td>
                         </tr>
-                      ))}
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>

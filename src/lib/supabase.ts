@@ -248,18 +248,19 @@ export function normalizeInvoiceDescription(desc?: string): string {
 }
 
 export function mapInvoiceFromDB(i: any): Invoice {
-  const isBonoRedeem = Boolean(
+  const invAmount = Number(i.amount) || 0;
+  // A bono redemption session is strictly 0 € (deducted from prepaid bono balance).
+  // When a bono is purchased (amount > 0 e.g. 160 € or 250 €), it is a regular paid invoice!
+  const isBonoRedeem = invAmount === 0 && Boolean(
     i.isBonoRedemption || 
     i.is_bono_redemption || 
     i.discountType === 'bono' || 
     i.discount_type === 'bono' || 
-    (Number(i.amount) === 0 && (
-      (typeof i.discount_label === 'string' && i.discount_label.toLowerCase().includes('bono')) || 
-      (typeof i.discountLabel === 'string' && i.discountLabel.toLowerCase().includes('bono')) ||
-      (typeof i.description === 'string' && i.description.toLowerCase().includes('bono')) ||
-      i.invoiceNumber === '' ||
-      i.invoice_number === ''
-    ))
+    (typeof i.discount_label === 'string' && i.discount_label.toLowerCase().includes('bono')) || 
+    (typeof i.discountLabel === 'string' && i.discountLabel.toLowerCase().includes('bono')) ||
+    (typeof i.description === 'string' && i.description.toLowerCase().includes('bono')) ||
+    i.invoiceNumber === '' ||
+    i.invoice_number === ''
   );
 
   return {
