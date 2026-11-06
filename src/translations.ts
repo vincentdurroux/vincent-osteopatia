@@ -268,6 +268,8 @@ export const translations = {
         deductBonoTitle: "Décompter du Bono",
         bonoSessionsLeft: "{count} séances restantes",
         confirmBonoDeductionAction: "Confirmer le décompte",
+        bonoRedemptionLabel: "Décompté du Bono",
+        statusSettledBono: "Réglé (Bono)",
       },
       modals: {
         newPatientTitle: "Nouveau Patient",
@@ -600,6 +602,8 @@ export const translations = {
         deductBonoTitle: "Deduct from Bono",
         bonoSessionsLeft: "{count} sessions remaining",
         confirmBonoDeductionAction: "Confirm Deduction",
+        bonoRedemptionLabel: "Redeemed from Bono",
+        statusSettledBono: "Settled (Bono)",
       },
       modals: {
         newPatientTitle: "New Patient",
@@ -932,6 +936,8 @@ export const translations = {
         deductBonoTitle: "Descontar del Bono",
         bonoSessionsLeft: "{count} sesiones restantes",
         confirmBonoDeductionAction: "Confirmar descuento",
+        bonoRedemptionLabel: "Descontado del Bono",
+        statusSettledBono: "Pagado (Bono)",
       },
       modals: {
         newPatientTitle: "Nuevo Paciente",

@@ -1515,6 +1515,32 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
           if (newInvoiceIncludeToday) {
             remaining = totalSessions - 1;
             updatedDates = Array.from(new Set([...updatedDates, targetToday]));
+
+            // Also update any matching note for this client on targetToday or for this eventId
+            const matchingNotes = allNotes.filter(n =>
+              (newInvoice.eventId && n.eventId === newInvoice.eventId) ||
+              (n.clientId === client.id && n.date && n.date.split('T')[0] === targetToday)
+            );
+            for (const mn of matchingNotes) {
+              const updatedNote: ClientNote = {
+                ...mn,
+                isBonoRedeemed: true,
+                bonoType: bonoTitle,
+              };
+              api.updateClientNote(updatedNote).catch(() => {});
+            }
+            setAllNotes(prev => prev.map(n =>
+              (newInvoice.eventId && n.eventId === newInvoice.eventId) ||
+              (n.clientId === client.id && n.date && n.date.split('T')[0] === targetToday)
+                ? { ...n, isBonoRedeemed: true, bonoType: bonoTitle }
+                : n
+            ));
+            setClientNotes(prev => prev.map(n =>
+              (newInvoice.eventId && n.eventId === newInvoice.eventId) ||
+              (n.clientId === client.id && n.date && n.date.split('T')[0] === targetToday)
+                ? { ...n, isBonoRedeemed: true, bonoType: bonoTitle }
+                : n
+            ));
           }
 
           const updatedClient: Client = {
@@ -1629,6 +1655,73 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
     const executeInlineCreation = async () => {
       try {
         const noteDateStr = note.date.includes('T') ? note.date.split('T')[0] : note.date;
+
+        if (inlineBillingPlan === 'bono3' || inlineBillingPlan === 'bono5') {
+          const totalSessions = inlineBillingPlan === 'bono3' ? 3 : 5;
+          const bonoTitle = inlineBillingPlan === 'bono3' ? 'Bono 3 séances' : 'Bono 5 séances';
+          const purchaseAmount = inlineBillingPlan === 'bono3' ? 160 : 250;
+          const originalAmount = inlineBillingPlan === 'bono3' ? 180 : 300;
+          const discountAmount = inlineBillingPlan === 'bono3' ? 20 : 50;
+
+          const purchaseInvoice = await api.createInvoice({
+            clientId: selectedClient.id,
+            clientName: selectedClient.name,
+            amount: purchaseAmount,
+            originalAmount: originalAmount,
+            discountAmount: discountAmount,
+            discountType: 'bono',
+            discountLabel: bonoTitle,
+            status: inlineInvoiceStatus,
+            paymentMethod: inlineInvoicePaymentMethod,
+            date: noteDateStr,
+            paymentDate: inlineInvoiceStatus === 'paid' ? noteDateStr : undefined,
+            description: `Bono Ostéopathie - Forfait ${totalSessions} séances`,
+            language: 'es',
+            quantity: 1,
+            noteId: note.id,
+            eventId: note.eventId || undefined,
+            isBonoRedemption: false,
+          });
+
+          let remaining = totalSessions;
+          const existingDates = selectedClient.bonoRedeemedDates || [];
+          let updatedDates = [...existingDates];
+
+          if (inlineIncludeToday) {
+            remaining = totalSessions - 1;
+            updatedDates = Array.from(new Set([...updatedDates, noteDateStr]));
+          }
+
+          const updatedClient: Client = {
+            ...selectedClient,
+            hasBono: true,
+            bonoType: bonoTitle,
+            bonoSessionsRemaining: remaining,
+            bonoRedeemedDates: updatedDates,
+          };
+          const savedClient = await api.updateClient(updatedClient);
+          setClients(prev => prev.map(c => c.id === savedClient.id ? savedClient : c));
+          setSelectedClient(savedClient);
+
+          if (inlineIncludeToday) {
+            const updatedNote: ClientNote = {
+              ...note,
+              isBonoRedeemed: true,
+              bonoType: bonoTitle,
+            };
+            try {
+              await api.updateClientNote(updatedNote);
+            } catch (err) {
+              console.warn('Could not persist updated note:', err);
+            }
+            setClientNotes(prev => prev.map(n => n.id === note.id ? updatedNote : n));
+            setAllNotes(prev => prev.map(n => n.id === note.id ? updatedNote : n));
+          }
+
+          setInvoices(prev => sortInvoicesByDate([purchaseInvoice, ...prev.filter(i => i.id !== purchaseInvoice.id)], false));
+          setCreatingInvoiceForNoteId(null);
+          return;
+        }
         
         let finalDescription = translations[lang as Language].invoice.serviceDescription;
         let finalAmount = Number(inlineInvoiceAmount);
@@ -1686,9 +1779,19 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
           setClients(prev => prev.map(c => c.id === updatedClient.id ? updatedClient : c));
           setSelectedClient(updatedClient);
 
-          // Update note state
-          setClientNotes(prev => prev.map(n => n.id === note.id ? { ...n, isBonoRedeemed: true } : n));
-          setAllNotes(prev => prev.map(n => n.id === note.id ? { ...n, isBonoRedeemed: true } : n));
+          // Update note state and persist
+          const updatedNote: ClientNote = {
+            ...note,
+            isBonoRedeemed: true,
+            bonoType: selectedClient.bonoType || 'Bono',
+          };
+          try {
+            await api.updateClientNote(updatedNote);
+          } catch (err) {
+            console.warn('Could not persist updated note:', err);
+          }
+          setClientNotes(prev => prev.map(n => n.id === note.id ? updatedNote : n));
+          setAllNotes(prev => prev.map(n => n.id === note.id ? updatedNote : n));
         }
 
         setInvoices(prev => sortInvoicesByDate([created, ...prev.filter(i => i.id !== created.id)], false));
@@ -3702,9 +3805,6 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                     const invDateStr = getLocalDateStr(inv.date);
                                     const invPayDateStr = getLocalDateStr(inv.paymentDate);
                                     if (invDateStr === evDateStr || invPayDateStr === evDateStr) {
-                                      if (inv.amount >= 160 || (inv.description && inv.description.toLowerCase().includes('forfait'))) {
-                                        return false;
-                                      }
                                       return true;
                                     }
                                   }
@@ -3712,20 +3812,37 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                 });
 
                                 const bonoInvoice = associatedInvoices.find(inv => 
-                                  inv.amount === 0 || inv.isBonoRedemption || inv.discountType === 'bono' || (inv.description && inv.description.toLowerCase().includes('décomptée'))
+                                  inv.amount === 0 || inv.isBonoRedemption || (inv.discountType === 'bono' && inv.amount === 0) || (inv.description && inv.description.toLowerCase().includes('décomptée'))
                                 );
+
+                                const bonoPurchaseInvoice = associatedInvoices.find(inv => 
+                                  inv.status === 'paid' && inv.amount > 0 &&
+                                  (inv.discountType === 'bono' || (inv.description && inv.description.toLowerCase().includes('bono')))
+                                ) || invoices.find(inv => {
+                                  const isClientMatch = inv.clientId === (ev.clientId || selectedClient?.id) || (
+                                    selectedClient && inv.clientName && selectedClient.name &&
+                                    inv.clientName.trim().toLowerCase() === selectedClient.name.trim().toLowerCase()
+                                  );
+                                  if (!isClientMatch) return false;
+                                  const isBonoType = inv.discountType === 'bono' || (inv.description && inv.description.toLowerCase().includes('bono'));
+                                  const isPurchaseAmount = inv.amount === 160 || inv.amount === 250 || inv.amount > 0;
+                                  if (!isBonoType || !isPurchaseAmount) return false;
+                                  const invDateStr = getLocalDateStr(inv.date);
+                                  return invDateStr === evDateStr || (inv.eventId && inv.eventId === ev.id);
+                                });
 
                                 const isBonoRedeemed = Boolean(
                                   bonoInvoice ||
                                   associatedNotes.some(n => n.isBonoRedeemed) || 
-                                  (selectedClient?.bonoRedeemedDates && selectedClient.bonoRedeemedDates.includes(evDateStr))
+                                  (selectedClient?.bonoRedeemedDates && selectedClient.bonoRedeemedDates.includes(evDateStr)) ||
+                                  Boolean(bonoPurchaseInvoice && selectedClient?.hasBono)
                                 );
 
                                 const standardPaidInvoice = associatedInvoices.find(inv => inv.status === 'paid' && inv.amount > 0 && !inv.isBonoRedemption && inv.discountType !== 'bono');
 
                                 const paidInvoice = isBonoRedeemed ? undefined : standardPaidInvoice;
                                 const pendingInvoice = isBonoRedeemed ? undefined : associatedInvoices.find(inv => inv.status === 'pending');
-                                const isPaymentSettled = Boolean(paidInvoice || isBonoRedeemed);
+                                const isPaymentSettled = Boolean(paidInvoice || isBonoRedeemed || (bonoPurchaseInvoice && bonoPurchaseInvoice.status === 'paid'));
                                 const isComplete = Boolean(hasNote && isPaymentSettled);
 
                                 return (
@@ -3792,13 +3909,26 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
 
                                           {/* Payment Status Notification Badge */}
                                           {isBonoRedeemed ? (
-                                            <span 
-                                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 shadow-2xs"
-                                              title={lang === 'fr' ? "Séance décomptée du Bono - Réglé" : "Session redeemed from Bono - Settled"}
-                                            >
-                                              <Sparkles size={11} className="text-emerald-700" />
-                                              <span>{translations[lang].admin.billing.bonoRedemptionLabel} (✓ {lang === 'fr' ? 'Réglé' : lang === 'es' ? 'Pagado' : 'Settled'})</span>
-                                            </span>
+                                            <div className="flex items-center gap-1.5 flex-wrap">
+                                              <span 
+                                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 shadow-2xs"
+                                                title={lang === 'fr' ? "Séance décomptée du Bono - Réglé" : "Session redeemed from Bono - Settled"}
+                                              >
+                                                <Sparkles size={11} className="text-emerald-700" />
+                                                <span>{translations[lang]?.admin?.billing?.bonoRedemptionLabel || (lang === 'fr' ? 'Décompté du Bono' : lang === 'es' ? 'Descontado del Bono' : 'Redeemed from Bono')} (✓ {lang === 'fr' ? 'Réglé' : lang === 'es' ? 'Pagado' : 'Settled'})</span>
+                                              </span>
+                                              {bonoPurchaseInvoice && bonoPurchaseInvoice.status === 'paid' && (
+                                                <button
+                                                  type="button"
+                                                  onClick={() => setSelectedInvoiceForPrint(bonoPurchaseInvoice)}
+                                                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-white text-emerald-900 border border-emerald-300 hover:bg-emerald-50 transition-colors cursor-pointer"
+                                                  title={lang === 'fr' ? `Facture Bono ${bonoPurchaseInvoice.amount} € - Cliquer pour voir la facture` : `Bono receipt ${bonoPurchaseInvoice.amount} €`}
+                                                >
+                                                  <Printer size={10} />
+                                                  <span>{bonoPurchaseInvoice.amount} €</span>
+                                                </button>
+                                              )}
+                                            </div>
                                           ) : paidInvoice ? (
                                             (() => {
                                               const methodLabel = paidInvoice.paymentMethod === 'card'
@@ -4430,13 +4560,61 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                 )
                               );
 
+                              const isBonoPurchaseInvoice = Boolean(
+                                associatedInvoice && (
+                                  associatedInvoice.discountType === 'bono' || 
+                                  (associatedInvoice.description && associatedInvoice.description.toLowerCase().includes('bono'))
+                                ) && associatedInvoice.amount > 0
+                              );
+
                               const isNoteBonoRedeemed = Boolean(
                                 note.isBonoRedeemed || 
                                 isZeroBonoInvoice ||
-                                (selectedClient?.bonoRedeemedDates && selectedClient.bonoRedeemedDates.includes(noteDateOnly))
+                                (selectedClient?.bonoRedeemedDates && selectedClient.bonoRedeemedDates.includes(noteDateOnly)) ||
+                                (isBonoPurchaseInvoice && Boolean(selectedClient?.hasBono))
                               );
 
-                              return associatedInvoice && associatedInvoice.amount > 0 && !isNoteBonoRedeemed ? (
+                              return isNoteBonoRedeemed ? (
+                                <div className="mt-4 pt-4 border-t border-black/5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-emerald-50/70 p-3.5 rounded-2xl border border-emerald-200/80 shadow-2xs">
+                                  <div className="flex items-center gap-2.5">
+                                    <div className="w-8 h-8 rounded-xl bg-emerald-100 flex items-center justify-center text-emerald-700 shrink-0 shadow-2xs">
+                                      <Sparkles size={16} />
+                                    </div>
+                                    <div className="text-left">
+                                      <div className="flex items-center gap-2 flex-wrap">
+                                        <span className="text-xs font-bold text-emerald-950">
+                                          {lang === 'fr' ? 'Séance décomptée du Bono' : lang === 'es' ? 'Sesión descontada del Bono' : 'Session redeemed from Bono'}
+                                        </span>
+                                        <span className="text-[10px] px-2 py-0.5 rounded-full font-bold flex items-center gap-1 bg-emerald-600 text-white shadow-2xs">
+                                          <CheckCircle2 size={11} />
+                                          <span>{lang === 'fr' ? 'Réglé' : lang === 'es' ? 'Pagado' : 'Settled'}</span>
+                                        </span>
+                                      </div>
+                                      <p className="text-[10px] text-emerald-800 font-medium mt-0.5">
+                                        {note.bonoType || selectedClient?.bonoType || 'Bono'} • {
+                                          associatedInvoice && associatedInvoice.amount > 0
+                                            ? (lang === 'fr' ? `Forfait acheté et réglé ce jour (${associatedInvoice.amount} € · 1ère séance décomptée)` : lang === 'es' ? `Bono comprado y abonado hoy (${associatedInvoice.amount} € · 1ª sesión descontada)` : `Prepaid package purchased & settled today (${associatedInvoice.amount} € · 1st session redeemed)`)
+                                            : (lang === 'fr' ? 'Forfait prépayé (Décompté du solde · Aucune facture à émettre)' : lang === 'es' ? 'Bono prepagado (Descontado del saldo)' : 'Prepaid package (Redeemed from balance)')
+                                        }
+                                      </p>
+                                    </div>
+                                  </div>
+
+                                  {associatedInvoice && associatedInvoice.amount > 0 && (
+                                    <div className="flex items-center gap-2 shrink-0">
+                                      <button
+                                        type="button"
+                                        onClick={() => setSelectedInvoiceForPrint(associatedInvoice)}
+                                        className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-bold uppercase tracking-wider transition-all cursor-pointer shadow-2xs"
+                                        title={lang === 'fr' ? "Imprimer le reçu du Bono" : "Print Bono receipt"}
+                                      >
+                                        <Printer size={13} />
+                                        <span>{translations[lang].admin.billing.receipt} ({associatedInvoice.amount} €)</span>
+                                      </button>
+                                    </div>
+                                  )}
+                                </div>
+                              ) : associatedInvoice && associatedInvoice.amount > 0 ? (
                                 <div className="mt-4 pt-4 border-t border-black/5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-stone-50 p-3.5 rounded-2xl border border-black/5">
                                   <div className="flex items-center gap-2.5">
                                     <CreditCard size={15} className="text-primary shrink-0" />
@@ -4483,7 +4661,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                     {associatedInvoice.status === 'pending' && (
                                       <button
                                         type="button"
-                                        onClick={() => handleToggleInvoiceStatus(associatedInvoice, 'paid')}
+                                        onClick={() => handleToggleInvoiceStatus(associatedInvoice)}
                                         className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer"
                                       >
                                         <CheckCircle2 size={13} />
@@ -4498,28 +4676,6 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                       <Printer size={13} />
                                       <span>{translations[lang].admin.billing.receipt}</span>
                                     </button>
-                                  </div>
-                                </div>
-                              ) : isNoteBonoRedeemed ? (
-                                <div className="mt-4 pt-4 border-t border-black/5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-emerald-50/70 p-3.5 rounded-2xl border border-emerald-200/80 shadow-2xs">
-                                  <div className="flex items-center gap-2.5">
-                                    <div className="w-8 h-8 rounded-xl bg-emerald-100 flex items-center justify-center text-emerald-700 shrink-0 shadow-2xs">
-                                      <Sparkles size={16} />
-                                    </div>
-                                    <div className="text-left">
-                                      <div className="flex items-center gap-2 flex-wrap">
-                                        <span className="text-xs font-bold text-emerald-950">
-                                          {lang === 'fr' ? 'Séance décomptée du Bono' : lang === 'es' ? 'Sesión descontada del Bono' : 'Session redeemed from Bono'}
-                                        </span>
-                                        <span className="text-[10px] px-2 py-0.5 rounded-full font-bold flex items-center gap-1 bg-emerald-600 text-white shadow-2xs">
-                                          <CheckCircle2 size={11} />
-                                          <span>{lang === 'fr' ? 'Réglé' : lang === 'es' ? 'Pagado' : 'Settled'}</span>
-                                        </span>
-                                      </div>
-                                      <p className="text-[10px] text-emerald-800 font-medium mt-0.5">
-                                        {note.bonoType || selectedClient?.bonoType || 'Bono'} • {lang === 'fr' ? 'Forfait prépayé (Décompté du solde · Aucune facture à émettre)' : lang === 'es' ? 'Bono prepagado (Descontado del saldo)' : 'Prepaid package (Redeemed from balance)'}
-                                      </p>
-                                    </div>
                                   </div>
                                 </div>
                               ) : (
@@ -5095,7 +5251,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                   const displayLabel = cleanRemark || ev.summary || (lang === 'fr' ? 'Créneau indisponible' : 'Bloqueado');
                   return (
                     <div
-                      key={cardKey ? `${cardKey}-${ev.id || 'slot'}` : (ev.id ? `${ev.id}-card` : `card-${Math.random()}`)}
+                      key={cardKey || (ev.id ? `${ev.id}-slot-card` : `slot-card-${ev.start || 'slot'}`)}
                       onClick={() => setSelectedAppointmentForDetails(ev)}
                       className="rounded-lg p-2 bg-amber-100/90 hover:bg-amber-100 border border-amber-300 text-amber-950 shadow-2xs hover:shadow-sm cursor-pointer transition-all relative group/card"
                       title={lang === 'fr' ? "Cliquer pour voir les détails" : "Click to view details"}
@@ -5118,7 +5274,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
 
                 return (
                   <div
-                    key={cardKey ? `${cardKey}-${ev.id || 'app'}` : (ev.id ? `${ev.id}-app-card` : `card-${Math.random()}`)}
+                    key={cardKey || (ev.id ? `${ev.id}-app-card` : `app-card-${ev.start || 'app'}`)}
                     onClick={() => setSelectedAppointmentForDetails(ev)}
                     className="rounded-lg p-2 bg-[#38c9d8] hover:bg-[#2fc0cf] border border-[#20b4c5] text-[#063840] shadow-2xs hover:shadow-md cursor-pointer transition-all relative group/card select-none"
                     title={lang === 'fr' ? "Cliquer pour voir les détails du rendez-vous" : "Click to view appointment details"}
@@ -5761,7 +5917,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
 
                                         return (
                                           <div
-                                            key={`${cell.dateString}-${ev.id || evIdx}`}
+                                            key={`month-ev-${cell.dateString}-${ev.id || 'ev'}-${evIdx}`}
                                             onClick={(e) => {
                                               e.stopPropagation();
                                               setSelectedAppointmentForDetails(ev);
@@ -7519,13 +7675,19 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
             (clientId && n.clientId === clientId && n.date && n.date.split('T')[0] === targetDateStr)
           ) : [];
 
-          // Settled specifically via a Bono session deduction (not the Bono package purchase itself)
+          // Check if this appointment corresponds to a Bono deduction:
+          // either 0 € redemption invoice, or note marked as isBonoRedeemed, or date in bonoRedeemedDates,
+          // OR paid Bono purchase invoice where this session was included!
+          const bonoPurchaseInvoice = associatedInvoices.find(inv =>
+            inv.status === 'paid' && inv.amount > 0 &&
+            (inv.discountType === 'bono' || (inv.description && inv.description.toLowerCase().includes('bono')))
+          );
+
           const isBonoDeducted = !isOther && Boolean(
-            !paidInvoice && (
-              associatedInvoices.some(inv => inv.amount === 0 && (inv.isBonoRedemption || inv.discountType === 'bono' || inv.paymentMethod === 'not_applicable')) ||
-              associatedNotes.some(n => n.isBonoRedeemed) ||
-              (client?.bonoRedeemedDates && targetDateStr && client.bonoRedeemedDates.includes(targetDateStr))
-            )
+            associatedNotes.some(n => n.isBonoRedeemed) ||
+            (client?.bonoRedeemedDates && targetDateStr && client.bonoRedeemedDates.includes(targetDateStr)) ||
+            associatedInvoices.some(inv => inv.isBonoRedemption || (inv.amount === 0 && inv.discountType === 'bono')) ||
+            Boolean(bonoPurchaseInvoice && client?.hasBono)
           );
 
           return (
@@ -7690,7 +7852,11 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                           )}
                           <span className="truncate text-[11px] font-semibold">
                             {isBonoDeducted
-                              ? (lang === 'fr' ? 'Réglé avec Bono' : lang === 'es' ? 'Pagado con Bono' : 'Settled with Bono')
+                              ? (
+                                bonoPurchaseInvoice
+                                  ? (lang === 'fr' ? `Réglé avec Bono (Achat ${bonoPurchaseInvoice.amount} €)` : lang === 'es' ? `Pagado con Bono (${bonoPurchaseInvoice.amount} €)` : `Settled with Bono (${bonoPurchaseInvoice.amount} €)`)
+                                  : (lang === 'fr' ? 'Réglé avec Bono' : lang === 'es' ? 'Pagado con Bono' : 'Settled with Bono')
+                                )
                               : paidInvoice
                               ? `${paidInvoice.amount} € (${lang === 'fr' ? 'Payé' : lang === 'es' ? 'Pagado' : 'Paid'})`
                               : pendingInvoice

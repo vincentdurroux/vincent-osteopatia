@@ -1580,6 +1580,8 @@ export const api = {
           treatment: newNote.treatment || '',
           content: newNote.content || '',
           category: newNote.category || 'treatment',
+          is_bono_redeemed: Boolean(newNote.isBonoRedeemed),
+          bono_type: newNote.bonoType || null,
         };
         if (newNote.eventId) {
           snakePayload.event_id = newNote.eventId;
@@ -1594,6 +1596,8 @@ export const api = {
           treatment: newNote.treatment || '',
           content: newNote.content || '',
           category: newNote.category || 'treatment',
+          isBonoRedeemed: Boolean(newNote.isBonoRedeemed),
+          bonoType: newNote.bonoType || null,
         };
         if (newNote.eventId) {
           camelPayload.eventId = newNote.eventId;
@@ -1610,12 +1614,18 @@ export const api = {
           }
 
           const mapped = mapNoteFromDB(result.data);
+          const finalCreatedNote: ClientNote = {
+            ...newNote,
+            ...mapped,
+            isBonoRedeemed: Boolean(newNote.isBonoRedeemed ?? mapped.isBonoRedeemed),
+            bonoType: newNote.bonoType || mapped.bonoType,
+          };
           const current = loadLocal('notes', mockNotes);
-          const idx = current.findIndex(n => n.id === mapped.id);
-          if (idx !== -1) current[idx] = mapped;
-          else current.push(mapped);
+          const idx = current.findIndex(n => n.id === finalCreatedNote.id);
+          if (idx !== -1) current[idx] = finalCreatedNote;
+          else current.push(finalCreatedNote);
           saveLocal('notes', current);
-          return mapped;
+          return finalCreatedNote;
         }
       } catch (err) {
         console.warn('Supabase createClientNote exception:', err);
@@ -1649,6 +1659,10 @@ export const api = {
           treatment: note.treatment || '',
           content: note.content || '',
           category: note.category || 'treatment',
+          is_bono_redeemed: Boolean(note.isBonoRedeemed),
+          isBonoRedeemed: Boolean(note.isBonoRedeemed),
+          bono_type: note.bonoType || null,
+          bonoType: note.bonoType || null,
         };
 
         const result = await executeResilientUpdate('client_notes', note.id, [payload]);
