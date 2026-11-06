@@ -892,7 +892,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
         (inv.isBonoRedemption ||
          inv.paymentMethod === 'not_applicable' ||
          inv.paymentMethod === 'bono' ||
-         (inv.description && (inv.description.toLowerCase().includes('décomptée') || inv.description.toLowerCase().includes('decomptée'))))
+         (formatLocalizedBonoText(inv.description, lang) && (formatLocalizedBonoText(inv.description, lang).toLowerCase().includes('décomptée') || formatLocalizedBonoText(inv.description, lang).toLowerCase().includes('decomptée'))))
       );
       if (isRed) {
         const clientKey = inv.clientId || inv.clientName?.trim().toLowerCase() || '';
@@ -988,7 +988,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
          inv.paymentMethod === 'not_applicable' ||
          inv.paymentMethod === 'bono' ||
          (inv.discountType === 'bono' && inv.amount === 0) ||
-         (inv.description && (inv.description.toLowerCase().includes('décomptée') || inv.description.toLowerCase().includes('decomptée'))))
+         (formatLocalizedBonoText(inv.description, lang) && (formatLocalizedBonoText(inv.description, lang).toLowerCase().includes('décomptée') || formatLocalizedBonoText(inv.description, lang).toLowerCase().includes('decomptée'))))
       );
 
       // Hide 0 € Bono session redemptions unless user checked showBonoRedemptions
@@ -1000,7 +1000,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
         const q = invoiceSearchQuery.toLowerCase().trim();
         const matchesNum = inv.invoiceNumber?.toLowerCase().includes(q);
         const matchesClient = inv.clientName?.toLowerCase().includes(q);
-        const matchesDesc = inv.description?.toLowerCase().includes(q);
+        const matchesDesc = formatLocalizedBonoText(inv.description, lang)?.toLowerCase().includes(q);
         if (!matchesNum && !matchesClient && !matchesDesc) return false;
       }
 
@@ -1250,8 +1250,8 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
       inv.amount > 0 && 
       (
         inv.discountType === 'bono' || 
-        (inv.description && inv.description.toLowerCase().includes('bono')) ||
-        (inv.discountLabel && inv.discountLabel.toLowerCase().includes('bono'))
+        (formatLocalizedBonoText(inv.description, lang) && formatLocalizedBonoText(inv.description, lang).toLowerCase().includes('bono')) ||
+        (formatLocalizedBonoText(inv.discountLabel, lang) && formatLocalizedBonoText(inv.discountLabel, lang).toLowerCase().includes('bono'))
       )
     );
 
@@ -1261,8 +1261,8 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
         inv.isBonoRedemption || 
         inv.paymentMethod === 'not_applicable' ||
         inv.discountType === 'bono' ||
-        (inv.description && (inv.description.toLowerCase().includes('décompté') || inv.description.toLowerCase().includes('decompté'))) ||
-        (inv.discountLabel && (inv.discountLabel.toLowerCase().includes('décompté') || inv.discountLabel.toLowerCase().includes('decompté')))
+        (formatLocalizedBonoText(inv.description, lang) && (formatLocalizedBonoText(inv.description, lang).toLowerCase().includes('décompté') || formatLocalizedBonoText(inv.description, lang).toLowerCase().includes('decompté'))) ||
+        (formatLocalizedBonoText(inv.discountLabel, lang) && (formatLocalizedBonoText(inv.discountLabel, lang).toLowerCase().includes('décompté') || formatLocalizedBonoText(inv.discountLabel, lang).toLowerCase().includes('decompté')))
       )
     );
 
@@ -1303,8 +1303,8 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
       inv.amount > 0 &&
       (
         inv.discountType === 'bono' ||
-        (inv.discountLabel && inv.discountLabel.toLowerCase().includes('bono')) ||
-        (inv.description && inv.description.toLowerCase().includes('bono'))
+        (formatLocalizedBonoText(inv.discountLabel, lang) && formatLocalizedBonoText(inv.discountLabel, lang).toLowerCase().includes('bono')) ||
+        (formatLocalizedBonoText(inv.description, lang) && formatLocalizedBonoText(inv.description, lang).toLowerCase().includes('bono'))
       )
     );
 
@@ -1314,7 +1314,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
       (
         inv.isBonoRedemption ||
         inv.discountType === 'bono' ||
-        (inv.discountLabel && inv.discountLabel.toLowerCase().includes('bono'))
+        (formatLocalizedBonoText(inv.discountLabel, lang) && formatLocalizedBonoText(inv.discountLabel, lang).toLowerCase().includes('bono'))
       )
     );
 
@@ -1477,8 +1477,8 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
           finalOriginal = 60;
           finalDiscount = 60;
           finalDiscType = 'bono';
-          finalDiscLabel = `Décompté sur ${client.bonoType || 'Bono'}`;
-          finalDescription = `Séance décomptée du Bono (${client.bonoType || 'Bono'})`;
+          finalDiscLabel = `Décompté sur ${formatLocalizedBonoText(client.bonoType, lang) || 'Bono'}`;
+          finalDescription = `Séance décomptée du Bono (${formatLocalizedBonoText(client.bonoType, lang) || 'Bono'})`;
           finalPaymentMethod = 'not_applicable';
           isRedemption = true;
         }
@@ -1573,7 +1573,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
             paymentMethod: finalPaymentMethod,
             date: newInvoice.date || new Date().toISOString().split('T')[0],
             paymentDate: newInvoice.status === 'paid' ? (newInvoice.paymentDate || newInvoice.date || new Date().toISOString().split('T')[0]) : undefined,
-            description: normalizeInvoiceDescription(finalDescription),
+            description: normalizeInvoiceDescription(formatLocalizedBonoText(finalDescription, lang)),
             language: 'es',
             quantity: 1,
             noteId: newInvoice.eventId || undefined,
@@ -1737,8 +1737,8 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
           finalOriginal = 60;
           finalDiscount = 60;
           finalDiscType = 'bono';
-          finalDiscLabel = `Décompté sur ${selectedClient.bonoType || 'Bono'}`;
-          finalDescription = `Séance décomptée du Bono (${selectedClient.bonoType || 'Bono'})`;
+          finalDiscLabel = `Décompté sur ${formatLocalizedBonoText(selectedClient.bonoType, lang) || 'Bono'}`;
+          finalDescription = `Séance décomptée du Bono (${formatLocalizedBonoText(selectedClient.bonoType, lang) || 'Bono'})`;
           finalPaymentMethod = 'not_applicable';
           isRedemption = true;
         }
@@ -1756,7 +1756,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
           paymentMethod: finalPaymentMethod,
           date: noteDateStr,
           paymentDate: inlineInvoiceStatus === 'paid' ? noteDateStr : undefined,
-          description: normalizeInvoiceDescription(finalDescription),
+          description: normalizeInvoiceDescription(formatLocalizedBonoText(finalDescription, lang)),
           language: 'es',
           quantity: 1,
           noteId: note.id,
@@ -2110,6 +2110,32 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
       if (found) return found;
     }
     return null;
+  };
+
+  // Helper to dynamically format and translate Bono titles, descriptions and labels according to selected language
+  const formatLocalizedBonoText = (text?: string, targetLang: Language = lang): string => {
+    if (!text) return '';
+    const lower = text.toLowerCase();
+    const t = translations[targetLang]?.admin?.billing;
+    if (lower.includes('bono 3') || lower.includes('3 séances') || lower.includes('3 sesiones') || lower.includes('3 sessions')) {
+      if (lower.includes('160') || lower.includes('forfait') || lower.includes('paquete') || lower.includes('package') || lower.includes('ostéopathie') || lower.includes('osteopatía') || lower.includes('osteopathy')) {
+        return t?.bono3Description || text;
+      }
+      return t?.bono3Label || text;
+    }
+    if (lower.includes('bono 5') || lower.includes('5 séances') || lower.includes('5 sesiones') || lower.includes('5 sessions')) {
+      if (lower.includes('250') || lower.includes('forfait') || lower.includes('paquete') || lower.includes('package') || lower.includes('ostéopathie') || lower.includes('osteopatía') || lower.includes('osteopathy')) {
+        return t?.bono5Description || text;
+      }
+      return t?.bono5Label || text;
+    }
+    if (lower.includes('décompté') || lower.includes('decompté') || lower.includes('descontado') || lower.includes('deducted') || lower.includes('redemption')) {
+      if (lower.includes('séance') || lower.includes('sesión') || lower.includes('session')) {
+        return t?.sessionDeductedFromBono ? t.sessionDeductedFromBono.replace('{bonoType}', 'Bono') : text;
+      }
+      return t?.bonoRedemptionLabel || text;
+    }
+    return text;
   };
 
   const hasAppointmentNote = (ev: { id?: string; clientId?: string; start?: string }) => {
@@ -3465,7 +3491,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                             <div className="flex flex-wrap items-center gap-2 mt-2">
                               <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-emerald-50 text-emerald-800 border border-emerald-200/70">
                                 <BadgePercent size={13} className="text-emerald-600" />
-                                <span>{selectedClient.bonoType || 'Bono'}</span>
+                                <span>{formatLocalizedBonoText(selectedClient.bonoType, lang) || 'Bono'}</span>
                                 {typeof selectedClient.bonoSessionsRemaining === 'number' && (
                                   <span className="text-emerald-800 font-bold bg-white px-2 py-0.5 rounded-full text-[10px] shadow-xs border border-emerald-200">
                                     {selectedClient.bonoSessionsRemaining} {lang === 'fr' ? 'séance(s) restante(s)' : lang === 'es' ? 'sesión(es) restante(s)' : 'remaining session(s)'}
@@ -3812,19 +3838,19 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                 });
 
                                 const bonoInvoice = associatedInvoices.find(inv => 
-                                  inv.amount === 0 || inv.isBonoRedemption || (inv.discountType === 'bono' && inv.amount === 0) || (inv.description && inv.description.toLowerCase().includes('décomptée'))
+                                  inv.amount === 0 || inv.isBonoRedemption || (inv.discountType === 'bono' && inv.amount === 0) || (formatLocalizedBonoText(inv.description, lang) && formatLocalizedBonoText(inv.description, lang).toLowerCase().includes('décomptée'))
                                 );
 
                                 const bonoPurchaseInvoice = associatedInvoices.find(inv => 
                                   inv.status === 'paid' && inv.amount > 0 &&
-                                  (inv.discountType === 'bono' || (inv.description && inv.description.toLowerCase().includes('bono')))
+                                  (inv.discountType === 'bono' || (formatLocalizedBonoText(inv.description, lang) && formatLocalizedBonoText(inv.description, lang).toLowerCase().includes('bono')))
                                 ) || invoices.find(inv => {
                                   const isClientMatch = inv.clientId === (ev.clientId || selectedClient?.id) || (
                                     selectedClient && inv.clientName && selectedClient.name &&
                                     inv.clientName.trim().toLowerCase() === selectedClient.name.trim().toLowerCase()
                                   );
                                   if (!isClientMatch) return false;
-                                  const isBonoType = inv.discountType === 'bono' || (inv.description && inv.description.toLowerCase().includes('bono'));
+                                  const isBonoType = inv.discountType === 'bono' || (formatLocalizedBonoText(inv.description, lang) && formatLocalizedBonoText(inv.description, lang).toLowerCase().includes('bono'));
                                   const isPurchaseAmount = inv.amount === 160 || inv.amount === 250 || inv.amount > 0;
                                   if (!isBonoType || !isPurchaseAmount) return false;
                                   const invDateStr = getLocalDateStr(inv.date);
@@ -4591,7 +4617,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                         </span>
                                       </div>
                                       <p className="text-[10px] text-emerald-800 font-medium mt-0.5">
-                                        {note.bonoType || selectedClient?.bonoType || 'Bono'} • {
+                                        {formatLocalizedBonoText(note.bonoType || selectedClient?.bonoType, lang) || 'Bono'} • {
                                           associatedInvoice && associatedInvoice.amount > 0
                                             ? (lang === 'fr' ? `Forfait acheté et réglé ce jour (${associatedInvoice.amount} € · 1ère séance décomptée)` : lang === 'es' ? `Bono comprado y abonado hoy (${associatedInvoice.amount} € · 1ª sesión descontada)` : `Prepaid package purchased & settled today (${associatedInvoice.amount} € · 1st session redeemed)`)
                                             : (lang === 'fr' ? 'Forfait prépayé (Décompté du solde · Aucune facture à émettre)' : lang === 'es' ? 'Bono prepagado (Descontado del saldo)' : 'Prepaid package (Redeemed from balance)')
@@ -4799,7 +4825,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                                 setInlineInvoiceOriginalAmount(60);
                                                 setInlineInvoiceDiscountAmount(60);
                                                 setInlineInvoiceDiscountType('bono');
-                                                setInlineInvoiceDiscountLabel(`Décompté sur ${selectedClient.bonoType || 'Bono'}`);
+                                                setInlineInvoiceDiscountLabel(`Décompté sur ${formatLocalizedBonoText(selectedClient.bonoType, lang) || 'Bono'}`);
                                                 setInlineInvoiceAmount(0);
                                               }}
                                               className={`p-2.5 rounded-xl border text-left transition-all relative ${
@@ -5002,7 +5028,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                           setInlineInvoiceOriginalAmount(60);
                                           setInlineInvoiceDiscountAmount(60);
                                           setInlineInvoiceDiscountType('bono');
-                                          setInlineInvoiceDiscountLabel(`Décompté sur ${selectedClient.bonoType || 'Bono'}`);
+                                          setInlineInvoiceDiscountLabel(`Décompté sur ${formatLocalizedBonoText(selectedClient.bonoType, lang) || 'Bono'}`);
                                           setInlineInvoiceAmount(0);
                                         } else {
                                           setInlineBillingPlan('single');
@@ -6173,8 +6199,8 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                         inv.isBonoRedemption ||
                         inv.paymentMethod === 'not_applicable' ||
                         (inv.discountType === 'bono' && inv.amount === 0) ||
-                        (inv.discountLabel && inv.discountLabel.toLowerCase().includes('décompté')) ||
-                        (inv.description && inv.description.toLowerCase().includes('décompté'))
+                        (formatLocalizedBonoText(inv.discountLabel, lang) && formatLocalizedBonoText(inv.discountLabel, lang).toLowerCase().includes('décompté')) ||
+                        (formatLocalizedBonoText(inv.description, lang) && formatLocalizedBonoText(inv.description, lang).toLowerCase().includes('décompté'))
                       );
 
                       if (isRedemption) return false;
@@ -6580,7 +6606,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                         (inv.isBonoRedemption || 
                          inv.paymentMethod === 'not_applicable' ||
                          (inv.discountType === 'bono' && inv.amount === 0) ||
-                         (inv.description && (inv.description.toLowerCase().includes('décomptée') || inv.description.toLowerCase().includes('decomptée'))))
+                         (formatLocalizedBonoText(inv.description, lang) && (formatLocalizedBonoText(inv.description, lang).toLowerCase().includes('décomptée') || formatLocalizedBonoText(inv.description, lang).toLowerCase().includes('decomptée'))))
                       );
                       return (
                       <tr 
@@ -6610,7 +6636,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                           <div>{inv.clientName}</div>
                           {isZeroBonoRedemption && (
                             <div className="text-[10px] font-medium text-emerald-800/80 mt-0.5">
-                              {inv.discountLabel || (lang === 'fr' ? 'Forfait Bono' : lang === 'es' ? 'Bono prepagado' : 'Prepaid Bono')}
+                              {formatLocalizedBonoText(inv.discountLabel, lang) || (lang === 'fr' ? 'Forfait Bono' : lang === 'es' ? 'Bono prepagado' : 'Prepaid Bono')}
                             </div>
                           )}
                         </td>
@@ -6703,7 +6729,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                               {inv.discountAmount && inv.discountAmount > 0 ? (
                                 <span className="inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded-md bg-emerald-50 text-emerald-700 text-[9px] font-semibold mt-0.5">
                                   <BadgePercent size={10} />
-                                  {inv.discountLabel || (inv.discountType === 'bono' ? 'Bono' : 'Remise')} -{inv.discountAmount}€
+                                  {formatLocalizedBonoText(inv.discountLabel, lang) || (inv.discountType === 'bono' ? 'Bono' : 'Remise')} -{inv.discountAmount}€
                                 </span>
                               ) : null}
                             </div>
@@ -7680,7 +7706,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
           // OR paid Bono purchase invoice where this session was included!
           const bonoPurchaseInvoice = associatedInvoices.find(inv =>
             inv.status === 'paid' && inv.amount > 0 &&
-            (inv.discountType === 'bono' || (inv.description && inv.description.toLowerCase().includes('bono')))
+            (inv.discountType === 'bono' || (formatLocalizedBonoText(inv.description, lang) && formatLocalizedBonoText(inv.description, lang).toLowerCase().includes('bono')))
           );
 
           const isBonoDeducted = !isOther && Boolean(
@@ -9432,7 +9458,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                     <tr className="border-b border-black/5 text-gray-700">
                       <td className="py-4">
                         <p className="font-bold">
-                          {normalizeInvoiceDescription(selectedInvoiceForPrint.description)}
+                          {normalizeInvoiceDescription(formatLocalizedBonoText(selectedInvoiceForPrint.description, lang))}
                         </p>
                       </td>
                       <td className="py-4 text-center font-medium">
@@ -9450,7 +9476,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                             <span className="px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 text-[9px] font-bold uppercase">
                               {selectedInvoiceForPrint.discountType === 'bono' ? 'Bono' : 'Descuento'}
                             </span>
-                            {selectedInvoiceForPrint.discountLabel || (selectedInvoiceForPrint.discountType === 'bono' ? 'Bono aplicado' : 'Descuento aplicado')}
+                            {formatLocalizedBonoText(selectedInvoiceForPrint.discountLabel, lang) || (selectedInvoiceForPrint.discountType === 'bono' ? 'Bono aplicado' : 'Descuento aplicado')}
                           </p>
                         </td>
                         <td className="py-3 text-center text-[10px] text-emerald-700 font-medium">-</td>
