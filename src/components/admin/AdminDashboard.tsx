@@ -694,6 +694,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
   const [invoiceSearchQuery, setInvoiceSearchQuery] = useState<string>('');
   const [invoiceStatusFilter, setInvoiceStatusFilter] = useState<'all' | 'paid' | 'pending'>('all');
   const [invoiceMethodFilter, setInvoiceMethodFilter] = useState<'all' | 'card' | 'cash' | 'transfer'>('all');
+  const [showBonoRedemptions, setShowBonoRedemptions] = useState<boolean>(false);
 
   // Accounting recap states
   const [recapPeriodType, setRecapPeriodType] = useState<'monthly' | 'annual' | 'custom'>('monthly');
@@ -881,7 +882,120 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
   // Memoized sorted and filtered invoices for the billing log
   // Default sort is strictly by date descending (newest first)
   const displayedInvoices = useMemo(() => {
-    let list = invoices.filter(inv => {
+    let baseList = [...invoices];
+
+    // Collect all unique keys of 0 € redemption entries already existing in invoices
+    const existingRedemptionKeys = new Set<string>();
+    baseList.forEach(inv => {
+      const isRed = Boolean(
+        inv.amount === 0 &&
+        (inv.isBonoRedemption ||
+         inv.paymentMethod === 'not_applicable' ||
+         inv.paymentMethod === 'bono' ||
+         (inv.description && (inv.description.toLowerCase().includes('décomptée') || inv.description.toLowerCase().includes('decomptée'))))
+      );
+      if (isRed) {
+        const clientKey = inv.clientId || inv.clientName?.trim().toLowerCase() || '';
+        const dateKey = inv.date ? inv.date.split('T')[0] : '';
+        if (clientKey && dateKey) {
+          existingRedemptionKeys.add(`${clientKey}_${dateKey}`);
+        }
+      }
+    });
+
+    // Collect all dates that have a real paid invoice (> 0) for each client (e.g. Bono purchase of 160 € or 250 €)
+    const clientPaidDates = new Set<string>();
+    baseList.forEach(inv => {
+      if (inv.amount > 0) {
+        const clientKey = inv.clientId || inv.clientName?.trim().toLowerCase() || '';
+        const dateKey = inv.date ? inv.date.split('T')[0] : '';
+        if (clientKey && dateKey) {
+          clientPaidDates.add(`${clientKey}_${dateKey}`);
+        }
+      }
+    });
+
+    // Synthesize entries for client notes marked with isBonoRedeemed (0 € redemptions without payment)
+    allNotes.forEach(note => {
+      if (!note.isBonoRedeemed) return;
+      const noteDate = note.date ? note.date.split('T')[0] : '';
+      const client = clients.find(c => c.id === note.clientId);
+      const clientKey = note.clientId || client?.name?.trim().toLowerCase() || '';
+      const key = `${clientKey}_${noteDate}`;
+      // Do not synthesize if already in existing redemption invoices OR if a paid invoice exists on that date
+      if (noteDate && clientKey && !existingRedemptionKeys.has(key) && !clientPaidDates.has(key)) {
+        existingRedemptionKeys.add(key);
+        baseList.push({
+          id: `syn-note-bono-${note.id}`,
+          clientId: note.clientId,
+          clientName: client?.name || note.clientName || 'Patient',
+          amount: 0,
+          originalAmount: 60,
+          discountAmount: 60,
+          discountType: 'bono',
+          discountLabel: `Décompté sur ${note.bonoType || client?.bonoType || 'Bono'}`,
+          status: 'paid',
+          paymentMethod: 'not_applicable',
+          date: noteDate,
+          paymentDate: noteDate,
+          description: `Séance décomptée du Bono (${note.bonoType || client?.bonoType || 'Bono'})`,
+          language: 'es',
+          quantity: 1,
+          isBonoRedemption: true,
+          noteId: note.id,
+          eventId: note.eventId,
+        });
+      }
+    });
+
+    // Synthesize entries for client.bonoRedeemedDates (0 € redemptions without payment)
+    clients.forEach(c => {
+      if (!c.hasBono || !c.bonoRedeemedDates || c.bonoRedeemedDates.length === 0) return;
+      c.bonoRedeemedDates.forEach((rDate, idx) => {
+        const cleanDate = rDate.split('T')[0];
+        const key = `${c.id}_${cleanDate}`;
+        // Do not synthesize if already in existing redemption invoices OR if a paid invoice exists on that date
+        if (cleanDate && !existingRedemptionKeys.has(key) && !clientPaidDates.has(key)) {
+          existingRedemptionKeys.add(key);
+          baseList.push({
+            id: `syn-client-bono-${c.id}-${idx}`,
+            clientId: c.id,
+            clientName: c.name,
+            amount: 0,
+            originalAmount: 60,
+            discountAmount: 60,
+            discountType: 'bono',
+            discountLabel: `Décompté sur ${c.bonoType || 'Bono'}`,
+            status: 'paid',
+            paymentMethod: 'not_applicable',
+            date: cleanDate,
+            paymentDate: cleanDate,
+            description: `Séance décomptée du Bono (${c.bonoType || 'Bono'})`,
+            language: 'es',
+            quantity: 1,
+            isBonoRedemption: true,
+          });
+        }
+      });
+    });
+
+    let list = baseList.filter(inv => {
+      // Paid invoices (including paid Bono package purchases like 160 € / 250 €) have amount > 0 and are ALWAYS shown!
+      // ONLY 0 € session redemptions (amount === 0) are subject to the showBonoRedemptions toggle.
+      const is0EURRedemption = Boolean(
+        inv.amount === 0 &&
+        (inv.isBonoRedemption ||
+         inv.paymentMethod === 'not_applicable' ||
+         inv.paymentMethod === 'bono' ||
+         (inv.discountType === 'bono' && inv.amount === 0) ||
+         (inv.description && (inv.description.toLowerCase().includes('décomptée') || inv.description.toLowerCase().includes('decomptée'))))
+      );
+
+      // Hide 0 € Bono session redemptions unless user checked showBonoRedemptions
+      if (!showBonoRedemptions && is0EURRedemption) {
+        return false;
+      }
+
       if (invoiceSearchQuery.trim()) {
         const q = invoiceSearchQuery.toLowerCase().trim();
         const matchesNum = inv.invoiceNumber?.toLowerCase().includes(q);
@@ -889,12 +1003,15 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
         const matchesDesc = inv.description?.toLowerCase().includes(q);
         if (!matchesNum && !matchesClient && !matchesDesc) return false;
       }
+
       if (invoiceStatusFilter !== 'all' && inv.status !== invoiceStatusFilter) {
         return false;
       }
-      if (invoiceMethodFilter !== 'all' && inv.paymentMethod !== invoiceMethodFilter) {
+
+      if (invoiceMethodFilter !== 'all' && inv.paymentMethod !== invoiceMethodFilter && !is0EURRedemption) {
         return false;
       }
+
       return true;
     });
 
@@ -928,7 +1045,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
       const numB = parseInt(String(b.invoiceNumber || '').match(/\d+$/)?.[0] || '0', 10);
       return numB - numA;
     });
-  }, [invoices, invoiceSortField, invoiceSortAsc, invoiceSearchQuery, invoiceStatusFilter, invoiceMethodFilter]);
+  }, [invoices, allNotes, clients, invoiceSortField, invoiceSortAsc, invoiceSearchQuery, invoiceStatusFilter, invoiceMethodFilter, showBonoRedemptions]);
 
   // Create new Client
   const handleAddClient = async (e: React.FormEvent) => {
@@ -1113,50 +1230,67 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
   const getClientActiveBonoInfo = (client: Client | null) => {
     if (!client) return { hasBono: false, remaining: 0, bonoType: '' };
     
-    // 1. If client has explicit bonoSessionsRemaining > 0, trust it directly
-    if (client.hasBono && client.bonoSessionsRemaining !== undefined && !isNaN(Number(client.bonoSessionsRemaining))) {
+    // 1. Primary Source of Truth: if client.hasBono is true and bonoSessionsRemaining is defined on the client model (synced 1:1 with Supabase column bono_sessions_remaining)
+    if (client.hasBono && client.bonoSessionsRemaining !== undefined && client.bonoSessionsRemaining !== null && !isNaN(Number(client.bonoSessionsRemaining))) {
+      const remaining = Math.max(0, Number(client.bonoSessionsRemaining));
       return {
-        hasBono: Number(client.bonoSessionsRemaining) > 0,
-        remaining: Number(client.bonoSessionsRemaining),
-        bonoType: client.bonoType || 'Bono 3 séances',
+        hasBono: remaining > 0,
+        remaining,
+        bonoType: client.bonoType || (lang === 'fr' ? 'Bono 3 séances' : lang === 'es' ? 'Bono 3 sesiones' : 'Bono 3 sessions'),
       };
     }
 
-    // 2. Otherwise calculate accurately from invoices
+    // 2. Secondary Fallback: compute from purchase and redemption invoices
     const clientInvoices = invoices.filter(i => 
-      i.clientId === client.id || 
+      (client.id && i.clientId === client.id) || 
       (i.clientName && client.name && i.clientName.trim().toLowerCase() === client.name.trim().toLowerCase())
     );
 
-    let totalPurchased = 0;
-    let totalRedeemed = 0;
-    let bonoType = client.bonoType || 'Bono 3 séances';
+    const purchaseInvoices = clientInvoices.filter(inv => 
+      inv.amount > 0 && 
+      (
+        inv.discountType === 'bono' || 
+        (inv.description && inv.description.toLowerCase().includes('bono')) ||
+        (inv.discountLabel && inv.discountLabel.toLowerCase().includes('bono'))
+      )
+    );
 
-    for (const inv of clientInvoices) {
-      const desc = (inv.description || '').toLowerCase();
-      const lbl = (inv.discountLabel || '').toLowerCase();
-      
-      const isBonoPurchase = inv.amount > 0 && (desc.includes('forfait') || desc.includes('bono ostéopathie') || lbl.includes('bono') || inv.discountType === 'bono');
-      const isBonoRedemption = inv.amount === 0 || inv.isBonoRedemption || desc.includes('décomptée') || desc.includes('decomptée') || desc.includes('séance décomptée');
+    const redemptionInvoices = clientInvoices.filter(inv => 
+      inv.amount === 0 && 
+      (
+        inv.isBonoRedemption || 
+        inv.paymentMethod === 'not_applicable' ||
+        inv.discountType === 'bono' ||
+        (inv.description && (inv.description.toLowerCase().includes('décompté') || inv.description.toLowerCase().includes('decompté'))) ||
+        (inv.discountLabel && (inv.discountLabel.toLowerCase().includes('décompté') || inv.discountLabel.toLowerCase().includes('decompté')))
+      )
+    );
 
-      if (isBonoPurchase) {
-        const is5 = desc.includes('5') || lbl.includes('5') || inv.amount >= 250;
-        // Purchase includes today's session by default (-1), so remaining from purchase is total - 1
-        totalPurchased += (is5 ? 4 : 2);
-        bonoType = is5 ? 'Bono 5 séances' : 'Bono 3 séances';
-      } else if (isBonoRedemption && !isBonoPurchase) {
-        totalRedeemed += 1;
+    if (purchaseInvoices.length > 0) {
+      let totalCapacity = 0;
+      let lastType = client.bonoType || '';
+
+      for (const pInv of purchaseInvoices) {
+        const desc = (pInv.description || '').toLowerCase();
+        const lbl = (pInv.discountLabel || '').toLowerCase();
+        const is5 = desc.includes('5') || lbl.includes('5') || pInv.amount >= 250;
+        totalCapacity += (is5 ? 5 : 3);
+        if (!lastType) {
+          lastType = is5 
+            ? (lang === 'fr' ? 'Bono 5 séances' : lang === 'es' ? 'Bono 5 sesiones' : 'Bono 5 sessions') 
+            : (lang === 'fr' ? 'Bono 3 séances' : lang === 'es' ? 'Bono 3 sesiones' : 'Bono 3 sessions');
+        }
       }
+
+      const remaining = Math.max(0, totalCapacity - redemptionInvoices.length);
+      return {
+        hasBono: remaining > 0,
+        remaining,
+        bonoType: lastType || (lang === 'fr' ? 'Bono 3 séances' : lang === 'es' ? 'Bono 3 sesiones' : 'Bono 3 sessions'),
+      };
     }
 
-    const remaining = Math.max(0, totalPurchased - totalRedeemed);
-    const hasBono = (client.hasBono || totalPurchased > 0) && remaining > 0;
-
-    return {
-      hasBono,
-      remaining,
-      bonoType: client.bonoType || bonoType,
-    };
+    return { hasBono: false, remaining: 0, bonoType: '' };
   };
 
   // Delete Invoice with confirmation and Bono cascade deletion
@@ -1327,218 +1461,264 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
     const client = clients.find(c => c.id === newInvoice.clientId);
     if (!client) return;
     
-    try {
-      let finalDescription = newInvoice.description;
-      let finalAmount = Number(newInvoice.amount);
-      let finalOriginal = Number(newInvoice.originalAmount || newInvoice.amount);
-      let finalDiscount = Number(newInvoice.discountAmount || 0);
-      let finalDiscType = newInvoice.discountType;
-      let finalDiscLabel = newInvoice.discountLabel;
-      let finalPaymentMethod = newInvoice.paymentMethod;
-      let isRedemption = false;
+    const executeInvoiceCreation = async () => {
+      try {
+        let finalDescription = newInvoice.description;
+        let finalAmount = Number(newInvoice.amount);
+        let finalOriginal = Number(newInvoice.originalAmount || newInvoice.amount);
+        let finalDiscount = Number(newInvoice.discountAmount || 0);
+        let finalDiscType = newInvoice.discountType;
+        let finalDiscLabel = newInvoice.discountLabel;
+        let finalPaymentMethod = newInvoice.paymentMethod;
+        let isRedemption = false;
 
-      if (newInvoiceBillingPlan === 'deduct_bono') {
-        finalAmount = 0;
-        finalOriginal = 60;
-        finalDiscount = 60;
-        finalDiscType = 'bono';
-        finalDiscLabel = `Décompté sur ${client.bonoType || 'Bono'}`;
-        finalDescription = `Séance décomptée du Bono (${client.bonoType || 'Bono'})`;
-        finalPaymentMethod = 'not_applicable';
-        isRedemption = true;
-      }
+        if (newInvoiceBillingPlan === 'deduct_bono') {
+          finalAmount = 0;
+          finalOriginal = 60;
+          finalDiscount = 60;
+          finalDiscType = 'bono';
+          finalDiscLabel = `Décompté sur ${client.bonoType || 'Bono'}`;
+          finalDescription = `Séance décomptée du Bono (${client.bonoType || 'Bono'})`;
+          finalPaymentMethod = 'not_applicable';
+          isRedemption = true;
+        }
 
-      if (newInvoiceBillingPlan === 'bono3' || newInvoiceBillingPlan === 'bono5') {
-        const totalSessions = newInvoiceBillingPlan === 'bono3' ? 3 : 5;
-        const bonoTitle = newInvoiceBillingPlan === 'bono3' ? 'Bono 3 séances' : 'Bono 5 séances';
-        
-        const purchaseInvoice = await api.createInvoice({
-          clientId: client.id,
-          clientName: client.name,
-          amount: newInvoiceBillingPlan === 'bono3' ? 160 : 250,
-          originalAmount: newInvoiceBillingPlan === 'bono3' ? 180 : 300,
-          discountAmount: newInvoiceBillingPlan === 'bono3' ? 20 : 50,
-          discountType: 'bono',
-          discountLabel: bonoTitle,
-          status: newInvoice.status || 'paid',
-          paymentMethod: newInvoice.paymentMethod,
-          date: newInvoice.date || new Date().toISOString().split('T')[0],
-          paymentDate: newInvoice.status === 'paid' ? (newInvoice.paymentDate || newInvoice.date || new Date().toISOString().split('T')[0]) : undefined,
-          description: `Bono Ostéopathie - Forfait ${totalSessions} séances`,
-          language: 'es',
-          quantity: 1,
-        });
-
-        let remaining = totalSessions;
-        let createdRedemptionInv: Invoice | null = null;
-
-        if (newInvoiceIncludeToday) {
-          remaining = totalSessions - 1;
-          createdRedemptionInv = await api.createInvoice({
+        if (newInvoiceBillingPlan === 'bono3' || newInvoiceBillingPlan === 'bono5') {
+          const totalSessions = newInvoiceBillingPlan === 'bono3' ? 3 : 5;
+          const bonoTitle = newInvoiceBillingPlan === 'bono3' ? 'Bono 3 séances' : 'Bono 5 séances';
+          
+          const purchaseInvoice = await api.createInvoice({
             clientId: client.id,
             clientName: client.name,
-            amount: 0,
-            originalAmount: 60,
-            discountAmount: 60,
+            amount: newInvoiceBillingPlan === 'bono3' ? 160 : 250,
+            originalAmount: newInvoiceBillingPlan === 'bono3' ? 180 : 300,
+            discountAmount: newInvoiceBillingPlan === 'bono3' ? 20 : 50,
             discountType: 'bono',
-            discountLabel: `Décompté sur ${bonoTitle}`,
-            status: 'paid',
-            paymentMethod: 'not_applicable',
+            discountLabel: bonoTitle,
+            status: newInvoice.status || 'paid',
+            paymentMethod: newInvoice.paymentMethod,
             date: newInvoice.date || new Date().toISOString().split('T')[0],
-            paymentDate: newInvoice.date || new Date().toISOString().split('T')[0],
-            description: `Séance décomptée du Bono (${bonoTitle})`,
+            paymentDate: newInvoice.status === 'paid' ? (newInvoice.paymentDate || newInvoice.date || new Date().toISOString().split('T')[0]) : undefined,
+            description: `Bono Ostéopathie - Forfait ${totalSessions} séances`,
             language: 'es',
             quantity: 1,
             eventId: newInvoice.eventId || undefined,
             noteId: newInvoice.eventId || undefined,
-            isBonoRedemption: true,
+            isBonoRedemption: false,
           });
-        }
 
-        const updatedClient: Client = {
-          ...client,
-          hasBono: true,
-          bonoType: bonoTitle,
-          bonoSessionsRemaining: remaining,
-        };
-        const savedClient = await api.updateClient(updatedClient);
-        setClients(prev => prev.map(c => c.id === savedClient.id ? savedClient : c));
-        if (selectedClient?.id === client.id) setSelectedClient(savedClient);
+          let remaining = totalSessions;
+          const targetToday = newInvoice.date || new Date().toISOString().split('T')[0];
+          const existingDates = client.bonoRedeemedDates || [];
+          let updatedDates = [...existingDates];
 
-        setInvoices(prev => sortInvoicesByDate([
-          purchaseInvoice,
-          ...(createdRedemptionInv ? [createdRedemptionInv] : []),
-          ...prev.filter(i => i.id !== purchaseInvoice.id && (!createdRedemptionInv || i.id !== createdRedemptionInv.id))
-        ], false));
+          if (newInvoiceIncludeToday) {
+            remaining = totalSessions - 1;
+            updatedDates = Array.from(new Set([...updatedDates, targetToday]));
+          }
 
-      } else {
-        const isDiscounted = finalDiscount > 0;
-        const created = await api.createInvoice({
-          clientId: client.id,
-          clientName: client.name,
-          amount: finalAmount,
-          originalAmount: isDiscounted ? finalOriginal : finalAmount,
-          discountAmount: isDiscounted ? finalDiscount : undefined,
-          discountType: isDiscounted && finalDiscType !== 'none' ? finalDiscType : undefined,
-          discountLabel: isDiscounted ? finalDiscLabel : undefined,
-          status: newInvoice.status || 'paid',
-          paymentMethod: finalPaymentMethod,
-          date: newInvoice.date || new Date().toISOString().split('T')[0],
-          paymentDate: newInvoice.status === 'paid' ? (newInvoice.paymentDate || newInvoice.date || new Date().toISOString().split('T')[0]) : undefined,
-          description: normalizeInvoiceDescription(finalDescription),
-          language: 'es',
-          quantity: 1,
-          noteId: newInvoice.eventId || undefined,
-          eventId: newInvoice.eventId || undefined,
-          isBonoRedemption: isRedemption,
-        });
-
-        if (newInvoiceBillingPlan === 'deduct_bono' && client.hasBono) {
-          const currentRem = client.bonoSessionsRemaining ?? 1;
-          const newRemaining = Math.max(0, currentRem - 1);
           const updatedClient: Client = {
             ...client,
-            bonoSessionsRemaining: newRemaining,
+            hasBono: true,
+            bonoType: bonoTitle,
+            bonoSessionsRemaining: remaining,
+            bonoRedeemedDates: updatedDates,
           };
           const savedClient = await api.updateClient(updatedClient);
           setClients(prev => prev.map(c => c.id === savedClient.id ? savedClient : c));
           if (selectedClient?.id === client.id) setSelectedClient(savedClient);
+
+          setInvoices(prev => sortInvoicesByDate([
+            purchaseInvoice,
+            ...prev.filter(i => i.id !== purchaseInvoice.id)
+          ], false));
+
+        } else {
+          const isDiscounted = finalDiscount > 0;
+          const created = await api.createInvoice({
+            clientId: client.id,
+            clientName: client.name,
+            amount: finalAmount,
+            originalAmount: isDiscounted ? finalOriginal : finalAmount,
+            discountAmount: isDiscounted ? finalDiscount : undefined,
+            discountType: isDiscounted && finalDiscType !== 'none' ? finalDiscType : undefined,
+            discountLabel: isDiscounted ? finalDiscLabel : undefined,
+            status: newInvoice.status || 'paid',
+            paymentMethod: finalPaymentMethod,
+            date: newInvoice.date || new Date().toISOString().split('T')[0],
+            paymentDate: newInvoice.status === 'paid' ? (newInvoice.paymentDate || newInvoice.date || new Date().toISOString().split('T')[0]) : undefined,
+            description: normalizeInvoiceDescription(finalDescription),
+            language: 'es',
+            quantity: 1,
+            noteId: newInvoice.eventId || undefined,
+            eventId: newInvoice.eventId || undefined,
+            isBonoRedemption: isRedemption,
+          });
+
+          if (newInvoiceBillingPlan === 'deduct_bono' && client.hasBono) {
+            const currentRem = client.bonoSessionsRemaining ?? 1;
+            const newRemaining = Math.max(0, currentRem - 1);
+            const targetDate = newInvoice.date || new Date().toISOString().split('T')[0];
+            const existingDates = client.bonoRedeemedDates || [];
+            const newDates = Array.from(new Set([...existingDates, targetDate]));
+
+            const updatedClient: Client = {
+              ...client,
+              bonoSessionsRemaining: newRemaining,
+              bonoRedeemedDates: newDates,
+            };
+            const savedClient = await api.updateClient(updatedClient);
+            setClients(prev => prev.map(c => c.id === savedClient.id ? savedClient : c));
+            if (selectedClient?.id === client.id) setSelectedClient(savedClient);
+          }
+
+          setInvoices(prev => sortInvoicesByDate([created, ...prev.filter(i => i.id !== created.id)], false));
         }
 
-        setInvoices(prev => sortInvoicesByDate([created, ...prev.filter(i => i.id !== created.id)], false));
+        setIsAddInvoiceOpen(false);
+        setNewInvoiceBillingPlan('single');
+        setNewInvoiceIncludeToday(true);
+        setNewInvoice({
+          clientId: '',
+          amount: 60,
+          originalAmount: 60,
+          discountAmount: 0,
+          discountType: 'none',
+          discountLabel: '',
+          status: 'paid',
+          paymentMethod: 'card',
+          description: "Sesión de osteopatía",
+          language: 'es',
+          quantity: 1,
+          date: new Date().toISOString().split('T')[0],
+          paymentDate: new Date().toISOString().split('T')[0],
+          eventId: '',
+        });
+      } catch (err) {
+        console.error('Failed to create invoice:', err);
       }
+    };
 
-      setIsAddInvoiceOpen(false);
-      setNewInvoiceBillingPlan('single');
-      setNewInvoiceIncludeToday(true);
-      setNewInvoice({
-        clientId: '',
-        amount: 60,
-        originalAmount: 60,
-        discountAmount: 0,
-        discountType: 'none',
-        discountLabel: '',
-        status: 'paid',
-        paymentMethod: 'card',
-        description: "Sesión de osteopatía",
-        language: 'es',
-        quantity: 1,
-        date: new Date().toISOString().split('T')[0],
-        paymentDate: new Date().toISOString().split('T')[0],
-        eventId: '',
+    if (newInvoiceBillingPlan === 'deduct_bono') {
+      const bonoInfo = getClientActiveBonoInfo(client);
+      const remainingAfter = Math.max(0, bonoInfo.remaining - 1);
+
+      setConfirmDialog({
+        isOpen: true,
+        title: lang === 'fr' ? 'Confirmer le décompte du Bono' : lang === 'es' ? 'Confirmar descuento del Bono' : 'Confirm Bono Deduction',
+        message: lang === 'fr'
+          ? `Souhaitez-vous vraiment décompter 1 séance sur le forfait Bono de ${client.name} ? Il lui restera ${remainingAfter} séance(s).`
+          : lang === 'es'
+          ? `¿Desea realmente descontar 1 sesión del Bono de ${client.name}? Le quedarán ${remainingAfter} sesión(es).`
+          : `Do you really want to deduct 1 session from ${client.name}'s Bono package? They will have ${remainingAfter} session(s) remaining.`,
+        confirmText: lang === 'fr' ? 'Décompter 1 séance' : lang === 'es' ? 'Descontar 1 sesión' : 'Deduct 1 session',
+        cancelText: lang === 'fr' ? 'Annuler' : lang === 'es' ? 'Cancelar' : 'Cancel',
+        isDangerous: false,
+        onConfirm: executeInvoiceCreation,
       });
-    } catch (err) {
-      console.error('Failed to create invoice:', err);
+      return;
     }
+
+    await executeInvoiceCreation();
   };
 
   // Create inline invoice from notes history
   const handleCreateInlineInvoice = async (note: ClientNote) => {
     if (!selectedClient) return;
-    try {
-      const noteDateStr = note.date.includes('T') ? note.date.split('T')[0] : note.date;
-      
-      let finalDescription = translations[lang as Language].invoice.serviceDescription;
-      let finalAmount = Number(inlineInvoiceAmount);
-      let finalOriginal = Number(inlineInvoiceOriginalAmount);
-      let finalDiscount = Number(inlineInvoiceDiscountAmount);
-      let finalDiscType = inlineInvoiceDiscountType;
-      let finalDiscLabel = inlineInvoiceDiscountLabel;
-      let finalPaymentMethod = inlineInvoicePaymentMethod;
-      let isRedemption = false;
 
-      if (inlineBillingPlan === 'deduct_bono') {
-        finalAmount = 0;
-        finalOriginal = 60;
-        finalDiscount = 60;
-        finalDiscType = 'bono';
-        finalDiscLabel = `Décompté sur ${selectedClient.bonoType || 'Bono'}`;
-        finalDescription = `Séance décomptée du Bono (${selectedClient.bonoType || 'Bono'})`;
-        finalPaymentMethod = 'not_applicable';
-        isRedemption = true;
-      }
+    const executeInlineCreation = async () => {
+      try {
+        const noteDateStr = note.date.includes('T') ? note.date.split('T')[0] : note.date;
+        
+        let finalDescription = translations[lang as Language].invoice.serviceDescription;
+        let finalAmount = Number(inlineInvoiceAmount);
+        let finalOriginal = Number(inlineInvoiceOriginalAmount);
+        let finalDiscount = Number(inlineInvoiceDiscountAmount);
+        let finalDiscType = inlineInvoiceDiscountType;
+        let finalDiscLabel = inlineInvoiceDiscountLabel;
+        let finalPaymentMethod = inlineInvoicePaymentMethod;
+        let isRedemption = false;
 
-      const isDiscounted = finalDiscount > 0;
-      const created = await api.createInvoice({
-        clientId: selectedClient.id,
-        clientName: selectedClient.name,
-        amount: finalAmount,
-        originalAmount: isDiscounted ? finalOriginal : finalAmount,
-        discountAmount: isDiscounted ? finalDiscount : undefined,
-        discountType: isDiscounted && finalDiscType !== 'none' ? finalDiscType : undefined,
-        discountLabel: isDiscounted ? finalDiscLabel : undefined,
-        status: inlineInvoiceStatus,
-        paymentMethod: finalPaymentMethod,
-        date: noteDateStr,
-        paymentDate: inlineInvoiceStatus === 'paid' ? noteDateStr : undefined,
-        description: normalizeInvoiceDescription(finalDescription),
-        language: 'es',
-        quantity: 1,
-        noteId: note.id,
-        eventId: note.eventId || undefined,
-        isBonoRedemption: isRedemption,
-      });
+        if (inlineBillingPlan === 'deduct_bono') {
+          finalAmount = 0;
+          finalOriginal = 60;
+          finalDiscount = 60;
+          finalDiscType = 'bono';
+          finalDiscLabel = `Décompté sur ${selectedClient.bonoType || 'Bono'}`;
+          finalDescription = `Séance décomptée du Bono (${selectedClient.bonoType || 'Bono'})`;
+          finalPaymentMethod = 'not_applicable';
+          isRedemption = true;
+        }
 
-      if (inlineBillingPlan === 'deduct_bono' && selectedClient.hasBono) {
-        const curRem = selectedClient.bonoSessionsRemaining ?? 1;
-        const newRem = Math.max(0, curRem - 1);
-        const updatedClient = await api.updateClient({
-          ...selectedClient,
-          bonoSessionsRemaining: newRem,
+        const isDiscounted = finalDiscount > 0;
+        const created = await api.createInvoice({
+          clientId: selectedClient.id,
+          clientName: selectedClient.name,
+          amount: finalAmount,
+          originalAmount: isDiscounted ? finalOriginal : finalAmount,
+          discountAmount: isDiscounted ? finalDiscount : undefined,
+          discountType: isDiscounted && finalDiscType !== 'none' ? finalDiscType : undefined,
+          discountLabel: isDiscounted ? finalDiscLabel : undefined,
+          status: inlineInvoiceStatus,
+          paymentMethod: finalPaymentMethod,
+          date: noteDateStr,
+          paymentDate: inlineInvoiceStatus === 'paid' ? noteDateStr : undefined,
+          description: normalizeInvoiceDescription(finalDescription),
+          language: 'es',
+          quantity: 1,
+          noteId: note.id,
+          eventId: note.eventId || undefined,
+          isBonoRedemption: isRedemption,
         });
-        setClients(prev => prev.map(c => c.id === updatedClient.id ? updatedClient : c));
-        setSelectedClient(updatedClient);
 
-        // Update note state
-        setClientNotes(prev => prev.map(n => n.id === note.id ? { ...n, isBonoRedeemed: true } : n));
-        setAllNotes(prev => prev.map(n => n.id === note.id ? { ...n, isBonoRedeemed: true } : n));
+        if (inlineBillingPlan === 'deduct_bono' && selectedClient.hasBono) {
+          const curRem = selectedClient.bonoSessionsRemaining ?? 1;
+          const newRem = Math.max(0, curRem - 1);
+          const targetDate = noteDateStr || new Date().toISOString().split('T')[0];
+          const existingDates = selectedClient.bonoRedeemedDates || [];
+          const newDates = Array.from(new Set([...existingDates, targetDate]));
+
+          const updatedClient = await api.updateClient({
+            ...selectedClient,
+            bonoSessionsRemaining: newRem,
+            bonoRedeemedDates: newDates,
+          });
+          setClients(prev => prev.map(c => c.id === updatedClient.id ? updatedClient : c));
+          setSelectedClient(updatedClient);
+
+          // Update note state
+          setClientNotes(prev => prev.map(n => n.id === note.id ? { ...n, isBonoRedeemed: true } : n));
+          setAllNotes(prev => prev.map(n => n.id === note.id ? { ...n, isBonoRedeemed: true } : n));
+        }
+
+        setInvoices(prev => sortInvoicesByDate([created, ...prev.filter(i => i.id !== created.id)], false));
+        setCreatingInvoiceForNoteId(null);
+      } catch (err) {
+        console.error('Failed to create inline invoice:', err);
       }
+    };
 
-      setInvoices(prev => sortInvoicesByDate([created, ...prev.filter(i => i.id !== created.id)], false));
-      setCreatingInvoiceForNoteId(null);
-    } catch (err) {
-      console.error('Failed to create inline invoice:', err);
+    if (inlineBillingPlan === 'deduct_bono') {
+      const bonoInfo = getClientActiveBonoInfo(selectedClient);
+      const remainingAfter = Math.max(0, bonoInfo.remaining - 1);
+
+      setConfirmDialog({
+        isOpen: true,
+        title: lang === 'fr' ? 'Confirmer le décompte du Bono' : lang === 'es' ? 'Confirmar descuento del Bono' : 'Confirm Bono Deduction',
+        message: lang === 'fr'
+          ? `Souhaitez-vous vraiment décompter 1 séance sur le forfait Bono de ${selectedClient.name} ? Il lui restera ${remainingAfter} séance(s).`
+          : lang === 'es'
+          ? `¿Desea realmente descontar 1 sesión del Bono de ${selectedClient.name}? Le quedarán ${remainingAfter} sesión(es).`
+          : `Do you really want to deduct 1 session from ${selectedClient.name}'s Bono package? They will have ${remainingAfter} session(s) remaining.`,
+        confirmText: lang === 'fr' ? 'Décompter 1 séance' : lang === 'es' ? 'Descontar 1 sesión' : 'Deduct 1 session',
+        cancelText: lang === 'fr' ? 'Annuler' : lang === 'es' ? 'Cancelar' : 'Cancel',
+        isDangerous: false,
+        onConfirm: executeInlineCreation,
+      });
+      return;
     }
+
+    await executeInlineCreation();
   };
   // Update Client Handler
   const handleUpdateClient = async (e: React.FormEvent) => {
@@ -1830,7 +2010,58 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
   };
 
   const hasAppointmentNote = (ev: { id?: string; clientId?: string; start?: string }) => {
-    return allNotes.some(n => n.eventId && n.eventId === ev.id);
+    if (ev.id && allNotes.some(n => n.eventId === ev.id)) return true;
+    if (ev.clientId && ev.start) {
+      const targetDateStr = ev.start.split('T')[0];
+      return allNotes.some(n => n.clientId === ev.clientId && n.date && n.date.split('T')[0] === targetDateStr);
+    }
+    return false;
+  };
+
+  const isAppointmentSettledOrRedeemed = (ev: { id?: string; clientId?: string; start?: string }) => {
+    if (!ev) return false;
+    const targetDateStr = ev.start ? ev.start.split('T')[0] : '';
+    const client = getEventClient(ev);
+    const clientId = ev.clientId || client?.id;
+    const clientName = client?.name;
+
+    // Check if client has bonoRedeemedDates matching this appointment date
+    if (client?.bonoRedeemedDates && targetDateStr && client.bonoRedeemedDates.includes(targetDateStr)) {
+      return true;
+    }
+
+    // Check notes for isBonoRedeemed
+    const associatedNotes = allNotes.filter(n => 
+      (ev.id && n.eventId === ev.id) ||
+      (clientId && n.clientId === clientId && n.date && n.date.split('T')[0] === targetDateStr)
+    );
+
+    if (associatedNotes.some(n => n.isBonoRedeemed)) {
+      return true;
+    }
+
+    // Check invoices for paid or bono redemption
+    const associatedInvoices = invoices.filter(inv => {
+      const isEventMatch = Boolean(ev.id && (inv.eventId === ev.id || inv.noteId === ev.id));
+      const isClientMatch = Boolean((clientId && inv.clientId === clientId) || 
+                            (clientName && inv.clientName && inv.clientName.trim().toLowerCase() === clientName.trim().toLowerCase()));
+      const isDateMatch = Boolean(targetDateStr && inv.date && inv.date.split('T')[0] === targetDateStr);
+      return isEventMatch || (isClientMatch && isDateMatch);
+    });
+
+    return associatedInvoices.some(inv => 
+      inv.status === 'paid' || 
+      inv.isBonoRedemption || 
+      inv.amount === 0 || 
+      inv.paymentMethod === 'not_applicable' || 
+      inv.discountType === 'bono'
+    );
+  };
+
+  const isAppointmentFullyCompleted = (ev: CalendarEvent) => {
+    const isOther = ev.eventType && ev.eventType !== 'appointment';
+    if (isOther) return false;
+    return hasAppointmentNote(ev) && isAppointmentSettledOrRedeemed(ev);
   };
 
   const getAppointmentInvoice = (ev: { id?: string; clientId?: string; start?: string }) => {
@@ -4853,9 +5084,11 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                 const startStr = new Date(ev.start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
                 const endStr = new Date(ev.end).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
                 const hasNote = !isOther && hasAppointmentNote(ev);
+                const isSettled = !isOther && isAppointmentSettledOrRedeemed(ev);
                 const client = !isOther ? getEventClient(ev) : null;
                 const profileNote = client?.profileNote?.trim();
                 const cleanRemark = ev.description?.replace(/\[eventType:[a-z]+\]/gi, '').replace(/\[type:[a-z]+\]/gi, '').trim();
+                const isFullyCompleted = !isOther && hasNote && isSettled;
 
                 if (isOther) {
                   // Si il y a une remarque pour les slots bloqués, privilégier la remarque plutôt que le slot title
@@ -4890,7 +5123,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                     className="rounded-lg p-2 bg-[#38c9d8] hover:bg-[#2fc0cf] border border-[#20b4c5] text-[#063840] shadow-2xs hover:shadow-md cursor-pointer transition-all relative group/card select-none"
                     title={lang === 'fr' ? "Cliquer pour voir les détails du rendez-vous" : "Click to view appointment details"}
                   >
-                    {/* Top row: Heure - Nom Prénom & Note cloud icon */}
+                    {/* Top row: Heure - Nom Prénom & Note / Completion status badge */}
                     <div className="flex items-start justify-between gap-1.5">
                       <div className="min-w-0 flex-1">
                         <div className="text-xs sm:text-[13px] font-bold text-[#063840] leading-tight flex items-baseline gap-1.5 flex-wrap">
@@ -4901,15 +5134,27 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                         </div>
                       </div>
 
-                      {/* Note indicator in top-right (like the white cloud icon in the schedule) */}
-                      {hasNote && (
-                        <span
-                          className="shrink-0 w-5 h-5 rounded-md bg-white/45 text-[#063840] flex items-center justify-center shadow-2xs"
-                          title={lang === 'fr' ? "Note clinique enregistrée" : "Clinical note recorded"}
-                        >
-                          <FileText size={11} className="text-[#063840]" />
-                        </span>
-                      )}
+                      {/* Status Indicators in top-right: Note rédigée & Paiement/Bono réglé */}
+                      <div className="flex items-center gap-1 shrink-0">
+                        {hasNote && (
+                          <span
+                            className="w-5 h-5 rounded-md bg-white/50 text-[#063840] flex items-center justify-center shadow-2xs"
+                            title={lang === 'fr' ? "Note clinique enregistrée" : lang === 'es' ? "Nota clínica registrada" : "Clinical note recorded"}
+                          >
+                            <FileText size={11} className="text-[#063840]" />
+                          </span>
+                        )}
+
+                        {isSettled && (
+                          <span
+                            className="px-1.5 py-0.5 rounded-md bg-emerald-700 text-white font-bold text-[10px] flex items-center gap-1 shadow-2xs border border-emerald-400/40"
+                            title={lang === 'fr' ? "Règlement effectué / Séance décomptée du Bono" : lang === 'es' ? "Pago cobrado / Sesión descontada del Bono" : "Payment settled / Bono deducted"}
+                          >
+                            <CreditCard size={11} className="shrink-0" />
+                            <Check size={10} className="stroke-[2.5]" />
+                          </span>
+                        )}
+                      </div>
                     </div>
 
                     {/* Profile Note si il y en a une */}
@@ -4921,32 +5166,6 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                         </span>
                       </div>
                     )}
-
-                    {/* Hover action buttons (Edit & Delete) */}
-                    <div className="absolute top-1.5 right-1.5 opacity-0 group-hover/card:opacity-100 transition-opacity flex items-center gap-1 bg-white/85 backdrop-blur-xs px-1 py-0.5 rounded shadow-2xs">
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          openEditEventModal(ev);
-                        }}
-                        className="p-1 text-slate-700 hover:text-primary rounded transition-colors"
-                        title={lang === 'fr' ? "Modifier le RDV" : "Edit"}
-                      >
-                        <Pencil size={11} />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleDeleteEvent(ev.id);
-                        }}
-                        className="p-1 text-rose-600 hover:bg-rose-50 rounded transition-colors"
-                        title={lang === 'fr' ? "Supprimer le RDV" : "Delete"}
-                      >
-                        <Trash2 size={11} />
-                      </button>
-                    </div>
                   </div>
                 );
               };
@@ -5539,6 +5758,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                         const isOther = ev.eventType && ev.eventType !== 'appointment';
                                         const timeStr = new Date(ev.start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
                                         const hasNote = !isOther && hasAppointmentNote(ev);
+                                        const isSettled = !isOther && isAppointmentSettledOrRedeemed(ev);
 
                                         return (
                                           <div
@@ -5558,7 +5778,20 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                               {isOther && <Lock size={10} className="shrink-0 text-amber-800" />}
                                               <span className="font-mono text-[9px] opacity-80">{timeStr}</span> {getEventDisplayName(ev)}
                                             </span>
-                                            {hasNote && <FileText size={10} className="text-[#063840] shrink-0 ml-1" />}
+                                            <div className="flex items-center gap-0.5 ml-1 shrink-0">
+                                              {hasNote && (
+                                                <FileText size={10} className="text-[#063840] shrink-0" title={lang === 'fr' ? "Note clinique enregistrée" : "Note recorded"} />
+                                              )}
+                                              {isSettled && (
+                                                <span 
+                                                  className="shrink-0 text-emerald-900 bg-emerald-100 px-0.5 py-0.2 rounded font-bold text-[8px] flex items-center gap-0.5 border border-emerald-300/60" 
+                                                  title={lang === 'fr' ? "Paiement réglé / Séance décomptée du Bono" : "Payment settled / Bono deducted"}
+                                                >
+                                                  <CreditCard size={8} className="text-emerald-800" />
+                                                  <Check size={7} className="stroke-[2.5] text-emerald-800" />
+                                                </span>
+                                              )}
+                                            </div>
                                           </div>
                                         );
                                       })}
@@ -5975,7 +6208,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                         )}
                       </span>
                     </span>
-                    {(invoiceSortField !== 'date' || invoiceSortAsc !== false || invoiceSearchQuery || invoiceStatusFilter !== 'all') && (
+                    {(invoiceSortField !== 'date' || invoiceSortAsc !== false || invoiceSearchQuery || invoiceStatusFilter !== 'all' || invoiceMethodFilter !== 'all' || showBonoRedemptions) && (
                       <button
                         type="button"
                         onClick={() => {
@@ -5984,6 +6217,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                           setInvoiceSearchQuery('');
                           setInvoiceStatusFilter('all');
                           setInvoiceMethodFilter('all');
+                          setShowBonoRedemptions(false);
                         }}
                         className="text-[10px] font-bold text-primary hover:underline px-2 py-1 bg-primary/5 rounded-lg"
                       >
@@ -5994,7 +6228,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                 </div>
 
                 {/* Filter and search bar */}
-                <div className="flex flex-col sm:flex-row gap-2 mb-4">
+                <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3 mb-4">
                   <div className="relative flex-1">
                     <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
                     <input
@@ -6015,41 +6249,61 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                     )}
                   </div>
 
-                  {/* Status pills */}
-                  <div className="flex items-center gap-1 bg-[#f4f4ec] p-1 rounded-xl border border-black/5 self-start">
-                    <button
-                      type="button"
-                      onClick={() => setInvoiceStatusFilter('all')}
-                      className={`px-3 py-1 text-[10px] font-bold rounded-lg transition-all ${
-                        invoiceStatusFilter === 'all'
-                          ? 'bg-primary text-white shadow-sm'
-                          : 'text-gray-500 hover:bg-black/5'
-                      }`}
-                    >
-                      {lang === 'fr' ? 'Toutes' : lang === 'es' ? 'Todas' : 'All'}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setInvoiceStatusFilter('paid')}
-                      className={`px-3 py-1 text-[10px] font-bold rounded-lg transition-all ${
-                        invoiceStatusFilter === 'paid'
-                          ? 'bg-emerald-700 text-white shadow-sm'
-                          : 'text-gray-500 hover:bg-black/5'
-                      }`}
-                    >
-                      {lang === 'fr' ? 'Payées' : lang === 'es' ? 'Cobradas' : 'Paid'}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setInvoiceStatusFilter('pending')}
-                      className={`px-3 py-1 text-[10px] font-bold rounded-lg transition-all ${
-                        invoiceStatusFilter === 'pending'
-                          ? 'bg-amber-700 text-white shadow-sm'
-                          : 'text-gray-500 hover:bg-black/5'
-                      }`}
-                    >
-                      {lang === 'fr' ? 'En attente' : lang === 'es' ? 'Pendientes' : 'Pending'}
-                    </button>
+                  <div className="flex flex-wrap items-center gap-2">
+                    {/* Visual option checkbox to toggle 0 € Bono session deductions in billing log */}
+                    <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold select-none bg-[#f4f4ec] hover:bg-[#eaeae0] px-3 py-1.5 rounded-xl border border-black/5 transition-all">
+                      <input
+                        type="checkbox"
+                        checked={showBonoRedemptions}
+                        onChange={(e) => setShowBonoRedemptions(e.target.checked)}
+                        className="w-3.5 h-3.5 rounded text-primary focus:ring-primary accent-primary cursor-pointer"
+                      />
+                      <span className="text-[10px] font-bold text-primary flex items-center gap-1">
+                        <Sparkles size={11} className="text-teal-600" />
+                        {lang === 'fr' 
+                          ? "Afficher les décomptes Bono (0 €)" 
+                          : lang === 'es' 
+                          ? "Mostrar décomptes de Bono (0 €)" 
+                          : "Show Bono redemptions (0 €)"}
+                      </span>
+                    </label>
+
+                    {/* Status pills */}
+                    <div className="flex items-center gap-1 bg-[#f4f4ec] p-1 rounded-xl border border-black/5">
+                      <button
+                        type="button"
+                        onClick={() => setInvoiceStatusFilter('all')}
+                        className={`px-3 py-1 text-[10px] font-bold rounded-lg transition-all ${
+                          invoiceStatusFilter === 'all'
+                            ? 'bg-primary text-white shadow-sm'
+                            : 'text-gray-500 hover:bg-black/5'
+                        }`}
+                      >
+                        {lang === 'fr' ? 'Toutes' : lang === 'es' ? 'Todas' : 'All'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setInvoiceStatusFilter('paid')}
+                        className={`px-3 py-1 text-[10px] font-bold rounded-lg transition-all ${
+                          invoiceStatusFilter === 'paid'
+                            ? 'bg-emerald-700 text-white shadow-sm'
+                            : 'text-gray-500 hover:bg-black/5'
+                        }`}
+                      >
+                        {lang === 'fr' ? 'Payées' : lang === 'es' ? 'Cobradas' : 'Paid'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setInvoiceStatusFilter('pending')}
+                        className={`px-3 py-1 text-[10px] font-bold rounded-lg transition-all ${
+                          invoiceStatusFilter === 'pending'
+                            ? 'bg-amber-700 text-white shadow-sm'
+                            : 'text-gray-500 hover:bg-black/5'
+                        }`}
+                      >
+                        {lang === 'fr' ? 'En attente' : lang === 'es' ? 'Pendientes' : 'Pending'}
+                      </button>
+                    </div>
                   </div>
                 </div>
 
@@ -6168,8 +6422,11 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                   <tbody>
                     {displayedInvoices.map((inv, invIdx) => {
                       const isZeroBonoRedemption = Boolean(
-                        (inv.isBonoRedemption && inv.amount === 0) || 
-                        (inv.amount === 0 && inv.discountType === 'bono')
+                        inv.amount === 0 &&
+                        (inv.isBonoRedemption || 
+                         inv.paymentMethod === 'not_applicable' ||
+                         (inv.discountType === 'bono' && inv.amount === 0) ||
+                         (inv.description && (inv.description.toLowerCase().includes('décomptée') || inv.description.toLowerCase().includes('decomptée'))))
                       );
                       return (
                       <tr 
@@ -6686,11 +6943,13 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                     return (
                       <div
                         key={ev.id ? `${ev.id}-${evIdx}` : `agenda-ev-${evIdx}`}
-                        className={`p-3.5 rounded-2xl border shadow-2xs transition-all space-y-2 group ${
+                        onClick={() => setSelectedAppointmentForDetails(ev)}
+                        className={`p-3.5 rounded-2xl border shadow-2xs transition-all space-y-2 group cursor-pointer ${
                           isOther 
-                            ? 'bg-amber-50 border-amber-200 text-amber-950' 
-                            : 'bg-[#38c9d8]/15 hover:bg-[#38c9d8]/25 border-[#20b4c5]/50'
+                            ? 'bg-amber-50 border-amber-200 text-amber-950 hover:bg-amber-100/90' 
+                            : 'bg-[#38c9d8]/15 hover:bg-[#38c9d8]/30 border-[#20b4c5]/50'
                         }`}
+                        title={lang === 'fr' ? 'Cliquer pour voir les détails' : 'Click to view details'}
                       >
                         <div className="flex items-start justify-between gap-3">
                           <div className="flex items-center gap-2 flex-wrap min-w-0">
@@ -6717,7 +6976,8 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                           <div className="flex items-center gap-1 shrink-0">
                             {!isOther && (
                               <button
-                                onClick={() => {
+                                onClick={(e) => {
+                                  e.stopPropagation();
                                   handleGoToNotes(ev);
                                 }}
                                 className="px-2.5 py-1 bg-[#009cb2] hover:bg-[#00838f] text-white rounded-lg text-xs font-bold transition-all flex items-center gap-1 cursor-pointer shadow-2xs"
@@ -6727,20 +6987,6 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                 <span className="hidden sm:inline">{lang === 'fr' ? 'Fiche' : 'File'}</span>
                               </button>
                             )}
-                            <button
-                              onClick={() => openEditEventModal(ev)}
-                              className="p-1.5 text-slate-500 hover:text-[#009cb2] hover:bg-white rounded-lg transition-all cursor-pointer"
-                              title={lang === 'fr' ? 'Modifier' : 'Edit'}
-                            >
-                              <Pencil size={14} />
-                            </button>
-                            <button
-                              onClick={() => handleDeleteEvent(ev.id)}
-                              className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-all cursor-pointer"
-                              title={lang === 'fr' ? 'Supprimer' : 'Delete'}
-                            >
-                              <Trash2 size={14} />
-                            </button>
                           </div>
                         </div>
 

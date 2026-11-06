@@ -224,14 +224,40 @@ export function normalizeInvoiceDescription(desc?: string): string {
 }
 
 export function mapInvoiceFromDB(i: any): Invoice {
+  let rawAmount = Number(i.amount);
+  const desc = (i.description || '').toLowerCase();
+  const label = (i.discountLabel || i.discount_label || '').toLowerCase();
+
+  // Auto-recover purchase invoice amount if it was previously zeroed out by a bug
+  // (e.g. Bono package purchases of 160 € / 250 € where "Générer la facture" was clicked)
+  const isBonoPurchaseDesc = (desc.includes('forfait') && desc.includes('bono')) || 
+                             desc.includes('bono ostéopathie') || 
+                             (desc.includes('bono') && !desc.includes('décompt') && !desc.includes('decompt'));
+  if ((isNaN(rawAmount) || rawAmount === 0) && isBonoPurchaseDesc) {
+    if (desc.includes('5') || label.includes('5')) {
+      rawAmount = 250;
+    } else if (desc.includes('3') || label.includes('3')) {
+      rawAmount = 160;
+    }
+  }
+
+  const isZeroAmount = isNaN(rawAmount) || rawAmount === 0;
+
+  // A Bono redemption is STRICTLY a 0 € deduction without payment.
+  // Invoices with amount > 0 (such as Bono purchase of 160 € or 250 €) are NEVER redemptions!
   const isRedemption = Boolean(
-    i.isBonoRedemption ||
-    i.is_bono_redemption ||
-    Number(i.amount) === 0 ||
-    i.discountType === 'bono' ||
-    i.discount_type === 'bono' ||
-    (i.description && (i.description.toLowerCase().includes('décomptée') || i.description.toLowerCase().includes('decomptée')))
+    isZeroAmount && (
+      i.isBonoRedemption ||
+      i.is_bono_redemption ||
+      i.paymentMethod === 'not_applicable' ||
+      i.payment_method === 'not_applicable' ||
+      (i.discountType === 'bono' && isZeroAmount) ||
+      (i.discount_type === 'bono' && isZeroAmount) ||
+      (desc.includes('décomptée') || desc.includes('decomptée') || desc.includes('décompté') || desc.includes('decompté'))
+    )
   );
+
+  const finalAmount = isRedemption ? 0 : (isNaN(rawAmount) ? 0 : rawAmount);
 
   return {
     id: String(i.id),
@@ -240,10 +266,10 @@ export function mapInvoiceFromDB(i: any): Invoice {
     clientName: i.clientName || i.client_name || i.clientname || '',
     date: i.date || new Date().toISOString().split('T')[0],
     paymentDate: i.paymentDate || i.payment_date || i.paymentdate || undefined,
-    amount: isRedemption ? 0 : (Number(i.amount) || 0),
-    originalAmount: i.originalAmount !== undefined ? Number(i.originalAmount) : (i.original_amount !== undefined ? Number(i.original_amount) : (isRedemption ? 60 : (Number(i.amount) || 0))),
-    discountAmount: isRedemption ? 60 : (i.discountAmount !== undefined ? Number(i.discountAmount) : (i.discount_amount !== undefined ? Number(i.discount_amount) : undefined)),
-    discountType: isRedemption ? 'bono' : (i.discountType || i.discount_type || undefined),
+    amount: finalAmount,
+    originalAmount: i.originalAmount !== undefined ? Number(i.originalAmount) : (i.original_amount !== undefined ? Number(i.original_amount) : (isRedemption ? 60 : finalAmount)),
+    discountAmount: i.discountAmount !== undefined ? Number(i.discountAmount) : (i.discount_amount !== undefined ? Number(i.discount_amount) : (isRedemption ? 60 : undefined)),
+    discountType: i.discountType || i.discount_type || (isRedemption ? 'bono' : undefined),
     discountLabel: i.discountLabel || i.discount_label || (isRedemption ? 'Décompté sur Bono' : undefined),
     status: i.status || 'paid',
     paymentMethod: isRedemption ? 'not_applicable' : (i.paymentMethod || i.payment_method || i.paymentmethod || 'card'),
@@ -1755,7 +1781,12 @@ export const api = {
   },
 
   async createInvoice(invoice: Omit<Invoice, 'id' | 'invoiceNumber'> & { id?: string; invoiceNumber?: string }): Promise<Invoice> {
-    const isRedemption = Boolean(invoice.isBonoRedemption || invoice.amount === 0 || invoice.discountType === 'bono');
+    const rawAmount = Number(invoice.amount);
+    const isZeroAmount = isNaN(rawAmount) || rawAmount === 0;
+
+    // A redemption is ONLY when amount is 0 (session deducted without payment)
+    // When a bono is purchased (amount 160 € or 250 €), it has payment and MUST receive a real invoiceNumber
+    const isRedemption = Boolean(isZeroAmount && (invoice.isBonoRedemption || invoice.paymentMethod === 'not_applicable' || (invoice.discountType === 'bono' && isZeroAmount)));
     const nextInvoiceNum = isRedemption ? (invoice.invoiceNumber || '') : (invoice.invoiceNumber || await this.getNextInvoiceNumber());
     const invoiceId = invoice.id || crypto.randomUUID();
 
@@ -1764,7 +1795,7 @@ export const api = {
       id: invoiceId,
       invoiceNumber: nextInvoiceNum,
       isBonoRedemption: isRedemption,
-      amount: isRedemption ? 0 : invoice.amount,
+      amount: isRedemption ? 0 : (isNaN(rawAmount) ? 0 : rawAmount),
       paymentMethod: isRedemption ? 'not_applicable' : invoice.paymentMethod,
     };
 
