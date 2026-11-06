@@ -5147,11 +5147,10 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
 
                         {isSettled && (
                           <span
-                            className="px-1.5 py-0.5 rounded-md bg-emerald-700 text-white font-bold text-[10px] flex items-center gap-1 shadow-2xs border border-emerald-400/40"
+                            className="w-5 h-5 rounded-md bg-emerald-700 text-white flex items-center justify-center shadow-2xs border border-emerald-400/40 shrink-0"
                             title={lang === 'fr' ? "Règlement effectué / Séance décomptée du Bono" : lang === 'es' ? "Pago cobrado / Sesión descontada del Bono" : "Payment settled / Bono deducted"}
                           >
-                            <CreditCard size={11} className="shrink-0" />
-                            <Check size={10} className="stroke-[2.5]" />
+                            <CreditCard size={11} />
                           </span>
                         )}
                       </div>
@@ -5784,11 +5783,10 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                               )}
                                               {isSettled && (
                                                 <span 
-                                                  className="shrink-0 text-emerald-900 bg-emerald-100 px-0.5 py-0.2 rounded font-bold text-[8px] flex items-center gap-0.5 border border-emerald-300/60" 
+                                                  className="shrink-0 text-emerald-900 bg-emerald-100 p-0.5 rounded flex items-center justify-center border border-emerald-300/60" 
                                                   title={lang === 'fr' ? "Paiement réglé / Séance décomptée du Bono" : "Payment settled / Bono deducted"}
                                                 >
                                                   <CreditCard size={8} className="text-emerald-800" />
-                                                  <Check size={7} className="stroke-[2.5] text-emerald-800" />
                                                 </span>
                                               )}
                                             </div>
@@ -7501,7 +7499,34 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
             : getEventDisplayName(ev);
 
           const hasNote = !isOther && hasAppointmentNote(ev);
-          const existingInvoice = !isOther ? getAppointmentInvoice(ev) : null;
+          const targetDateStr = ev.start ? ev.start.split('T')[0] : '';
+          const clientId = ev.clientId || client?.id;
+          const clientName = client?.name;
+
+          const associatedInvoices = !isOther ? invoices.filter(inv => {
+            const isEventMatch = Boolean(ev.id && (inv.eventId === ev.id || inv.noteId === ev.id));
+            const isClientMatch = Boolean((clientId && inv.clientId === clientId) || 
+                                  (clientName && inv.clientName && inv.clientName.trim().toLowerCase() === clientName.trim().toLowerCase()));
+            const isDateMatch = Boolean(targetDateStr && inv.date && inv.date.split('T')[0] === targetDateStr);
+            return isEventMatch || (isClientMatch && isDateMatch);
+          }) : [];
+
+          const paidInvoice = associatedInvoices.find(inv => inv.status === 'paid' && inv.amount > 0);
+          const pendingInvoice = associatedInvoices.find(inv => inv.status === 'pending');
+
+          const associatedNotes = !isOther ? allNotes.filter(n => 
+            (ev.id && n.eventId === ev.id) ||
+            (clientId && n.clientId === clientId && n.date && n.date.split('T')[0] === targetDateStr)
+          ) : [];
+
+          // Settled specifically via a Bono session deduction (not the Bono package purchase itself)
+          const isBonoDeducted = !isOther && Boolean(
+            !paidInvoice && (
+              associatedInvoices.some(inv => inv.amount === 0 && (inv.isBonoRedemption || inv.discountType === 'bono' || inv.paymentMethod === 'not_applicable')) ||
+              associatedNotes.some(n => n.isBonoRedeemed) ||
+              (client?.bonoRedeemedDates && targetDateStr && client.bonoRedeemedDates.includes(targetDateStr))
+            )
+          );
 
           return (
             <div 
@@ -7650,11 +7675,27 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                         </div>
 
                         <div className={`p-2.5 rounded-xl border flex items-center gap-2 ${
-                          existingInvoice ? 'bg-cyan-50/80 border-cyan-200 text-cyan-900' : 'bg-slate-50 border-slate-200 text-slate-600'
+                          isBonoDeducted
+                            ? 'bg-emerald-50/80 border-emerald-200 text-emerald-900'
+                            : paidInvoice
+                            ? 'bg-cyan-50/80 border-cyan-200 text-cyan-900'
+                            : pendingInvoice
+                            ? 'bg-amber-50/80 border-amber-200 text-amber-900'
+                            : 'bg-slate-50 border-slate-200 text-slate-600'
                         }`}>
-                          <CreditCard size={14} className={existingInvoice ? 'text-[#009cb2]' : 'text-slate-400'} />
+                          {isBonoDeducted ? (
+                            <Sparkles size={14} className="text-emerald-700 shrink-0" />
+                          ) : (
+                            <CreditCard size={14} className={paidInvoice ? 'text-[#009cb2] shrink-0' : pendingInvoice ? 'text-amber-700 shrink-0' : 'text-slate-400 shrink-0'} />
+                          )}
                           <span className="truncate text-[11px] font-semibold">
-                            {existingInvoice ? `${existingInvoice.amount} € (${existingInvoice.status === 'paid' ? (lang === 'fr' ? 'Payé' : 'Pagado') : (lang === 'fr' ? 'En attente' : 'Pendiente')})` : (lang === 'fr' ? 'Non facturé' : 'No facturado')}
+                            {isBonoDeducted
+                              ? (lang === 'fr' ? 'Réglé avec Bono' : lang === 'es' ? 'Pagado con Bono' : 'Settled with Bono')
+                              : paidInvoice
+                              ? `${paidInvoice.amount} € (${lang === 'fr' ? 'Payé' : lang === 'es' ? 'Pagado' : 'Paid'})`
+                              : pendingInvoice
+                              ? `${pendingInvoice.amount} € (${lang === 'fr' ? 'En attente' : lang === 'es' ? 'Pendiente' : 'Pending'})`
+                              : (lang === 'fr' ? 'Non facturé' : lang === 'es' ? 'No facturado' : 'Unbilled')}
                           </span>
                         </div>
                       </div>
