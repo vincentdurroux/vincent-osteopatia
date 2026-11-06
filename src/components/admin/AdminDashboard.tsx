@@ -7776,6 +7776,18 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                     </div>
                   </div>
 
+                  {/* Appointment Remarks / Notes (Right under Date & Time box) */}
+                  {!isOther && cleanRemark && client && cleanRemark.toLowerCase() !== client.name.toLowerCase() && (
+                    <div className="p-3.5 rounded-2xl bg-cyan-50/70 border border-cyan-200/80 space-y-1">
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-[#00838f] block">
+                        {lang === 'fr' ? 'Remarques du rendez-vous' : lang === 'es' ? 'Notas de la cita' : 'Appointment remarks'}
+                      </span>
+                      <p className="text-xs sm:text-sm font-semibold text-slate-900">
+                        {cleanRemark}
+                      </p>
+                    </div>
+                  )}
+
                   {/* Blocked Slot Remark / Description (Prioritized) */}
                   {isOther && (
                     <div className="p-4 rounded-2xl bg-amber-50 border border-amber-200 space-y-1">
@@ -7793,64 +7805,8 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                     </div>
                   )}
 
-                  {/* Patient Info Card (for appointments) */}
                   {!isOther && (
-                    <div className="space-y-3">
-                      {client ? (
-                        <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200/80 space-y-2.5">
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-2">
-                              <User size={15} className="text-[#009cb2]" />
-                              <h4 className="text-xs font-bold text-slate-900">{client.name}</h4>
-                            </div>
-                            {client.dni && (
-                              <span className="font-mono text-[10px] text-slate-500 bg-white px-2 py-0.5 rounded border border-slate-200">
-                                {client.dni}
-                              </span>
-                            )}
-                          </div>
-
-                          {/* Contacts: Phone & Email */}
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs pt-1">
-                            {client.phone ? (
-                              <div className="flex items-center gap-2">
-                                <Phone size={13} className="text-slate-400 shrink-0" />
-                                <a href={`tel:${client.phone}`} className="font-mono text-slate-700 hover:text-[#009cb2] underline font-medium">
-                                  {client.phone}
-                                </a>
-                              </div>
-                            ) : null}
-                            {client.email ? (
-                              <div className="flex items-center gap-2">
-                                <Mail size={13} className="text-slate-400 shrink-0" />
-                                <a href={`mailto:${client.email}`} className="text-slate-700 hover:text-[#009cb2] truncate underline font-medium">
-                                  {client.email}
-                                </a>
-                              </div>
-                            ) : null}
-                          </div>
-
-                          {/* Profile Note if available */}
-                          {profileNote && (
-                            <div className="p-2.5 rounded-xl bg-amber-50/80 border border-amber-200/90 text-amber-950 text-xs flex items-start gap-2">
-                              <Info size={14} className="text-amber-700 shrink-0 mt-0.5" />
-                              <div>
-                                <span className="text-[10px] font-bold uppercase tracking-wider text-amber-800 block">
-                                  {lang === 'fr' ? 'Remarque profil patient' : 'Nota de perfil'}
-                                </span>
-                                <p className="italic font-medium text-amber-900 mt-0.5">{profileNote}</p>
-                              </div>
-                            </div>
-                          )}
-
-                        </div>
-                      ) : (
-                        <div className="p-3 rounded-2xl bg-slate-50 border border-slate-200 text-xs text-slate-600">
-                          <p className="font-semibold">{ev.summary || (lang === 'fr' ? "Rendez-vous" : "Cita")}</p>
-                          {cleanRemark && <p className="text-slate-500 mt-1 italic">{cleanRemark}</p>}
-                        </div>
-                      )}
-
+                    <div className="space-y-3 pt-1">
                       {/* Status badges row: Note clinique & Facture */}
                       <div className="grid grid-cols-2 gap-2 text-xs">
                         <div className={`p-2.5 rounded-xl border flex items-center gap-2 ${
