@@ -2117,6 +2117,8 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
     if (!text) return '';
     const lower = text.toLowerCase();
     const t = translations[targetLang]?.admin?.billing;
+    
+    // Exact matches or variations for Bono packages
     if (lower.includes('bono 3') || lower.includes('3 séances') || lower.includes('3 sesiones') || lower.includes('3 sessions')) {
       if (lower.includes('160') || lower.includes('forfait') || lower.includes('paquete') || lower.includes('package') || lower.includes('ostéopathie') || lower.includes('osteopatía') || lower.includes('osteopathy')) {
         return t?.bono3Description || text;
@@ -2129,12 +2131,16 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
       }
       return t?.bono5Label || text;
     }
+    
+    // Bono redemptions / deductions
     if (lower.includes('décompté') || lower.includes('decompté') || lower.includes('descontado') || lower.includes('deducted') || lower.includes('redemption')) {
       if (lower.includes('séance') || lower.includes('sesión') || lower.includes('session')) {
-        return t?.sessionDeductedFromBono ? t.sessionDeductedFromBono.replace('{bonoType}', 'Bono') : text;
+        const base = t?.sessionDeductedFromBono || 'Séance décomptée du Bono ({bonoType})';
+        return base.replace('{bonoType}', 'Bono');
       }
       return t?.bonoRedemptionLabel || text;
     }
+    
     return text;
   };
 
@@ -2622,6 +2628,49 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
 
   const chartData = getRevenueChartData();
 
+  // Pre-calculate activity counts for each client to display badges and detect "active" profiles
+  const clientActivityMap = useMemo(() => {
+    const map: Record<string, { noteCount: number; invCount: number; evCount: number; total: number }> = {};
+    clients.forEach(c => {
+      map[c.id] = { noteCount: 0, invCount: 0, evCount: 0, total: 0 };
+    });
+    allNotes.forEach(n => { if (map[n.clientId]) map[n.clientId].noteCount++; });
+    invoices.forEach(i => { if (map[i.clientId]) map[i.clientId].invCount++; });
+    events.forEach(e => { if (e.clientId && map[e.clientId]) map[e.clientId].evCount++; });
+    Object.values(map).forEach(v => { v.total = v.noteCount + v.invCount + v.evCount; });
+    return map;
+  }, [clients, allNotes, invoices, events]);
+
+  // Duplicate detection logic: group patients by name and count associated records
+  const duplicateGroups = useMemo(() => {
+    const groups: Record<string, Client[]> = {};
+    clients.forEach(c => {
+      const nameKey = c.name?.trim().toLowerCase();
+      if (!nameKey || nameKey === 'patient sans nom') return;
+      if (!groups[nameKey]) groups[nameKey] = [];
+      groups[nameKey].push(c);
+    });
+
+    return Object.entries(groups)
+      .filter(([_, list]) => list.length > 1)
+      .map(([name, list]) => {
+        return {
+          name: list[0].name,
+          clients: list.map(c => {
+            const activity = clientActivityMap[c.id] || { noteCount: 0, invCount: 0, evCount: 0, total: 0 };
+            return { 
+              ...c, 
+              noteCount: activity.noteCount, 
+              invoiceCount: activity.invCount, 
+              eventCount: activity.evCount, 
+              totalRecords: activity.total 
+            };
+          }).sort((a, b) => b.totalRecords - a.totalRecords) // Most "active" first
+        };
+      })
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [clients, clientActivityMap]);
+
   // Filter clients based on search query
   const filteredClients = clients.filter(c => 
     c.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -2952,6 +3001,77 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                 </div>
               </div>
             </div>
+            
+            {/* DUPLICATE DETECTION & CLEANUP (Maintenance) */}
+            {duplicateGroups.length > 0 && (
+              <div className="bg-amber-50/70 p-6 rounded-3xl border border-amber-200/80 shadow-xs space-y-4">
+                 <div className="flex items-start gap-4">
+                   <div className="w-12 h-12 rounded-2xl bg-amber-100 text-amber-700 flex items-center justify-center shrink-0 shadow-sm border border-amber-200">
+                     <AlertTriangle size={24} />
+                   </div>
+                   <div className="flex-1">
+                     <h3 className="text-xl font-serif font-bold text-amber-900 leading-tight">
+                       {lang === 'fr' ? "Nettoyage des doublons" : lang === 'es' ? "Limpieza de duplicados" : "Duplicate Cleanup"}
+                     </h3>
+                     <p className="text-sm text-amber-800/80 mt-0.5">
+                       {lang === 'fr' 
+                         ? `Nous avons détecté ${duplicateGroups.length} patient(s) avec des comptes en double. Gardez le profil avec le plus d'enregistrements et supprimez les autres.` 
+                         : lang === 'es'
+                         ? `Hemos detectado ${duplicateGroups.length} paciente(s) con cuentas duplicadas. Mantenga el perfil con más registros y elimine los demás.`
+                         : `Detected ${duplicateGroups.length} patient(s) with duplicate accounts. Keep the profile with more records and delete the others.`}
+                     </p>
+                   </div>
+                 </div>
+                 
+                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                   {duplicateGroups.map((group, idx) => (
+                     <div key={idx} className="bg-white p-5 rounded-2xl border border-amber-200/60 shadow-xs space-y-3">
+                       <div className="flex items-center justify-between gap-2 border-b border-gray-100 pb-2">
+                         <p className="text-base font-bold text-gray-900 truncate">{group.name}</p>
+                         <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 text-[10px] font-bold uppercase tracking-wider">
+                           {group.clients.length} profiles
+                         </span>
+                       </div>
+                       
+                       <div className="space-y-3">
+                         {group.clients.map((c, cIdx) => (
+                           <div key={c.id} className={`p-3 rounded-xl text-xs space-y-2 border transition-all ${cIdx === 0 ? 'bg-emerald-50/40 border-emerald-100' : 'bg-gray-50 border-gray-100'}`}>
+                             <div className="flex items-center justify-between gap-2">
+                               <div className="flex items-center gap-2">
+                                 <span className="font-mono text-[9px] text-gray-400 font-bold">{c.id.substring(0, 8)}...</span>
+                                 {cIdx === 0 && (
+                                   <span className="bg-emerald-600 text-white px-1.5 py-0.2 rounded text-[9px] font-bold uppercase tracking-widest">Keep</span>
+                                 )}
+                               </div>
+                               <span className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold ${c.totalRecords > 0 ? 'bg-emerald-600 text-white' : 'bg-gray-200 text-gray-500'}`}>
+                                 {c.totalRecords} {lang === 'fr' ? 'enreg.' : 'records'}
+                               </span>
+                             </div>
+                             
+                             <div className="flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-gray-500 font-medium">
+                               <div className="flex items-center gap-1"><FileText size={10} className="text-primary/60" /> {c.noteCount} notes</div>
+                               <div className="flex items-center gap-1"><CreditCard size={10} className="text-primary/60" /> {c.invoiceCount} invoices</div>
+                               <div className="flex items-center gap-1"><CalendarIcon size={10} className="text-primary/60" /> {c.eventCount} events</div>
+                             </div>
+                             
+                             {cIdx > 0 && (
+                               <button 
+                                 type="button"
+                                 onClick={() => handleDeleteClient(c.id)}
+                                 className="w-full mt-1.5 py-1.5 bg-white hover:bg-rose-50 text-rose-600 rounded-xl text-[10px] font-bold border border-rose-200 hover:border-rose-300 transition-all shadow-2xs cursor-pointer flex items-center justify-center gap-1.5"
+                               >
+                                 <Trash2 size={11} />
+                                 <span>{lang === 'fr' ? 'Supprimer ce doublon' : 'Delete duplicate'}</span>
+                               </button>
+                             )}
+                           </div>
+                         ))}
+                       </div>
+                     </div>
+                   ))}
+                 </div>
+              </div>
+            )}
 
             {/* AGENDA DU CABINET DIRECT SUR L'APERÇU */}
             {(() => {
@@ -3368,8 +3488,19 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                             <User size={18} />
                           </div>
                           <div className="overflow-hidden min-w-0">
-                            <p className="text-xs font-bold truncate flex items-center gap-1.5">
+                            <p className="text-xs font-bold truncate flex items-center gap-1.5 flex-wrap">
                               <span className="truncate">{c.name}</span>
+                              {(() => {
+                                const activity = clientActivityMap[c.id];
+                                if (!activity || activity.total === 0) return (
+                                  <span className="bg-gray-100 text-gray-400 px-1.5 py-0.2 rounded text-[9px] font-bold uppercase tracking-widest border border-gray-200" title={lang === 'fr' ? 'Dossier vide' : 'Empty record'}>Vide</span>
+                                );
+                                return (
+                                  <span className="bg-emerald-100 text-emerald-800 px-1.5 py-0.2 rounded text-[9px] font-bold uppercase tracking-widest border border-emerald-200" title={`${activity.noteCount} notes, ${activity.invCount} invoices, ${activity.evCount} events`}>
+                                    {activity.total} rec.
+                                  </span>
+                                );
+                              })()}
                               {c.profileNote && (
                                 <span className="inline-flex items-center gap-0.5 text-amber-800 bg-amber-100/90 px-1.5 py-0.2 rounded-full text-[9px] font-semibold shrink-0" title={c.profileNote}>
                                   <Pin size={9} className="fill-amber-700/40" />
@@ -7745,7 +7876,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                           : (lang === 'fr' ? 'Rendez-vous Patient' : 'Cita de Paciente')}
                       </span>
                       <h3 className="text-lg sm:text-xl font-bold font-serif text-slate-900 leading-tight">
-                        {eventDisplayName}
+                        {isOther ? eventDisplayName : (lang === 'fr' ? "Détails de la consultation" : lang === 'es' ? "Detalles de la consulta" : "Consultation details")}
                       </h3>
                     </div>
                   </div>
@@ -7776,19 +7907,21 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                     </div>
                   </div>
 
-                  {/* Appointment Remarks / Notes (Right under Date & Time box) */}
-                  {!isOther && cleanRemark && client && cleanRemark.toLowerCase() !== client.name.toLowerCase() && (
+                  {/* Appointment Remarks / Notes (Priority Section) */}
+                  {!isOther && (
                     <div className="p-3.5 rounded-2xl bg-cyan-50/70 border border-cyan-200/80 space-y-1">
                       <span className="text-[10px] font-bold uppercase tracking-wider text-[#00838f] block">
                         {lang === 'fr' ? 'Remarques du rendez-vous' : lang === 'es' ? 'Notas de la cita' : 'Appointment remarks'}
                       </span>
                       <p className="text-xs sm:text-sm font-semibold text-slate-900">
-                        {cleanRemark}
+                        {cleanRemark && cleanRemark.toLowerCase() !== (client?.name || '').toLowerCase() 
+                          ? cleanRemark 
+                          : (lang === 'fr' ? 'Aucune remarque spécifiée' : lang === 'es' ? 'Sin notas' : 'No remarks')}
                       </p>
                     </div>
                   )}
 
-                  {/* Blocked Slot Remark / Description (Prioritized) */}
+                  {/* Blocked Slot Remark / Description (Prioritized for non-appointments) */}
                   {isOther && (
                     <div className="p-4 rounded-2xl bg-amber-50 border border-amber-200 space-y-1">
                       <span className="text-[10px] font-bold uppercase tracking-wider text-amber-800 block">
@@ -7833,17 +7966,17 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                             <CreditCard size={14} className={paidInvoice ? 'text-[#009cb2] shrink-0' : pendingInvoice ? 'text-amber-700 shrink-0' : 'text-slate-400 shrink-0'} />
                           )}
                           <span className="truncate text-[11px] font-semibold">
-                            {isBonoDeducted
-                              ? (
-                                bonoPurchaseInvoice
-                                  ? (lang === 'fr' ? `Réglé avec Bono (Achat ${bonoPurchaseInvoice.amount} €)` : lang === 'es' ? `Pagado con Bono (${bonoPurchaseInvoice.amount} €)` : `Settled with Bono (${bonoPurchaseInvoice.amount} €)`)
-                                  : (lang === 'fr' ? 'Réglé avec Bono' : lang === 'es' ? 'Pagado con Bono' : 'Settled with Bono')
-                                )
-                              : paidInvoice
-                              ? `${paidInvoice.amount} € (${lang === 'fr' ? 'Payé' : lang === 'es' ? 'Pagado' : 'Paid'})`
-                              : pendingInvoice
-                              ? `${pendingInvoice.amount} € (${lang === 'fr' ? 'En attente' : lang === 'es' ? 'Pendiente' : 'Pending'})`
-                              : (lang === 'fr' ? 'Non facturé' : lang === 'es' ? 'No facturado' : 'Unbilled')}
+                              {isBonoDeducted
+                                ? (
+                                  bonoPurchaseInvoice
+                                    ? (lang === 'fr' ? `Réglé (Achat ${bonoPurchaseInvoice.amount} €)` : lang === 'es' ? `Liquidado (Compra ${bonoPurchaseInvoice.amount} €)` : `Settled (Purchase ${bonoPurchaseInvoice.amount} €)`)
+                                    : (lang === 'fr' ? 'Réglé avec Bono' : lang === 'es' ? 'Liquidado con Bono' : 'Settled with Bono')
+                                  )
+                                : paidInvoice
+                                ? (lang === 'fr' ? 'Réglé' : lang === 'es' ? 'Liquidado' : 'Settled')
+                                : pendingInvoice
+                                ? `${pendingInvoice.amount} € (${lang === 'fr' ? 'En attente' : lang === 'es' ? 'Pendiente' : 'Pending'})`
+                                : (lang === 'fr' ? 'Non réglé' : lang === 'es' ? 'No liquidado' : 'Unbilled')}
                           </span>
                         </div>
                       </div>

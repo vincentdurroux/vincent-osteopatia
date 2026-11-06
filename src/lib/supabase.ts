@@ -911,6 +911,19 @@ GRANT ALL ON public.client_notes TO anon, authenticated;
 GRANT ALL ON public.invoices TO anon, authenticated;
 GRANT ALL ON public.calendar_events TO anon, authenticated;
 GRANT ALL ON public.google_reviews TO anon, authenticated;
+
+-- 8. ACTIVATION DU TEMPS RÉEL (SUPABASE REALTIME)
+ALTER PUBLICATION supabase_realtime ADD TABLE public.clients;
+ALTER PUBLICATION supabase_realtime ADD TABLE public.client_notes;
+ALTER PUBLICATION supabase_realtime ADD TABLE public.invoices;
+ALTER PUBLICATION supabase_realtime ADD TABLE public.calendar_events;
+ALTER PUBLICATION supabase_realtime ADD TABLE public.google_reviews;
+
+ALTER TABLE public.clients REPLICA IDENTITY FULL;
+ALTER TABLE public.client_notes REPLICA IDENTITY FULL;
+ALTER TABLE public.invoices REPLICA IDENTITY FULL;
+ALTER TABLE public.calendar_events REPLICA IDENTITY FULL;
+ALTER TABLE public.google_reviews REPLICA IDENTITY FULL;
 `;
 
 // ==========================================
