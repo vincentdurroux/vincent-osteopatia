@@ -5257,18 +5257,19 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                 <button 
                   onClick={loadData}
                   disabled={isSyncing}
-                  className="flex items-center gap-1.5 px-3 py-2 bg-white border border-slate-200 hover:bg-slate-50 rounded-2xl transition-all text-xs font-bold text-slate-700 disabled:opacity-50 shadow-2xs cursor-pointer"
+                  className="flex items-center gap-1.5 px-3 py-2 bg-white border border-slate-200 hover:bg-slate-50 rounded-2xl transition-all text-xs font-bold text-slate-700 disabled:opacity-50 shadow-2xs cursor-pointer whitespace-nowrap shrink-0"
                   title={lang === 'fr' ? "Actualiser l'agenda" : "Refresh"}
                 >
-                  <RefreshCw size={14} className={isSyncing ? "animate-spin text-[#0e9f8e]" : ""} />
-                  <span>{lang === 'fr' ? "Actualiser" : "Refresh"}</span>
+                  <RefreshCw size={14} className={`shrink-0 ${isSyncing ? "animate-spin text-[#0e9f8e]" : ""}`} />
+                  <span className="whitespace-nowrap">{lang === 'fr' ? "Actualiser" : "Refresh"}</span>
                 </button>
 
                 <button
                   onClick={() => setIsAddEventOpen(true)}
-                  className="flex items-center gap-2 px-4 py-2.5 bg-[#0e9f8e] hover:bg-[#0c8a7b] text-white rounded-2xl text-xs font-bold uppercase tracking-wider transition-all shadow-md shadow-[#0e9f8e]/20 cursor-pointer"
+                  className="flex items-center gap-2 px-4 py-2.5 bg-[#0e9f8e] hover:bg-[#0c8a7b] text-white rounded-2xl text-xs font-bold uppercase tracking-wider transition-all shadow-md shadow-[#0e9f8e]/20 cursor-pointer whitespace-nowrap shrink-0"
                 >
-                  <Plus size={16} /> {lang === 'fr' ? "Nouveau RDV" : lang === 'es' ? "Nueva Cita" : "New Appointment"}
+                  <Plus size={16} className="shrink-0" />
+                  <span className="whitespace-nowrap">{lang === 'fr' ? "Nouveau RDV" : lang === 'es' ? "Nueva Cita" : "New Appointment"}</span>
                 </button>
               </div>
             </div>
@@ -6144,9 +6145,10 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
 
               <button
                 onClick={() => setIsAddInvoiceOpen(true)}
-                className="flex items-center gap-2 px-4 py-2.5 bg-primary text-white rounded-2xl text-xs font-bold uppercase tracking-wider hover:bg-primary/95 transition-all shadow-md shadow-primary/10"
+                className="w-full sm:w-auto flex items-center justify-center gap-2 px-4 py-2.5 bg-primary text-white rounded-2xl text-xs font-bold uppercase tracking-wider hover:bg-primary/95 transition-all shadow-md shadow-primary/10 whitespace-nowrap cursor-pointer"
               >
-                <Plus size={16} /> {lang === 'fr' ? "Émettre une Facture" : lang === 'es' ? "Emitir una Factura" : "Issue an Invoice"}
+                <Plus size={16} className="shrink-0" />
+                <span className="whitespace-nowrap">{lang === 'fr' ? "Émettre une Facture" : lang === 'es' ? "Emitir una Factura" : "Issue an Invoice"}</span>
               </button>
             </div>
 
@@ -6984,14 +6986,14 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
       <AnimatePresence>
         {isAddClientOpen && (
           <div 
-            className="fixed inset-0 z-[100] flex items-start justify-center p-4 bg-black/40 backdrop-blur-sm overflow-y-auto"
+            className="fixed inset-0 z-[100] flex items-start sm:items-center justify-center p-3 sm:p-4 bg-black/40 backdrop-blur-sm overflow-y-auto"
             onClick={() => setIsAddClientOpen(false)}
           >
             <motion.div
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="relative w-full max-w-md bg-white rounded-3xl shadow-2xl p-8 z-10 border border-black/5 my-auto"
+              className="relative w-full max-w-md max-h-[92dvh] overflow-y-auto bg-white rounded-3xl shadow-2xl p-5 sm:p-8 z-10 border border-black/5 my-auto"
               onClick={(e) => e.stopPropagation()}
             >
               <h3 className="text-xl font-serif font-bold text-primary mb-6">
@@ -7090,17 +7092,17 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
 
 
 
-                <div className="flex gap-3 pt-4">
+                <div className="flex flex-col-reverse sm:flex-row gap-2.5 sm:gap-3 pt-4">
                   <button
                     type="button"
                     onClick={() => setIsAddClientOpen(false)}
-                    className="flex-1 py-3 bg-secondary text-gray-600 rounded-2xl text-xs font-bold uppercase tracking-wider hover:bg-black/5 transition-all"
+                    className="w-full sm:flex-1 py-3 bg-secondary text-gray-600 rounded-2xl text-xs font-bold uppercase tracking-wider hover:bg-black/5 transition-all text-center cursor-pointer"
                   >
                     {lang === 'fr' ? 'Annuler' : lang === 'es' ? 'Cancelar' : 'Cancel'}
                   </button>
                   <button
                     type="submit"
-                    className="flex-1 py-3 bg-primary text-white rounded-2xl text-xs font-bold uppercase tracking-wider hover:bg-primary/95 transition-all shadow-md"
+                    className="w-full sm:flex-1 py-3 px-4 bg-primary text-white rounded-2xl text-xs font-bold uppercase tracking-wider hover:bg-primary/95 transition-all shadow-md text-center whitespace-nowrap cursor-pointer"
                   >
                     {lang === 'fr' ? 'Créer la fiche' : lang === 'es' ? 'Crear ficha' : 'Create profile'}
                   </button>
@@ -7115,18 +7117,18 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
       <AnimatePresence>
         {selectedDayModalDate && (
           <div 
-            className="fixed inset-0 z-[100] flex items-start justify-center p-4 bg-black/50 backdrop-blur-sm overflow-y-auto"
+            className="fixed inset-0 z-[100] flex items-start sm:items-center justify-center p-3 sm:p-4 bg-black/50 backdrop-blur-sm overflow-y-auto"
             onClick={() => setSelectedDayModalDate(null)}
           >
             <motion.div
               initial={{ opacity: 0, scale: 0.95, y: 10 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95, y: 10 }}
-              className="relative w-full max-w-xl bg-white rounded-3xl shadow-2xl p-6 sm:p-8 z-10 border border-black/5 flex flex-col my-auto"
+              className="relative w-full max-w-xl max-h-[92dvh] overflow-y-auto bg-white rounded-3xl shadow-2xl p-4 sm:p-8 z-10 border border-black/5 flex flex-col my-auto"
               onClick={(e) => e.stopPropagation()}
             >
               {/* Header */}
-              <div className="flex items-start justify-between pb-4 border-b border-black/5">
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pb-4 border-b border-black/5">
                 <div className="flex items-center gap-3">
                   <div className="w-10 h-10 rounded-2xl bg-primary/10 text-primary flex items-center justify-center shrink-0">
                     <CalendarIcon size={20} />
@@ -7170,7 +7172,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2">
+                <div className="flex items-center justify-between sm:justify-end gap-2 w-full sm:w-auto">
                   <button
                     onClick={() => {
                       setNewEvent(prev => ({
@@ -7181,15 +7183,15 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                       }));
                       setIsAddEventOpen(true);
                     }}
-                    className="flex items-center gap-1.5 px-3 py-2 bg-primary text-white rounded-xl text-xs font-bold hover:bg-primary/95 transition-all shadow-sm"
+                    className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 px-3.5 py-2 bg-primary text-white rounded-xl text-xs font-bold hover:bg-primary/95 transition-all shadow-sm whitespace-nowrap cursor-pointer"
                   >
-                    <Plus size={14} />
+                    <Plus size={14} className="shrink-0" />
                     <span>{lang === 'fr' ? 'Nouveau RDV' : lang === 'es' ? 'Nueva Cita' : 'New Appointment'}</span>
                   </button>
 
                   <button
                     onClick={() => setSelectedDayModalDate(null)}
-                    className="p-2 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-xl transition-all"
+                    className="p-2 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-xl transition-all cursor-pointer shrink-0"
                   >
                     <X size={18} />
                   </button>
@@ -7334,14 +7336,14 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
       <AnimatePresence>
         {isAddEventOpen && (
           <div 
-            className="fixed inset-0 z-[100] flex items-start justify-center p-4 bg-black/40 backdrop-blur-sm overflow-y-auto"
+            className="fixed inset-0 z-[100] flex items-start sm:items-center justify-center p-3 sm:p-4 bg-black/40 backdrop-blur-sm overflow-y-auto"
             onClick={() => setIsAddEventOpen(false)}
           >
             <motion.div
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="relative w-full max-w-lg bg-white rounded-3xl shadow-2xl p-6 sm:p-8 z-10 border border-black/5 my-auto"
+              className="relative w-full max-w-lg max-h-[92dvh] overflow-y-auto bg-white rounded-3xl shadow-2xl p-5 sm:p-8 z-10 border border-black/5 my-auto"
               onClick={(e) => e.stopPropagation()}
             >
               <div className="flex items-center justify-between mb-5">
@@ -7634,7 +7636,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                   />
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
                   <div>
                     <label className="text-[10px] uppercase tracking-wider font-bold text-gray-400 block mb-1">
                       {lang === 'fr' ? 'Date' : lang === 'es' ? 'Fecha' : 'Date'} *
@@ -7752,20 +7754,20 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                   ></textarea>
                 </div>
 
-                <div className="flex gap-3 pt-4">
+                <div className="flex flex-col-reverse sm:flex-row gap-2.5 sm:gap-3 pt-4">
                   <button
                     type="button"
                     onClick={() => setIsAddEventOpen(false)}
-                    className="flex-1 py-3 bg-secondary text-gray-600 rounded-2xl text-xs font-bold uppercase tracking-wider hover:bg-black/5 transition-all"
+                    className="w-full sm:flex-1 py-3 bg-secondary text-gray-600 rounded-2xl text-xs font-bold uppercase tracking-wider hover:bg-black/5 transition-all text-center cursor-pointer"
                   >
                     {lang === 'fr' ? 'Annuler' : lang === 'es' ? 'Cancelar' : 'Cancel'}
                   </button>
                   <button
                     type="submit"
-                    className="flex-1 py-3 bg-primary hover:bg-primary/95 text-white rounded-2xl text-xs font-bold uppercase tracking-wider transition-all shadow-md flex items-center justify-center gap-1.5"
+                    className="w-full sm:flex-1 py-3 px-4 bg-primary hover:bg-primary/95 text-white rounded-2xl text-xs font-bold uppercase tracking-wider transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer whitespace-nowrap"
                   >
-                    <CalendarIcon size={14} />
-                    <span>
+                    <CalendarIcon size={14} className="shrink-0" />
+                    <span className="whitespace-nowrap">
                       {newEvent.eventType === 'appointment'
                         ? (lang === 'fr' ? 'Créer le rendez-vous' : lang === 'es' ? 'Crear cita' : 'Create appointment')
                         : (lang === 'fr' ? 'Enregistrer le créneau' : lang === 'es' ? 'Guardar horario' : 'Save slot')}
@@ -7849,14 +7851,14 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
 
           return (
             <div 
-              className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs overflow-y-auto"
+              className="fixed inset-0 z-[110] flex items-start sm:items-center justify-center p-3 sm:p-4 bg-black/50 backdrop-blur-xs overflow-y-auto"
               onClick={() => setSelectedAppointmentForDetails(null)}
             >
               <motion.div
                 initial={{ opacity: 0, scale: 0.95, y: 10 }}
                 animate={{ opacity: 1, scale: 1, y: 0 }}
                 exit={{ opacity: 0, scale: 0.95, y: 10 }}
-                className="relative w-full max-w-lg bg-white rounded-3xl shadow-2xl p-6 sm:p-7 z-10 border border-slate-200 text-left my-auto"
+                className="relative w-full max-w-lg max-h-[92dvh] overflow-y-auto bg-white rounded-3xl shadow-2xl p-5 sm:p-7 z-10 border border-slate-200 text-left my-auto"
                 onClick={(e) => e.stopPropagation()}
               >
                 {/* Header */}
@@ -8015,14 +8017,14 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                         },
                       });
                     }}
-                    className="px-3.5 py-2.5 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                    className="w-full sm:w-auto px-3.5 py-2.5 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap"
                     title={lang === 'fr' ? "Supprimer ce rendez-vous" : "Delete appointment"}
                   >
-                    <Trash2 size={14} />
+                    <Trash2 size={14} className="shrink-0" />
                     <span>{lang === 'fr' ? "Supprimer le RDV" : "Eliminar cita"}</span>
                   </button>
 
-                  <div className="flex items-center gap-2 justify-end flex-1">
+                  <div className="flex items-center gap-2 justify-end w-full sm:w-auto">
                     {/* Edit button */}
                     <button
                       type="button"
@@ -8030,9 +8032,9 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                         setSelectedAppointmentForDetails(null);
                         openEditEventModal(ev);
                       }}
-                      className="px-3.5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                      className="flex-1 sm:flex-initial px-3.5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap"
                     >
-                      <Pencil size={13} />
+                      <Pencil size={13} className="shrink-0" />
                       <span>{lang === 'fr' ? "Modifier" : "Editar"}</span>
                     </button>
 
@@ -8044,11 +8046,11 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                           setSelectedAppointmentForDetails(null);
                           handleGoToNotes(ev);
                         }}
-                        className="px-4 py-2.5 bg-[#009cb2] hover:bg-[#00838f] text-white rounded-xl text-xs font-bold transition-all shadow-xs flex items-center justify-center gap-1.5 cursor-pointer"
+                        className="flex-1 sm:flex-initial px-4 py-2.5 bg-[#009cb2] hover:bg-[#00838f] text-white rounded-xl text-xs font-bold transition-all shadow-xs flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap"
                       >
-                        <FileText size={14} />
+                        <FileText size={14} className="shrink-0" />
                         <span>{lang === 'fr' ? "Fiche & Notes" : "Ficha y Notas"}</span>
-                        <ArrowRight size={13} />
+                        <ArrowRight size={13} className="shrink-0" />
                       </button>
                     )}
                   </div>
@@ -8063,7 +8065,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
       <AnimatePresence>
         {isEditEventOpen && editingEvent && (
           <div 
-            className="fixed inset-0 z-[100] flex items-start justify-center p-4 bg-black/40 backdrop-blur-sm overflow-y-auto"
+            className="fixed inset-0 z-[100] flex items-start sm:items-center justify-center p-3 sm:p-4 bg-black/40 backdrop-blur-sm overflow-y-auto"
             onClick={() => {
               setIsEditEventOpen(false);
               setEditingEvent(null);
@@ -8073,7 +8075,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="relative w-full max-w-lg bg-white rounded-3xl shadow-2xl p-6 sm:p-8 z-10 border border-black/5 my-auto"
+              className="relative w-full max-w-lg max-h-[92dvh] overflow-y-auto bg-white rounded-3xl shadow-2xl p-5 sm:p-8 z-10 border border-black/5 my-auto"
               onClick={(e) => e.stopPropagation()}
             >
               <div className="flex items-center justify-between mb-5">
@@ -8242,7 +8244,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                   />
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
                   <div>
                     <label className="text-[10px] uppercase tracking-wider font-bold text-gray-400 block mb-1">
                       {lang === 'fr' ? 'Date' : lang === 'es' ? 'Fecha' : 'Date'} *
@@ -8350,20 +8352,20 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                   ></textarea>
                 </div>
 
-                <div className="flex gap-3 pt-4">
+                <div className="flex flex-col-reverse sm:flex-row gap-2.5 sm:gap-3 pt-4">
                   <button
                     type="button"
                     onClick={() => {
                       setIsEditEventOpen(false);
                       setEditingEvent(null);
                     }}
-                    className="flex-1 py-3 bg-secondary text-gray-600 rounded-2xl text-xs font-bold uppercase tracking-wider hover:bg-black/5 transition-all"
+                    className="w-full sm:flex-1 py-3 bg-secondary text-gray-600 rounded-2xl text-xs font-bold uppercase tracking-wider hover:bg-black/5 transition-all text-center cursor-pointer"
                   >
                     {lang === 'fr' ? 'Fermer' : lang === 'es' ? 'Cerrar' : 'Close'}
                   </button>
                   <button
                     type="submit"
-                    className="flex-1 py-3 bg-primary text-white rounded-2xl text-xs font-bold uppercase tracking-wider hover:bg-primary/95 transition-all shadow-md"
+                    className="w-full sm:flex-1 py-3 px-4 bg-primary text-white rounded-2xl text-xs font-bold uppercase tracking-wider hover:bg-primary/95 transition-all shadow-md text-center whitespace-nowrap cursor-pointer"
                   >
                     {lang === 'fr' ? 'Enregistrer' : lang === 'es' ? 'Guardar' : 'Save'}
                   </button>
@@ -8377,7 +8379,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
       {/* MODAL: ADD INVOICE */}
       <AnimatePresence>
         {isAddInvoiceOpen && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+          <div className="fixed inset-0 z-[100] flex items-start sm:items-center justify-center p-3 sm:p-4 overflow-y-auto">
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -8389,7 +8391,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="relative w-full max-w-md max-h-[90vh] overflow-y-auto bg-white rounded-3xl shadow-2xl p-8 z-10 border border-black/5 scrollbar-thin scrollbar-thumb-gray-200"
+              className="relative w-full max-w-md max-h-[90dvh] overflow-y-auto bg-white rounded-3xl shadow-2xl p-5 sm:p-8 z-10 border border-black/5 scrollbar-thin scrollbar-thumb-gray-200 my-auto"
             >
               <h3 className="text-xl font-serif font-bold text-primary mb-6">
                 {lang === 'fr' ? 'Nouvelle Facture' : lang === 'es' ? 'Nueva Factura' : 'New Invoice'}
@@ -8528,7 +8530,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                         <label className="text-[10px] uppercase tracking-wider font-bold text-gray-400 block mb-1.5">
                           {translations[lang].admin.billing.pricingPlan}
                         </label>
-                        <div className="grid grid-cols-2 gap-2">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-2.5">
                           <button
                             type="button"
                             onClick={() => {
@@ -8809,25 +8811,27 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                   </div>
                 )}
 
-                <div className="flex gap-3 pt-4">
+                <div className="flex flex-col-reverse sm:flex-row gap-2.5 sm:gap-3 pt-4">
                   <button
                     type="button"
                     onClick={() => setIsAddInvoiceOpen(false)}
-                    className="flex-1 py-3 bg-secondary text-gray-600 rounded-2xl text-xs font-bold uppercase tracking-wider hover:bg-black/5 transition-all"
+                    className="w-full sm:flex-1 py-3 bg-secondary text-gray-600 rounded-2xl text-xs font-bold uppercase tracking-wider hover:bg-black/5 transition-all text-center cursor-pointer"
                   >
                     {lang === 'fr' ? 'Annuler' : lang === 'es' ? 'Cancelar' : 'Cancel'}
                   </button>
                   <button
                     type="submit"
-                    className={`flex-1 py-3 text-white rounded-2xl text-xs font-bold uppercase tracking-wider transition-all shadow-md ${
+                    className={`w-full sm:flex-1 py-3 px-4 text-white rounded-2xl text-xs font-bold uppercase tracking-wider transition-all shadow-md text-center whitespace-nowrap cursor-pointer ${
                       newInvoiceBillingPlan === 'deduct_bono'
                         ? 'bg-emerald-600 hover:bg-emerald-700'
                         : 'bg-primary hover:bg-primary/95'
                     }`}
                   >
-                    {newInvoiceBillingPlan === 'deduct_bono'
-                      ? (translations[lang]?.admin?.billing?.confirmBonoDeductionAction || (lang === 'fr' ? 'Confirmer le décompte' : lang === 'es' ? 'Confirmar descuento' : 'Confirm Deduction'))
-                      : (lang === 'fr' ? 'Générer la facture' : lang === 'es' ? 'Generar factura' : 'Generate invoice')}
+                    <span className="whitespace-nowrap">
+                      {newInvoiceBillingPlan === 'deduct_bono'
+                        ? (translations[lang]?.admin?.billing?.confirmBonoDeductionAction || (lang === 'fr' ? 'Confirmer le décompte' : lang === 'es' ? 'Confirmar descuento' : 'Confirm Deduction'))
+                        : (lang === 'fr' ? 'Générer la facture' : lang === 'es' ? 'Generar factura' : 'Generate invoice')}
+                    </span>
                   </button>
                 </div>
               </form>
@@ -8839,7 +8843,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
       {/* MODAL: EDIT CLIENT */}
       <AnimatePresence>
         {isEditClientOpen && editingClient && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+          <div className="fixed inset-0 z-[100] flex items-start sm:items-center justify-center p-3 sm:p-4 bg-black/40 backdrop-blur-sm overflow-y-auto">
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -8848,13 +8852,13 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                 setIsEditClientOpen(false);
                 setEditingClient(null);
               }}
-              className="absolute inset-0 bg-black/40 backdrop-blur-sm"
+              className="absolute inset-0"
             />
             <motion.div
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="relative w-full max-w-md bg-white rounded-3xl shadow-2xl p-8 z-10 border border-black/5"
+              className="relative w-full max-w-md max-h-[90dvh] overflow-y-auto bg-white rounded-3xl shadow-2xl p-5 sm:p-8 z-10 border border-black/5 my-auto"
             >
               <h3 className="text-xl font-serif font-bold text-primary mb-6">
                 {lang === 'fr' ? 'Modifier le Patient' : lang === 'es' ? 'Editar Paciente' : 'Edit Patient'}
@@ -8965,30 +8969,30 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
 
 
 
-                <div className="flex items-center justify-between pt-4 gap-3">
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between pt-4 gap-2.5">
                   <button
                     type="button"
                     onClick={() => handleDeleteClient(editingClient.id)}
-                    className="px-3 py-3 bg-red-50 hover:bg-red-100 text-red-600 rounded-2xl text-xs font-bold transition-all flex items-center gap-1.5"
+                    className="w-full sm:w-auto px-4 py-2.5 bg-red-50 hover:bg-red-100 text-red-600 rounded-2xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 whitespace-nowrap cursor-pointer order-2 sm:order-1"
                     title={lang === 'fr' ? 'Supprimer ce patient' : 'Delete patient'}
                   >
-                    <Trash2 size={14} />
-                    <span>{lang === 'fr' ? 'Supprimer' : 'Delete'}</span>
+                    <Trash2 size={14} className="shrink-0" />
+                    <span>{lang === 'fr' ? 'Supprimer le patient' : lang === 'es' ? 'Eliminar paciente' : 'Delete patient'}</span>
                   </button>
-                  <div className="flex gap-2 flex-1 justify-end">
+                  <div className="flex items-center gap-2 w-full sm:w-auto justify-end order-1 sm:order-2">
                     <button
                       type="button"
                       onClick={() => {
                         setIsEditClientOpen(false);
                         setEditingClient(null);
                       }}
-                      className="px-4 py-3 bg-secondary text-gray-600 rounded-2xl text-xs font-bold uppercase tracking-wider hover:bg-black/5 transition-all"
+                      className="flex-1 sm:flex-initial px-4 py-2.5 bg-secondary text-gray-600 rounded-2xl text-xs font-bold uppercase tracking-wider hover:bg-black/5 transition-all text-center whitespace-nowrap cursor-pointer"
                     >
                       {lang === 'fr' ? 'Annuler' : lang === 'es' ? 'Cancelar' : 'Cancel'}
                     </button>
                     <button
                       type="submit"
-                      className="px-5 py-3 bg-primary text-white rounded-2xl text-xs font-bold uppercase tracking-wider hover:bg-primary/95 transition-all shadow-md"
+                      className="flex-1 sm:flex-initial px-5 py-2.5 bg-primary text-white rounded-2xl text-xs font-bold uppercase tracking-wider hover:bg-primary/95 transition-all shadow-md text-center whitespace-nowrap cursor-pointer"
                     >
                       {lang === 'fr' ? 'Enregistrer' : lang === 'es' ? 'Guardar' : 'Save'}
                     </button>
@@ -9003,7 +9007,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
       {/* MODAL: EDIT INVOICE */}
       <AnimatePresence>
         {isEditInvoiceOpen && editingInvoice && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+          <div className="fixed inset-0 z-[100] flex items-start sm:items-center justify-center p-3 sm:p-4 bg-black/40 backdrop-blur-sm overflow-y-auto">
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -9012,13 +9016,13 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                 setIsEditInvoiceOpen(false);
                 setEditingInvoice(null);
               }}
-              className="absolute inset-0 bg-black/40 backdrop-blur-sm"
+              className="absolute inset-0"
             />
             <motion.div
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="relative w-full max-w-md bg-white rounded-3xl shadow-2xl p-8 z-10 border border-black/5"
+              className="relative w-full max-w-md max-h-[90dvh] overflow-y-auto bg-white rounded-3xl shadow-2xl p-5 sm:p-8 z-10 border border-black/5 my-auto"
             >
               <h3 className="text-xl font-serif font-bold text-primary mb-6">
                 {editingInvoice.isBonoRedemption && editingInvoice.amount === 0 
@@ -9234,30 +9238,30 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                   </div>
                 )}
 
-                <div className="flex items-center justify-between pt-4 gap-3">
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between pt-4 gap-2.5">
                   <button
                     type="button"
                     onClick={() => handleDeleteInvoice(editingInvoice.id)}
-                    className="px-3 py-3 bg-red-50 hover:bg-red-100 text-red-600 rounded-2xl text-xs font-bold transition-all flex items-center gap-1.5"
+                    className="w-full sm:w-auto px-4 py-2.5 bg-red-50 hover:bg-red-100 text-red-600 rounded-2xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 whitespace-nowrap cursor-pointer order-2 sm:order-1"
                     title={lang === 'fr' ? 'Supprimer cette facture' : 'Delete invoice'}
                   >
-                    <Trash2 size={14} />
-                    <span>{lang === 'fr' ? 'Supprimer' : 'Delete'}</span>
+                    <Trash2 size={14} className="shrink-0" />
+                    <span>{lang === 'fr' ? 'Supprimer la facture' : lang === 'es' ? 'Eliminar factura' : 'Delete invoice'}</span>
                   </button>
-                  <div className="flex gap-2 flex-1 justify-end">
+                  <div className="flex items-center gap-2 w-full sm:w-auto justify-end order-1 sm:order-2">
                     <button
                       type="button"
                       onClick={() => {
                         setIsEditInvoiceOpen(false);
                         setEditingInvoice(null);
                       }}
-                      className="px-4 py-3 bg-secondary text-gray-600 rounded-2xl text-xs font-bold uppercase tracking-wider hover:bg-black/5 transition-all"
+                      className="flex-1 sm:flex-initial px-4 py-2.5 bg-secondary text-gray-600 rounded-2xl text-xs font-bold uppercase tracking-wider hover:bg-black/5 transition-all text-center whitespace-nowrap cursor-pointer"
                     >
                       {lang === 'fr' ? 'Annuler' : lang === 'es' ? 'Cancelar' : 'Cancel'}
                     </button>
                     <button
                       type="submit"
-                      className="px-5 py-3 bg-primary text-white rounded-2xl text-xs font-bold uppercase tracking-wider hover:bg-primary/95 transition-all shadow-md"
+                      className="flex-1 sm:flex-initial px-5 py-2.5 bg-primary text-white rounded-2xl text-xs font-bold uppercase tracking-wider hover:bg-primary/95 transition-all shadow-md text-center whitespace-nowrap cursor-pointer"
                     >
                       {lang === 'fr' ? 'Enregistrer' : lang === 'es' ? 'Guardar' : 'Save'}
                     </button>
@@ -9432,7 +9436,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
       {/* MODAL: PRINTABLE RECEIPT / MUTUELLE REÇU */}
       <AnimatePresence>
         {selectedInvoiceForPrint && (
-          <div className="fixed inset-0 z-[100] flex items-start justify-center p-4 bg-black/60 backdrop-blur-sm overflow-y-auto print:bg-white print:p-0 print:block print:static print:overflow-visible print-modal-container">
+          <div className="fixed inset-0 z-[100] flex items-start justify-center p-3 sm:p-4 md:p-6 bg-black/60 backdrop-blur-sm overflow-y-auto print:bg-white print:p-0 print:block print:static print:overflow-visible print-modal-container">
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -9445,28 +9449,32 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: 20 }}
-              className="relative w-full max-w-2xl bg-white rounded-3xl shadow-2xl p-8 sm:p-12 z-10 border border-black/5 my-8 print:m-0 print:p-0 print:max-w-none print:shadow-none print:border-none print:bg-white"
+              className="relative w-full max-w-2xl bg-white rounded-3xl shadow-2xl p-4 sm:p-8 md:p-12 z-10 border border-black/5 my-4 sm:my-8 print:m-0 print:p-0 print:max-w-none print:shadow-none print:border-none print:bg-white"
             >
               {/* Close and Print Actions */}
-              <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4 mb-8 pb-4 border-b border-black/5 print:hidden">
+              <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3 sm:gap-4 mb-6 sm:mb-8 pb-4 border-b border-black/5 print:hidden">
                 <div>
-                  <h4 className="text-sm font-bold uppercase tracking-wider text-primary">Vista Previa de la Factura</h4>
-                  <p className="text-[11px] text-gray-500 mt-0.5">Recibo oficial de honorarios en español</p>
+                  <h4 className="text-sm font-bold uppercase tracking-wider text-primary">
+                    {lang === 'fr' ? 'Aperçu de la facture' : lang === 'es' ? 'Vista Previa de la Factura' : 'Invoice Preview'}
+                  </h4>
+                  <p className="text-[11px] text-gray-500 mt-0.5">
+                    {lang === 'fr' ? 'Reçu officiel d\'honoraires' : lang === 'es' ? 'Recibo oficial de honorarios en español' : 'Official fee receipt'}
+                  </p>
                 </div>
 
-                <div className="flex items-center gap-3">
+                <div className="flex flex-wrap sm:flex-nowrap items-center gap-2 sm:gap-3 w-full sm:w-auto">
                   <button
                     onClick={handlePrintInvoice}
-                    className="flex items-center gap-2 px-4 py-2 bg-primary text-white rounded-xl text-xs font-bold uppercase tracking-wider hover:bg-primary/95 transition-all shadow-sm active:scale-95"
+                    className="flex-1 sm:flex-initial flex items-center justify-center gap-2 px-3.5 sm:px-4 py-2.5 sm:py-2 bg-primary text-white rounded-xl text-xs font-bold uppercase tracking-wider hover:bg-primary/95 transition-all shadow-sm active:scale-95 whitespace-nowrap cursor-pointer"
                   >
-                    <Printer size={14} /> 
-                    Imprimir Factura
+                    <Printer size={14} className="shrink-0" /> 
+                    <span>{lang === 'fr' ? 'Imprimer la facture' : lang === 'es' ? 'Imprimir Factura' : 'Print Invoice'}</span>
                   </button>
                   <button
                     onClick={() => setSelectedInvoiceForPrint(null)}
-                    className="px-4 py-2 bg-secondary text-gray-600 rounded-xl text-xs font-bold uppercase tracking-wider hover:bg-black/5 transition-all shadow-sm active:scale-95"
+                    className="px-4 py-2.5 sm:py-2 bg-secondary text-gray-600 rounded-xl text-xs font-bold uppercase tracking-wider hover:bg-black/5 transition-all shadow-sm active:scale-95 text-center whitespace-nowrap cursor-pointer"
                   >
-                    Cerrar
+                    {lang === 'fr' ? 'Fermer' : lang === 'es' ? 'Cerrar' : 'Close'}
                   </button>
                 </div>
               </div>
@@ -9507,7 +9515,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                     <p className="text-gray-800 text-xs font-bold tracking-wide mt-0.5">NIE : Z1503310N</p>
                     <p className="text-gray-500 text-xs mt-0.5">Osteo Valencia</p>
                     <p className="text-gray-400 text-[10px] mt-2">Calle General Pastor 25, 46183 L'Eliana, Valencia</p>
-                    <p className="text-gray-400 text-[10px]">Tél : +34 614 159 462</p>
+                    <p className="text-gray-400 text-[10px]">{lang === 'fr' ? 'Tél' : lang === 'es' ? 'Tel' : 'Phone'} : +34 614 159 462</p>
                   </div>
                   
                   <div className="text-right">
@@ -9534,49 +9542,51 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                 </div>
 
                 {/* Invoice Table Grid */}
-                <table className="w-full border-collapse">
-                  <thead>
-                    <tr className="border-b-2 border-primary/20 text-left text-[10px] font-bold uppercase text-gray-400">
-                      <th className="py-2.5">Descripción de los servicios</th>
-                      <th className="py-2.5 text-center">Unidades</th>
-                      <th className="py-2.5 text-center">IVA</th>
-                      <th className="py-2.5 text-right">Importe Unitario</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr className="border-b border-black/5 text-gray-700">
-                      <td className="py-4">
-                        <p className="font-bold">
-                          {normalizeInvoiceDescription(formatLocalizedBonoText(selectedInvoiceForPrint.description, lang))}
-                        </p>
-                      </td>
-                      <td className="py-4 text-center font-medium">
-                        {selectedInvoiceForPrint.quantity || 1}
-                      </td>
-                      <td className="py-4 text-center">21%</td>
-                      <td className="py-4 text-right font-bold">
-                        {selectedInvoiceForPrint.originalAmount ? `${selectedInvoiceForPrint.originalAmount} €` : `${selectedInvoiceForPrint.amount} €`}
-                      </td>
-                    </tr>
-                    {selectedInvoiceForPrint.discountAmount && selectedInvoiceForPrint.discountAmount > 0 ? (
-                      <tr className="border-b border-black/5 text-emerald-800 bg-emerald-50/50">
-                        <td className="py-3">
-                          <p className="font-semibold text-xs flex items-center gap-1.5">
-                            <span className="px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 text-[9px] font-bold uppercase">
-                              {selectedInvoiceForPrint.discountType === 'bono' ? 'Bono' : 'Descuento'}
-                            </span>
-                            {formatLocalizedBonoText(selectedInvoiceForPrint.discountLabel, lang) || (selectedInvoiceForPrint.discountType === 'bono' ? 'Bono aplicado' : 'Descuento aplicado')}
+                <div className="overflow-x-auto -mx-1 sm:mx-0">
+                  <table className="w-full border-collapse min-w-[340px]">
+                    <thead>
+                      <tr className="border-b-2 border-primary/20 text-left text-[10px] font-bold uppercase text-gray-400">
+                        <th className="py-2.5">Descripción de los servicios</th>
+                        <th className="py-2.5 text-center">Unidades</th>
+                        <th className="py-2.5 text-center">IVA</th>
+                        <th className="py-2.5 text-right">Importe Unitario</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr className="border-b border-black/5 text-gray-700">
+                        <td className="py-4">
+                          <p className="font-bold">
+                            {normalizeInvoiceDescription(formatLocalizedBonoText(selectedInvoiceForPrint.description, lang))}
                           </p>
                         </td>
-                        <td className="py-3 text-center text-[10px] text-emerald-700 font-medium">-</td>
-                        <td className="py-3 text-center text-[10px] text-emerald-700 font-medium">-</td>
-                        <td className="py-3 text-right font-bold text-emerald-700">
-                          -{selectedInvoiceForPrint.discountAmount} €
+                        <td className="py-4 text-center font-medium">
+                          {selectedInvoiceForPrint.quantity || 1}
+                        </td>
+                        <td className="py-4 text-center">21%</td>
+                        <td className="py-4 text-right font-bold">
+                          {selectedInvoiceForPrint.originalAmount ? `${selectedInvoiceForPrint.originalAmount} €` : `${selectedInvoiceForPrint.amount} €`}
                         </td>
                       </tr>
-                    ) : null}
-                  </tbody>
-                </table>
+                      {selectedInvoiceForPrint.discountAmount && selectedInvoiceForPrint.discountAmount > 0 ? (
+                        <tr className="border-b border-black/5 text-emerald-800 bg-emerald-50/50">
+                          <td className="py-3">
+                            <p className="font-semibold text-xs flex items-center gap-1.5">
+                              <span className="px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 text-[9px] font-bold uppercase">
+                                {selectedInvoiceForPrint.discountType === 'bono' ? 'Bono' : 'Descuento'}
+                              </span>
+                              {formatLocalizedBonoText(selectedInvoiceForPrint.discountLabel, lang) || (selectedInvoiceForPrint.discountType === 'bono' ? 'Bono aplicado' : 'Descuento aplicado')}
+                            </p>
+                          </td>
+                          <td className="py-3 text-center text-[10px] text-emerald-700 font-medium">-</td>
+                          <td className="py-3 text-center text-[10px] text-emerald-700 font-medium">-</td>
+                          <td className="py-3 text-right font-bold text-emerald-700">
+                            -{selectedInvoiceForPrint.discountAmount} €
+                          </td>
+                        </tr>
+                      ) : null}
+                    </tbody>
+                  </table>
+                </div>
 
                 {/* Total Recap */}
                 <div className="flex justify-end pt-4">
@@ -9641,7 +9651,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
 
         {/* ACCOUNTING PERIOD RECAP PRINT MODAL */}
         {selectedRecapForPrint && (
-          <div className="fixed inset-0 z-[100] flex items-start justify-center p-4 bg-black/60 backdrop-blur-sm overflow-y-auto animate-fadeIn print:bg-white print:p-0 print:block print:static print:overflow-visible print-modal-container">
+          <div className="fixed inset-0 z-[100] flex items-start justify-center p-3 sm:p-4 md:p-6 bg-black/60 backdrop-blur-sm overflow-y-auto animate-fadeIn print:bg-white print:p-0 print:block print:static print:overflow-visible print-modal-container">
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -9654,30 +9664,30 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: 20 }}
-              className="relative w-full max-w-2xl bg-white rounded-3xl shadow-2xl p-8 sm:p-12 z-10 border border-black/5 my-8 print:m-0 print:p-0 print:max-w-none print:shadow-none print:border-none print:bg-white"
+              className="relative w-full max-w-2xl bg-white rounded-3xl shadow-2xl p-4 sm:p-8 md:p-12 z-10 border border-black/5 my-4 sm:my-8 print:m-0 print:p-0 print:max-w-none print:shadow-none print:border-none print:bg-white"
             >
               {/* Actions Bar */}
-              <div className="flex justify-between items-center mb-8 pb-4 border-b border-black/5 print:hidden">
+              <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3 sm:gap-4 mb-6 sm:mb-8 pb-4 border-b border-black/5 print:hidden">
                 <div>
                   <h4 className="text-sm font-bold uppercase tracking-wider text-primary">
-                    Resumen Contable
+                    {lang === 'fr' ? 'Récapitulatif comptable' : lang === 'es' ? 'Resumen Contable' : 'Accounting Summary'}
                   </h4>
-                  <p className="text-[11px] text-gray-500 mt-1">
+                  <p className="text-[11px] text-gray-500 mt-0.5">
                     {formatRecapSubtitle(selectedRecapForPrint)}
                   </p>
                 </div>
 
-                <div className="flex items-center gap-3">
+                <div className="flex flex-wrap sm:flex-nowrap items-center gap-2 sm:gap-3 w-full sm:w-auto">
                   <button
                     onClick={handlePrintRecap}
-                    className="flex items-center gap-2 px-4 py-2 bg-primary text-white rounded-xl text-xs font-bold uppercase tracking-wider hover:bg-primary/95 transition-all shadow-sm active:scale-95"
+                    className="flex-1 sm:flex-initial flex items-center justify-center gap-2 px-3.5 sm:px-4 py-2.5 sm:py-2 bg-primary text-white rounded-xl text-xs font-bold uppercase tracking-wider hover:bg-primary/95 transition-all shadow-sm active:scale-95 whitespace-nowrap cursor-pointer"
                   >
-                    <Printer size={14} /> 
-                    {lang === 'fr' ? 'Imprimer le récapitulatif' : lang === 'es' ? 'Imprimir resumen' : 'Print summary'}
+                    <Printer size={14} className="shrink-0" /> 
+                    <span>{lang === 'fr' ? 'Imprimer le récapitulatif' : lang === 'es' ? 'Imprimir resumen' : 'Print summary'}</span>
                   </button>
                   <button
                     onClick={() => setSelectedRecapForPrint(null)}
-                    className="px-4 py-2 bg-secondary text-gray-600 rounded-xl text-xs font-bold uppercase tracking-wider hover:bg-black/5 transition-all shadow-sm active:scale-95"
+                    className="px-4 py-2.5 sm:py-2 bg-secondary text-gray-600 rounded-xl text-xs font-bold uppercase tracking-wider hover:bg-black/5 transition-all shadow-sm active:scale-95 text-center whitespace-nowrap cursor-pointer"
                   >
                     {lang === 'fr' ? 'Fermer' : lang === 'es' ? 'Cerrar' : 'Close'}
                   </button>
@@ -9697,7 +9707,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                     <p className="text-gray-800 text-xs font-bold tracking-wide mt-0.5">NIE : Z1503310N</p>
                     <p className="text-gray-500 mt-1 font-medium">Osteo Valencia</p>
                     <p className="text-gray-400 text-[10px] mt-1">Calle General Pastor 25, 46183 L'Eliana, Valencia</p>
-                    <p className="text-gray-400 text-[10px]">Tél : +34 614 159 462</p>
+                    <p className="text-gray-400 text-[10px]">{lang === 'fr' ? 'Tél' : lang === 'es' ? 'Tel' : 'Phone'} : +34 614 159 462</p>
                   </div>
                   <div className="text-right">
                     <span className="text-[10px] uppercase font-bold tracking-widest text-primary/60 block">
@@ -9714,7 +9724,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                 </div>
 
                 {/* KPI Metrics */}
-                <div className="grid grid-cols-4 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 sm:gap-3">
                   <div className="bg-[#f4f4ec] p-3.5 rounded-2xl border border-black/5">
                     <p className="text-[9px] uppercase font-bold text-emerald-800">
                       {lang === 'fr' ? 'Chiffre d\'affaires Encaissé' : lang === 'es' ? 'Total Cobrado' : 'Total Collected'}
@@ -9748,17 +9758,6 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                       {selectedRecapForPrint.count} {lang === 'fr' ? 'consultations' : lang === 'es' ? 'consultas' : 'consultations'}
                     </p>
                   </div>
-                  <div className="bg-[#f4f4ec] p-3.5 rounded-2xl border border-black/5">
-                    <p className="text-[9px] uppercase font-bold text-gray-400">
-                      {lang === 'fr' ? 'Ticket Moyen' : lang === 'es' ? 'Ticket Promedio' : 'Average Ticket'}
-                    </p>
-                    <p className="text-lg font-bold font-serif text-primary mt-1">
-                      {selectedRecapForPrint.count > 0 ? Math.round(selectedRecapForPrint.total / selectedRecapForPrint.count) : 0} €
-                    </p>
-                    <p className="text-[8px] text-gray-400 font-medium mt-0.5">
-                      {lang === 'fr' ? 'par séance' : lang === 'es' ? 'por sesión' : 'per session'}
-                    </p>
-                  </div>
                 </div>
 
                 {/* Detailed Invoices List */}
@@ -9766,68 +9765,74 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                   <h3 className="text-xs font-bold uppercase tracking-wider text-primary">
                     {lang === 'fr' ? `Détail des factures (${selectedRecapForPrint.invoices.length})` : lang === 'es' ? `Detalle de facturas (${selectedRecapForPrint.invoices.length})` : `Invoice details (${selectedRecapForPrint.invoices.length})`}
                   </h3>
-                  <table className="w-full border-collapse text-xs">
-                    <thead>
-                      <tr className="border-b-2 border-primary/20 text-left font-bold text-gray-400 uppercase text-[9px] tracking-wider">
-                        <th className="py-2">{lang === 'fr' ? 'N° Facture' : lang === 'es' ? 'Factura' : 'Invoice'}</th>
-                        <th className="py-2">{lang === 'fr' ? 'Patient' : lang === 'es' ? 'Paciente' : 'Patient'}</th>
-                        <th className="py-2">{lang === 'fr' ? 'Date' : lang === 'es' ? 'Fecha' : 'Date'}</th>
-                        <th className="py-2">{lang === 'fr' ? 'Règlement' : lang === 'es' ? 'Pago' : 'Payment'}</th>
-                        <th className="py-2 text-center">{lang === 'fr' ? 'Statut' : lang === 'es' ? 'Estado' : 'Status'}</th>
-                        <th className="py-2 text-right">{lang === 'fr' ? 'Montant' : lang === 'es' ? 'Importe' : 'Amount'}</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {selectedRecapForPrint.invoices.map((inv, invIdx) => {
-                        const isZeroBono = Boolean((inv.isBonoRedemption && inv.amount === 0) || (inv.amount === 0 && inv.discountType === 'bono'));
-                        return (
-                        <tr key={inv.id ? `${inv.id}-${invIdx}` : `recap-inv-${invIdx}`} className="border-b border-black/5 text-gray-700">
-                          <td className="py-2 font-bold text-primary">
-                            {isZeroBono ? (
-                              <span className="text-[10px] font-bold text-emerald-800 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">
-                                Bono
-                              </span>
-                            ) : (
-                              inv.invoiceNumber
-                            )}
-                          </td>
-                          <td className="py-2 font-medium">{inv.clientName}</td>
-                          <td className="py-2 text-gray-500">{new Date(inv.date).toLocaleDateString(lang === 'fr' ? 'fr-FR' : lang === 'es' ? 'es-ES' : 'en-US')}</td>
-                          <td className="py-2">
-                            <span className="text-[10px] font-medium uppercase">
-                              {isZeroBono || inv.paymentMethod === 'not_applicable'
-                                ? (lang === 'fr' ? 'Non applicable' : lang === 'es' ? 'No aplicable' : 'N/A')
-                                : inv.paymentMethod === 'card' ? (lang === 'fr' ? 'Carte' : lang === 'es' ? 'Tarjeta' : 'Card') :
-                                  inv.paymentMethod === 'cash' ? (lang === 'fr' ? 'Espèces' : lang === 'es' ? 'Efectivo' : 'Cash') : (lang === 'fr' ? 'Virement' : lang === 'es' ? 'Transferencia' : 'Transfer')}
-                            </span>
-                          </td>
-                          <td className="py-2 text-center font-bold">
-                            <span className={`text-[9px] px-1.5 py-0.5 rounded-full ${
-                              isZeroBono || inv.status === 'paid' 
-                                ? 'bg-emerald-100 text-emerald-800' 
-                                : 'bg-amber-100 text-amber-900 font-bold'
-                            }`}>
-                              {isZeroBono ? (lang === 'fr' ? 'Réglé (Bono)' : lang === 'es' ? 'Pagada (Bono)' : 'Settled (Bono)') : inv.status === 'paid' ? (lang === 'fr' ? 'Réglée' : lang === 'es' ? 'Pagada' : 'Paid') : (lang === 'fr' ? 'En attente' : lang === 'es' ? 'Pendiente' : 'Pending')}
-                            </span>
-                          </td>
-                          <td className="py-2 text-right font-bold">
-                            {isZeroBono ? (
-                              <span className="text-emerald-800 text-[10px]">0 € (Bono)</span>
-                            ) : (
-                              `${inv.amount} €`
-                            )}
-                          </td>
+                  <div className="overflow-x-auto -mx-1 sm:mx-0">
+                    <table className="w-full border-collapse text-xs min-w-[480px]">
+                      <thead>
+                        <tr className="border-b-2 border-primary/20 text-left font-bold text-gray-400 uppercase text-[9px] tracking-wider">
+                          <th className="py-2">{lang === 'fr' ? 'N° Facture' : lang === 'es' ? 'Factura' : 'Invoice'}</th>
+                          <th className="py-2">{lang === 'fr' ? 'Patient' : lang === 'es' ? 'Paciente' : 'Patient'}</th>
+                          <th className="py-2">{lang === 'fr' ? 'Date' : lang === 'es' ? 'Fecha' : 'Date'}</th>
+                          <th className="py-2">{lang === 'fr' ? 'Règlement' : lang === 'es' ? 'Pago' : 'Payment'}</th>
+                          <th className="py-2 text-center">{lang === 'fr' ? 'Statut' : lang === 'es' ? 'Estado' : 'Status'}</th>
+                          <th className="py-2 text-right">{lang === 'fr' ? 'Montant' : lang === 'es' ? 'Importe' : 'Amount'}</th>
                         </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
+                      </thead>
+                      <tbody>
+                        {selectedRecapForPrint.invoices.map((inv, invIdx) => {
+                          const isZeroBono = Boolean((inv.isBonoRedemption && inv.amount === 0) || (inv.amount === 0 && inv.discountType === 'bono'));
+                          return (
+                          <tr key={inv.id ? `${inv.id}-${invIdx}` : `recap-inv-${invIdx}`} className="border-b border-black/5 text-gray-700">
+                            <td className="py-2 font-bold text-primary">
+                              {isZeroBono ? (
+                                <span className="text-[10px] font-bold text-emerald-800 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">
+                                  Bono
+                                </span>
+                              ) : (
+                                inv.invoiceNumber
+                              )}
+                            </td>
+                            <td className="py-2 font-medium">{inv.clientName}</td>
+                            <td className="py-2 text-gray-500">{new Date(inv.date).toLocaleDateString(lang === 'fr' ? 'fr-FR' : lang === 'es' ? 'es-ES' : 'en-US')}</td>
+                            <td className="py-2">
+                              <span className="text-[10px] font-medium uppercase">
+                                {isZeroBono || inv.paymentMethod === 'not_applicable'
+                                  ? (lang === 'fr' ? 'Non applicable' : lang === 'es' ? 'No aplicable' : 'N/A')
+                                  : inv.paymentMethod === 'card' ? (lang === 'fr' ? 'Carte' : lang === 'es' ? 'Tarjeta' : 'Card') :
+                                    inv.paymentMethod === 'cash' ? (lang === 'fr' ? 'Espèces' : lang === 'es' ? 'Efectivo' : 'Cash') : (lang === 'fr' ? 'Virement' : lang === 'es' ? 'Transferencia' : 'Transfer')}
+                              </span>
+                            </td>
+                            <td className="py-2 text-center font-bold">
+                              <span className={`text-[9px] px-1.5 py-0.5 rounded-full ${
+                                isZeroBono || inv.status === 'paid' 
+                                  ? 'bg-emerald-100 text-emerald-800' 
+                                  : 'bg-amber-100 text-amber-900 font-bold'
+                              }`}>
+                                {isZeroBono ? (lang === 'fr' ? 'Réglé (Bono)' : lang === 'es' ? 'Pagada (Bono)' : 'Settled (Bono)') : inv.status === 'paid' ? (lang === 'fr' ? 'Réglée' : lang === 'es' ? 'Pagada' : 'Paid') : (lang === 'fr' ? 'En attente' : lang === 'es' ? 'Pendiente' : 'Pending')}
+                              </span>
+                            </td>
+                            <td className="py-2 text-right font-bold">
+                              {isZeroBono ? (
+                                <span className="text-emerald-800 text-[10px]">0 € (Bono)</span>
+                              ) : (
+                                `${inv.amount} €`
+                              )}
+                            </td>
+                          </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
 
                 {/* Footer validation statement */}
                 <div className="pt-8 border-t border-black/5 flex justify-between items-center text-[10px] text-gray-400">
                   <p>
-                    Informe contable oficial para declaraciones fiscales y seguimiento de actividad.
+                    {lang === 'fr' 
+                      ? 'Rapport comptable officiel pour déclarations fiscales et suivi d\'activité.' 
+                      : lang === 'es' 
+                        ? 'Informe contable oficial para declaraciones fiscales y seguimiento de actividad.' 
+                        : 'Official accounting report for tax declarations and activity tracking.'}
                   </p>
                   <p className="font-serif italic text-primary">Vincent Durroux - Osteo Valencia</p>
                 </div>
@@ -9840,12 +9845,12 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
       {/* MODAL: ADD / EDIT GOOGLE REVIEW */}
       <AnimatePresence>
         {isAddReviewModalOpen && (
-          <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs">
+          <div className="fixed inset-0 z-[110] flex items-start sm:items-center justify-center p-3 sm:p-4 bg-black/50 backdrop-blur-xs overflow-y-auto">
             <motion.div
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-white rounded-3xl max-w-lg w-full p-6 shadow-2xl border border-black/10 text-left"
+              className="bg-white rounded-3xl max-w-lg w-full max-h-[92dvh] overflow-y-auto p-5 sm:p-6 shadow-2xl border border-black/10 text-left my-auto"
             >
               <div className="flex items-center justify-between pb-3 border-b border-black/5 mb-4">
                 <h3 className="font-serif text-lg font-bold text-gray-900 flex items-center gap-2">
@@ -9933,19 +9938,21 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                   />
                 </div>
 
-                <div className="flex items-center justify-end gap-2 pt-2 border-t border-black/5">
+                <div className="flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-end gap-2.5 pt-3 border-t border-black/5">
                   <button
                     type="button"
                     onClick={() => setIsAddReviewModalOpen(false)}
-                    className="px-4 py-2 text-xs font-semibold text-gray-600 hover:bg-black/5 rounded-xl cursor-pointer"
+                    className="w-full sm:w-auto px-4 py-2.5 text-xs font-semibold text-gray-600 hover:bg-black/5 rounded-xl cursor-pointer text-center"
                   >
-                    Cancel
+                    {lang === 'fr' ? 'Annuler' : lang === 'es' ? 'Cancelar' : 'Cancel'}
                   </button>
                   <button
                     type="submit"
-                    className="px-5 py-2 text-xs font-semibold text-white bg-primary hover:bg-primary/95 rounded-xl shadow-xs cursor-pointer"
+                    className="w-full sm:w-auto px-5 py-2.5 text-xs font-semibold text-white bg-primary hover:bg-primary/95 rounded-xl shadow-xs cursor-pointer text-center whitespace-nowrap"
                   >
-                    {editingReviewIndex !== null ? 'Update Review' : 'Add Review'}
+                    {editingReviewIndex !== null 
+                      ? (lang === 'fr' ? 'Mettre à jour l\'avis' : lang === 'es' ? 'Actualizar reseña' : 'Update Review')
+                      : (lang === 'fr' ? 'Ajouter l\'avis' : lang === 'es' ? 'Añadir reseña' : 'Add Review')}
                   </button>
                 </div>
               </form>
@@ -9956,7 +9963,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
 
         {/* MODAL: CUSTOM IN-APP CONFIRMATION DIALOG (Guaranteed to work in iframe, Google AI Studio, and Deployed sites) */}
         {confirmDialog.isOpen && (
-          <div className="fixed inset-0 z-[120] flex items-center justify-center p-4">
+          <div className="fixed inset-0 z-[120] flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -9972,7 +9979,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
               initial={{ opacity: 0, scale: 0.95, y: 10 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95, y: 10 }}
-              className="relative w-full max-w-sm bg-white rounded-3xl shadow-2xl p-6 z-10 border border-black/10 text-left"
+              className="relative w-full max-w-sm max-h-[92dvh] overflow-y-auto bg-white rounded-3xl shadow-2xl p-5 sm:p-6 z-10 border border-black/10 text-left my-auto"
             >
               <div className="flex items-start gap-3.5 mb-4">
                 <div className={`w-10 h-10 rounded-2xl flex items-center justify-center shrink-0 ${
@@ -9990,12 +9997,12 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                 </div>
               </div>
 
-              <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-black/5">
+              <div className="flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-end gap-2.5 pt-3 border-t border-black/5">
                 <button
                   type="button"
                   disabled={confirmDialog.isLoading}
                   onClick={() => setConfirmDialog(prev => ({ ...prev, isOpen: false }))}
-                  className="px-4 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl text-xs font-bold transition-all disabled:opacity-50"
+                  className="w-full sm:w-auto px-4 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl text-xs font-bold transition-all disabled:opacity-50 text-center whitespace-nowrap cursor-pointer"
                 >
                   {confirmDialog.cancelText || (lang === 'fr' ? 'Annuler' : lang === 'es' ? 'Cancelar' : 'Cancel')}
                 </button>
@@ -10010,14 +10017,14 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                       setConfirmDialog(prev => ({ ...prev, isLoading: false, isOpen: false }));
                     }
                   }}
-                  className={`px-4 py-2.5 text-white rounded-xl text-xs font-bold transition-all shadow-sm flex items-center gap-1.5 disabled:opacity-50 ${
+                  className={`w-full sm:w-auto px-4 py-2.5 text-white rounded-xl text-xs font-bold transition-all shadow-sm flex items-center justify-center gap-2 disabled:opacity-50 text-center whitespace-nowrap cursor-pointer ${
                     confirmDialog.isDangerous 
                       ? 'bg-rose-600 hover:bg-rose-700' 
                       : 'bg-primary hover:bg-primary/95'
                   }`}
                 >
-                  {confirmDialog.isLoading && <RefreshCw size={13} className="animate-spin" />}
-                  <span>{confirmDialog.confirmText || (lang === 'fr' ? 'Confirmer' : lang === 'es' ? 'Confirmar' : 'Confirm')}</span>
+                  {confirmDialog.isLoading && <RefreshCw size={13} className="animate-spin shrink-0" />}
+                  <span className="whitespace-nowrap">{confirmDialog.confirmText || (lang === 'fr' ? 'Confirmer' : lang === 'es' ? 'Confirmar' : 'Confirm')}</span>
                 </button>
               </div>
             </motion.div>
