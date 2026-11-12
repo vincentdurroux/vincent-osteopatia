@@ -32,6 +32,18 @@ export interface ClientNote {
   bonoType?: string;
 }
 
+export interface ClinicalNoteDraftItem {
+  clientId: string;
+  clientName?: string;
+  anamnese: string;
+  treatment: string;
+  category: ClientNote['category'];
+  date: string;
+  motif: string;
+  eventId?: string;
+  updatedAt: number;
+}
+
 export interface Invoice {
   id: string;
   invoiceNumber: string;

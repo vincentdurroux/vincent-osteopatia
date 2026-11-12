@@ -1,5 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
-import { Client, ClientNote, Invoice, CalendarEvent, EventType, GoogleReview } from '../types';
+import { Client, ClientNote, Invoice, CalendarEvent, EventType, GoogleReview, ClinicalNoteDraftItem } from '../types';
 
 // Default Supabase project credentials as robust production fallback
 const DEFAULT_SUPABASE_URL = 'https://lnlemynayesjduntoran.supabase.co';
@@ -29,14 +29,8 @@ export const isSupabaseConfigured = !!(supabaseUrl && supabaseAnonKey);
 
 if (typeof window !== 'undefined' && isSupabaseConfigured) {
   try {
-    const keysToRemove: string[] = [];
-    for (let i = 0; i < localStorage.length; i++) {
-      const key = localStorage.key(i);
-      if (key && (key.startsWith('vincent_osteo_') || key.startsWith('vincent_'))) {
-        keysToRemove.push(key);
-      }
-    }
-    keysToRemove.forEach(k => localStorage.removeItem(k));
+    const legacyKeysToPurge = ['vincent_osteo_clients', 'vincent_osteo_notes', 'vincent_osteo_invoices', 'vincent_osteo_events'];
+    legacyKeysToPurge.forEach(k => localStorage.removeItem(k));
   } catch {}
 }
 
@@ -1525,13 +1519,13 @@ export const api = {
         const { data, error } = await supabase.from('client_notes').select('*').order('date', { ascending: false });
         if (!error && data) {
           const notes = data.map(mapNoteFromDB);
-          return notes.filter(n => !isDeletedTombstone('notes', n.id));
+          return notes.filter(n => !isDeletedTombstone('notes', n.id) && !n.id.startsWith('draft_') && !n.motif?.startsWith('[BROUILLON]'));
         }
       } catch (err) {
         console.warn('Supabase getAllNotes exception:', err);
       }
     }
-    const localNotes = loadLocal('notes', mockNotes);
+    const localNotes = loadLocal('notes', mockNotes).filter(n => !n.id.startsWith('draft_') && !n.motif?.startsWith('[BROUILLON]'));
     return localNotes.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
   },
 
@@ -1542,19 +1536,19 @@ export const api = {
         
         if (!error && data && data.length > 0) {
           const notes = data.map(mapNoteFromDB);
-          return notes.filter(n => !isDeletedTombstone('notes', n.id));
+          return notes.filter(n => !isDeletedTombstone('notes', n.id) && !n.id.startsWith('draft_') && !n.motif?.startsWith('[BROUILLON]'));
         }
 
         const res = await supabase.from('client_notes').select('*').eq('clientId', clientId).order('date', { ascending: false });
         if (!res.error && res.data) {
           const notes = res.data.map(mapNoteFromDB);
-          return notes.filter(n => !isDeletedTombstone('notes', n.id));
+          return notes.filter(n => !isDeletedTombstone('notes', n.id) && !n.id.startsWith('draft_') && !n.motif?.startsWith('[BROUILLON]'));
         }
       } catch (err) {
         console.warn('Supabase getClientNotes exception:', err);
       }
     }
-    const localNotes = loadLocal('notes', mockNotes).filter(n => n.clientId === clientId);
+    const localNotes = loadLocal('notes', mockNotes).filter(n => n.clientId === clientId && !n.id.startsWith('draft_') && !n.motif?.startsWith('[BROUILLON]'));
     return localNotes.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
   },
 
@@ -1724,6 +1718,102 @@ export const api = {
     const filtered = current.filter(n => n.id !== id);
     saveLocal('notes', filtered);
     return true;
+  },
+
+  // ==========================================
+  // MULTI-DEVICE CLINICAL NOTE DRAFTS
+  // ==========================================
+  async getRemoteDrafts(): Promise<Record<string, ClinicalNoteDraftItem>> {
+    if (isSupabaseConfigured && supabase) {
+      try {
+        const { data, error } = await supabase.from('client_notes').select('*').like('id', 'draft_%');
+        if (!error && data) {
+          const drafts: Record<string, ClinicalNoteDraftItem> = {};
+          data.forEach((row: any) => {
+            try {
+              let parsedMeta: any = {};
+              if (row.content && typeof row.content === 'string' && row.content.trim().startsWith('{')) {
+                try { parsedMeta = JSON.parse(row.content); } catch {}
+              }
+              const rawMotif = (row.motif || '').replace(/^\[BROUILLON\]\s*/i, '');
+              const clientId = String(row.clientId || row.client_id || parsedMeta.clientId || '');
+              const eventId = row.eventId || row.event_id || parsedMeta.eventId || '';
+              const key = parsedMeta.draftKey || (eventId ? `${clientId}::evt_${eventId}` : `${clientId}::general`);
+
+              if (clientId && (row.anamnese?.trim() || row.treatment?.trim() || rawMotif.trim())) {
+                drafts[key] = {
+                  clientId,
+                  clientName: parsedMeta.clientName || '',
+                  anamnese: row.anamnese || '',
+                  treatment: row.treatment || '',
+                  category: (parsedMeta.category || row.category || 'treatment') as ClientNote['category'],
+                  date: parsedMeta.date || (row.date ? row.date.split('T')[0] : new Date().toISOString().split('T')[0]),
+                  motif: rawMotif,
+                  eventId: eventId || undefined,
+                  updatedAt: parsedMeta.updatedAt || new Date(row.date || Date.now()).getTime(),
+                };
+              }
+            } catch (e) {
+              console.warn('Failed to parse remote draft row:', e);
+            }
+          });
+          return drafts;
+        }
+      } catch (err) {
+        console.warn('Supabase getRemoteDrafts exception:', err);
+      }
+    }
+    return {};
+  },
+
+  async saveRemoteDraft(draft: ClinicalNoteDraftItem): Promise<boolean> {
+    if (!isSupabaseConfigured || !supabase || !draft.clientId) return false;
+    try {
+      const draftId = `draft_${draft.clientId}${draft.eventId ? `_${draft.eventId}` : ''}`;
+      const contentPayload = JSON.stringify({
+        isDraft: true,
+        draftKey: `${draft.clientId}::${draft.eventId ? `evt_${draft.eventId}` : 'general'}`,
+        clientId: draft.clientId,
+        clientName: draft.clientName || '',
+        eventId: draft.eventId || '',
+        date: draft.date,
+        category: draft.category || 'treatment',
+        updatedAt: draft.updatedAt || Date.now(),
+      });
+
+      const res = await supabase.from('client_notes').upsert({
+        id: draftId,
+        clientId: draft.clientId,
+        date: new Date().toISOString(),
+        motif: draft.motif ? `[BROUILLON] ${draft.motif}` : '[BROUILLON]',
+        anamnese: draft.anamnese || '',
+        treatment: draft.treatment || '',
+        content: contentPayload,
+        category: draft.category || 'treatment',
+      });
+      return !res.error;
+    } catch (err) {
+      console.warn('Supabase saveRemoteDraft exception:', err);
+      return false;
+    }
+  },
+
+  async deleteRemoteDraft(clientId: string, eventId?: string): Promise<boolean> {
+    if (!isSupabaseConfigured || !supabase || !clientId) return false;
+    try {
+      if (eventId) {
+        await supabase.from('client_notes').delete().eq('id', `draft_${clientId}_${eventId}`);
+      }
+      const { data } = await supabase.from('client_notes').select('id').eq('clientId', clientId).like('id', 'draft_%');
+      if (data && data.length > 0) {
+        const ids = data.map((d: any) => d.id);
+        await supabase.from('client_notes').delete().in('id', ids);
+      }
+      return true;
+    } catch (err) {
+      console.warn('Supabase deleteRemoteDraft exception:', err);
+      return false;
+    }
   },
 
   // ==========================================

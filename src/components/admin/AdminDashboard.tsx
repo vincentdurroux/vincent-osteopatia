@@ -7,9 +7,9 @@ import {
   ChevronRight, Pencil, ChevronLeft, ChevronDown, LayoutGrid, List, ArrowRight,
   Copy, CheckCircle2, XCircle, AlertTriangle, Database, Server, UserPlus, User,
   Tag, BadgePercent, Percent, Sparkles, IdCard, X, Columns3, Lock, Coffee, Briefcase, Bookmark, Pin, StickyNote,
-  ArrowUpDown, ArrowUp, ArrowDown, ExternalLink, Info, Star
+  ArrowUpDown, ArrowUp, ArrowDown, ExternalLink, Info, Star, Cloud
 } from 'lucide-react';
-import { Client, ClientNote, Invoice, CalendarEvent, EventType, GoogleReview } from '../../types';
+import { Client, ClientNote, Invoice, CalendarEvent, EventType, GoogleReview, ClinicalNoteDraftItem } from '../../types';
 import { api, supabase, isSupabaseConfigured, SUPABASE_SQL_SETUP, capitalizeFirstName, sortInvoicesByDate, normalizeInvoiceDescription } from '../../lib/supabase';
 import SpineLogo from '../SpineLogo';
 import { useTranslation } from '../../App';
@@ -443,6 +443,56 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
     newNoteRef.current = newNote;
   }, [newNote]);
 
+  // Sync remote drafts from Supabase on mount and keep local/remote in sync across devices
+  useEffect(() => {
+    let isMounted = true;
+    const syncRemoteDrafts = async () => {
+      if (!isSupabaseConfigured) return;
+      try {
+        const remote = await api.getRemoteDrafts();
+        if (!isMounted || !remote) return;
+        const local = getStoredDrafts();
+        let updated = false;
+
+        Object.entries(remote).forEach(([key, remoteDraft]) => {
+          const localDraft = local[key];
+          if (!localDraft || (remoteDraft.updatedAt && remoteDraft.updatedAt > (localDraft.updatedAt || 0))) {
+            local[key] = remoteDraft;
+            updated = true;
+          }
+        });
+
+        if (updated) {
+          localStorage.setItem(NOTE_DRAFTS_STORAGE_KEY, JSON.stringify(local));
+          setDraftsMap({ ...local });
+
+          // If current selected client has a draft, restore into form if empty
+          if (selectedClient?.id) {
+            const currentClientDraft = getClientDraft(selectedClient.id, newNoteRef.current.eventId);
+            if (currentClientDraft && (!newNoteRef.current.anamnese.trim() && !newNoteRef.current.treatment.trim() && !newNoteRef.current.motif.trim())) {
+              setNewNote({
+                anamnese: currentClientDraft.draft.anamnese || '',
+                treatment: currentClientDraft.draft.treatment || '',
+                category: currentClientDraft.draft.category || 'treatment',
+                date: currentClientDraft.draft.date || new Date().toISOString().split('T')[0],
+                motif: currentClientDraft.draft.motif || '',
+                eventId: currentClientDraft.draft.eventId || '',
+              });
+              setActiveDraftNotice(true);
+            }
+          }
+        }
+      } catch (e) {
+        console.warn('Failed to sync remote drafts:', e);
+      }
+    };
+
+    syncRemoteDrafts();
+    return () => {
+      isMounted = false;
+    };
+  }, [isSupabaseConfigured, selectedClient?.id]);
+
   const saveDraftToStorage = (
     clientId: string,
     arg2?: string | Partial<typeof newNote> | null,
@@ -476,7 +526,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
       const hasContent = Boolean(draft && (draft.anamnese?.trim() || draft.treatment?.trim() || draft.motif?.trim()));
 
       if (!hasContent) {
-        // Clear all drafts for this client
+        // Clear all drafts for this client locally and remotely
         let changed = false;
         Object.keys(current).forEach(k => {
           if (k.startsWith(`${clientId}::`) || k.startsWith(`${clientId}_`) || current[k].clientId === clientId) {
@@ -488,9 +538,10 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
           localStorage.setItem(NOTE_DRAFTS_STORAGE_KEY, JSON.stringify(current));
           setDraftsMap({ ...current });
         }
+        api.deleteRemoteDraft(clientId, eventId);
       } else {
         const client = clients.find(c => c.id === clientId);
-        current[primaryKey] = {
+        const draftItem: ClinicalNoteDraftItem = {
           clientId,
           clientName: client?.name || '',
           anamnese: draft?.anamnese || '',
@@ -501,8 +552,10 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
           eventId: draft?.eventId || eventId || '',
           updatedAt: Date.now(),
         };
+        current[primaryKey] = draftItem;
         localStorage.setItem(NOTE_DRAFTS_STORAGE_KEY, JSON.stringify(current));
         setDraftsMap({ ...current });
+        api.saveRemoteDraft(draftItem);
       }
     } catch (e) {
       console.error('Failed to persist draft:', e);
@@ -3604,6 +3657,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                             delete current[d.key];
                             localStorage.setItem(NOTE_DRAFTS_STORAGE_KEY, JSON.stringify(current));
                             setDraftsMap({ ...current });
+                            api.deleteRemoteDraft(d.clientId, d.eventId);
                           }}
                           className="p-1 text-amber-700/60 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer shrink-0"
                           title={lang === 'fr' ? "Supprimer ce brouillon" : "Discard draft"}
@@ -4532,17 +4586,21 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                       {activeDraftNotice && (newNote.anamnese.trim() || newNote.treatment.trim() || newNote.motif.trim()) && (
                         <div className="mb-4 p-3 rounded-2xl bg-amber-50/90 border border-amber-200/90 flex items-center justify-between gap-3 text-xs text-amber-900 shadow-2xs">
                           <div className="flex items-center gap-2">
-                            <StickyNote size={15} className="text-amber-700 shrink-0" />
+                            <div className="relative shrink-0">
+                              <StickyNote size={16} className="text-amber-700" />
+                              <Cloud size={10} className="text-amber-800 absolute -bottom-1 -right-1 fill-amber-100" />
+                            </div>
                             <div>
-                              <p className="font-bold text-amber-950">
-                                {lang === 'fr' ? "Brouillon automatique sauvegardé" : lang === 'es' ? "Borrador guardado automáticamente" : "Auto-saved draft preserved"}
+                              <p className="font-bold text-amber-950 flex items-center gap-1.5 flex-wrap">
+                                <span>{lang === 'fr' ? "Brouillon sauvegardé & synchronisé" : lang === 'es' ? "Borrador guardado y sincronizado" : "Draft saved & synced"}</span>
+                                <span className="text-[9px] font-extrabold px-1.5 py-0.2 rounded bg-amber-200/90 text-amber-900 uppercase tracking-wider">Multi-appareils</span>
                               </p>
                               <p className="text-[10px] text-amber-800">
                                 {lang === 'fr' 
-                                  ? "Votre saisie est conservée si vous quittez la page ou fermez votre navigateur." 
+                                  ? "Ce brouillon est enregistré en ligne et immédiatement disponible sur tous vos appareils (PC, tablette, mobile)." 
                                   : lang === 'es'
-                                  ? "Su texto se conserva si sale de la página o cierra el navegador."
-                                  : "Your draft is kept safe if you navigate away or close your browser."}
+                                  ? "Este borrador está guardado en la nube y disponible en todos sus dispositivos."
+                                  : "Saved online and synced across all your devices."}
                               </p>
                             </div>
                           </div>
