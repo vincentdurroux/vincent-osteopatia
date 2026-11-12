@@ -337,15 +337,9 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
   // Persistent Clinical Note Draft Storage (saved in localStorage across page leaves/refreshes, associated with client + session/date/eventId)
   const NOTE_DRAFTS_STORAGE_KEY = 'vincent_osteo_note_drafts_v3';
 
-  const getDraftKey = (clientId: string, eventId?: string, date?: string) => {
-    const dateStr = date ? date.split('T')[0] : new Date().toISOString().split('T')[0];
-    if (eventId) {
-      return `${clientId}_evt_${eventId}`;
-    }
-    return `${clientId}_date_${dateStr}`;
-  };
-
-  const getStoredDrafts = (): Record<string, {
+  interface ClinicalNoteDraftItem {
+    clientId: string;
+    clientName?: string;
     anamnese: string;
     treatment: string;
     category: ClientNote['category'];
@@ -353,7 +347,9 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
     motif: string;
     eventId?: string;
     updatedAt: number;
-  }> => {
+  }
+
+  const getStoredDrafts = (): Record<string, ClinicalNoteDraftItem> => {
     if (typeof window === 'undefined') return {};
     try {
       const raw = localStorage.getItem(NOTE_DRAFTS_STORAGE_KEY);
@@ -363,16 +359,67 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
     }
   };
 
-  const [draftsMap, setDraftsMap] = useState(getStoredDrafts);
+  const [draftsMap, setDraftsMap] = useState<Record<string, ClinicalNoteDraftItem>>(getStoredDrafts);
 
-  const hasClientDraft = (clientId: string) => {
-    return Object.keys(draftsMap).some(k => k.startsWith(clientId + '_'));
+  // Robust draft retriever for a client with smart matching across general and appointment-specific drafts
+  const getClientDraft = (clientId: string, preferredEventId?: string): { key: string; draft: ClinicalNoteDraftItem } | null => {
+    if (!clientId) return null;
+    const stored = getStoredDrafts();
+
+    // 1. Exact match with preferredEventId
+    if (preferredEventId) {
+      const candidateKeys = [
+        `${clientId}::evt_${preferredEventId}`,
+        `${clientId}_evt_${preferredEventId}`,
+      ];
+      for (const k of candidateKeys) {
+        if (stored[k] && (stored[k].anamnese?.trim() || stored[k].treatment?.trim() || stored[k].motif?.trim())) {
+          return { key: k, draft: stored[k] };
+        }
+      }
+      for (const [k, d] of Object.entries(stored)) {
+        if ((d.clientId === clientId || k.startsWith(clientId)) && d.eventId === preferredEventId && (d.anamnese?.trim() || d.treatment?.trim() || d.motif?.trim())) {
+          return { key: k, draft: d };
+        }
+      }
+    }
+
+    // 2. Direct general draft keys
+    const generalKeys = [
+      `${clientId}::general`,
+      `${clientId}::draft`,
+      `${clientId}_date_${new Date().toISOString().split('T')[0]}`,
+    ];
+    for (const k of generalKeys) {
+      if (stored[k] && (stored[k].anamnese?.trim() || stored[k].treatment?.trim() || stored[k].motif?.trim())) {
+        return { key: k, draft: stored[k] };
+      }
+    }
+
+    // 3. Any non-empty draft belonging to this client (latest updatedAt first)
+    const clientCandidates = Object.entries(stored).filter(([k, d]) => {
+      const matchesClient = d.clientId === clientId || k.startsWith(`${clientId}::`) || k.startsWith(`${clientId}_`);
+      const hasContent = Boolean(d.anamnese?.trim() || d.treatment?.trim() || d.motif?.trim());
+      return matchesClient && hasContent;
+    });
+
+    if (clientCandidates.length > 0) {
+      clientCandidates.sort((a, b) => (b[1].updatedAt || 0) - (a[1].updatedAt || 0));
+      return { key: clientCandidates[0][0], draft: clientCandidates[0][1] };
+    }
+
+    return null;
+  };
+
+  const hasClientDraft = (clientId?: string, eventId?: string): boolean => {
+    if (!clientId) return false;
+    return Boolean(getClientDraft(clientId, eventId));
   };
 
   const allActiveDrafts = useMemo(() => {
     const drafts = getStoredDrafts();
     return Object.entries(drafts).map(([key, draft]) => {
-      const clientId = key.split('_')[0];
+      const clientId = draft.clientId || key.split('::')[0].split('_')[0];
       const client = clients.find(c => c.id === clientId);
       return {
         key,
@@ -380,8 +427,9 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
         client,
         ...draft
       };
-    }).filter(d => d.client && (d.anamnese?.trim() || d.treatment?.trim() || d.motif?.trim()));
+    }).filter(d => Boolean(d.anamnese?.trim() || d.treatment?.trim() || d.motif?.trim()));
   }, [draftsMap, clients]);
+
   const [activeDraftNotice, setActiveDraftNotice] = useState<boolean>(false);
   const prevSessionRef = useRef<{ clientId: string | null; eventId: string; date: string }>({
     clientId: null,
@@ -395,41 +443,67 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
     newNoteRef.current = newNote;
   }, [newNote]);
 
-  const saveDraftToStorage = (clientId: string, arg2?: string | Partial<typeof newNote> | null, arg3?: string | Partial<typeof newNote> | null, arg4?: Partial<typeof newNote> | null) => {
+  const saveDraftToStorage = (
+    clientId: string,
+    arg2?: string | Partial<typeof newNote> | null,
+    arg3?: string | Partial<typeof newNote> | null,
+    arg4?: Partial<typeof newNote> | null
+  ) => {
     if (typeof window === 'undefined' || !clientId) return;
-    let eventId: string | undefined = newNote.eventId;
-    let date: string | undefined = newNote.date;
+    let eventId: string | undefined = newNoteRef.current.eventId;
+    let date: string | undefined = newNoteRef.current.date;
     let draft: Partial<typeof newNote> | null = null;
 
-    if (arguments.length === 2) {
+    if (arguments.length === 2 && typeof arg2 === 'object') {
       draft = arg2 as Partial<typeof newNote> | null;
+      eventId = draft?.eventId || eventId;
+      date = draft?.date || date;
     } else if (arguments.length >= 4) {
       eventId = arg2 as string | undefined;
       date = arg3 as string | undefined;
       draft = arg4 as Partial<typeof newNote> | null;
-    } else {
+    } else if (typeof arg3 === 'object') {
       eventId = arg2 as string | undefined;
       draft = arg3 as Partial<typeof newNote> | null;
+      date = draft?.date || date;
+    } else {
+      draft = arg2 as Partial<typeof newNote> | null;
     }
 
     try {
       const current = getStoredDrafts();
-      const key = getDraftKey(clientId, eventId, date);
-      if (!draft || (!draft.anamnese?.trim() && !draft.treatment?.trim() && !draft.motif?.trim())) {
-        delete current[key];
+      const primaryKey = `${clientId}::${eventId ? `evt_${eventId}` : 'general'}`;
+      const hasContent = Boolean(draft && (draft.anamnese?.trim() || draft.treatment?.trim() || draft.motif?.trim()));
+
+      if (!hasContent) {
+        // Clear all drafts for this client
+        let changed = false;
+        Object.keys(current).forEach(k => {
+          if (k.startsWith(`${clientId}::`) || k.startsWith(`${clientId}_`) || current[k].clientId === clientId) {
+            delete current[k];
+            changed = true;
+          }
+        });
+        if (changed) {
+          localStorage.setItem(NOTE_DRAFTS_STORAGE_KEY, JSON.stringify(current));
+          setDraftsMap({ ...current });
+        }
       } else {
-        current[key] = {
-          anamnese: draft.anamnese || '',
-          treatment: draft.treatment || '',
-          category: draft.category || 'treatment',
-          date: draft.date || new Date().toISOString().split('T')[0],
-          motif: draft.motif || '',
-          eventId: draft.eventId || eventId || '',
+        const client = clients.find(c => c.id === clientId);
+        current[primaryKey] = {
+          clientId,
+          clientName: client?.name || '',
+          anamnese: draft?.anamnese || '',
+          treatment: draft?.treatment || '',
+          category: draft?.category || 'treatment',
+          date: draft?.date || date || new Date().toISOString().split('T')[0],
+          motif: draft?.motif || '',
+          eventId: draft?.eventId || eventId || '',
           updatedAt: Date.now(),
         };
+        localStorage.setItem(NOTE_DRAFTS_STORAGE_KEY, JSON.stringify(current));
+        setDraftsMap({ ...current });
       }
-      localStorage.setItem(NOTE_DRAFTS_STORAGE_KEY, JSON.stringify(current));
-      setDraftsMap({ ...current });
     } catch (e) {
       console.error('Failed to persist draft:', e);
     }
@@ -441,7 +515,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
       const updated = { ...prev, ...fields };
       newNoteRef.current = updated;
       if (selectedClient?.id) {
-        saveDraftToStorage(selectedClient.id, updated.eventId, updated.date, updated);
+        saveDraftToStorage(selectedClient.id, updated);
         if (updated.anamnese.trim() || updated.treatment.trim() || updated.motif.trim()) {
           setActiveDraftNotice(true);
         }
@@ -453,14 +527,15 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
   // Discard draft for current session
   const handleDiscardDraft = () => {
     if (!selectedClient?.id) return;
-    saveDraftToStorage(selectedClient.id, newNote.eventId, newNote.date, null);
-    setNewNote(prev => ({
-      ...prev,
+    saveDraftToStorage(selectedClient.id, null);
+    setNewNote({
       anamnese: '',
       treatment: '',
       category: 'treatment',
+      date: new Date().toISOString().split('T')[0],
       motif: '',
-    }));
+      eventId: '',
+    });
     setActiveDraftNotice(false);
   };
 
@@ -468,7 +543,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
   useEffect(() => {
     const handleBeforeUnload = () => {
       if (selectedClient?.id && (newNoteRef.current.anamnese.trim() || newNoteRef.current.treatment.trim() || newNoteRef.current.motif.trim())) {
-        saveDraftToStorage(selectedClient.id, newNoteRef.current.eventId, newNoteRef.current.date, newNoteRef.current);
+        saveDraftToStorage(selectedClient.id, newNoteRef.current);
       }
     };
     window.addEventListener('beforeunload', handleBeforeUnload);
@@ -477,50 +552,48 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
       window.removeEventListener('beforeunload', handleBeforeUnload);
       window.removeEventListener('pagehide', handleBeforeUnload);
       if (selectedClient?.id && (newNoteRef.current.anamnese.trim() || newNoteRef.current.treatment.trim() || newNoteRef.current.motif.trim())) {
-        saveDraftToStorage(selectedClient.id, newNoteRef.current.eventId, newNoteRef.current.date, newNoteRef.current);
+        saveDraftToStorage(selectedClient.id, newNoteRef.current);
       }
     };
   }, [selectedClient?.id]);
 
-  // Synchronize drafts when client selection or session (eventId / date) changes
+  // Synchronize drafts when client selection changes
   useEffect(() => {
     const prev = prevSessionRef.current;
     const currClientId = selectedClient?.id || null;
-    const currEventId = newNote.eventId;
-    const currDate = newNote.date;
 
-    // 1. Save draft of previous session if not empty
-    if (prev.clientId && (prev.clientId !== currClientId || prev.eventId !== currEventId || prev.date !== currDate)) {
+    // 1. Save draft of previous client if it had uncommitted text
+    if (prev.clientId && prev.clientId !== currClientId) {
       if (newNoteRef.current.anamnese.trim() || newNoteRef.current.treatment.trim() || newNoteRef.current.motif.trim()) {
-        saveDraftToStorage(prev.clientId, prev.eventId, prev.date, newNoteRef.current);
+        saveDraftToStorage(prev.clientId, newNoteRef.current);
       }
     }
 
-    // 2. Load draft of current client + session from localStorage
+    // 2. Load draft of current client from localStorage
     if (currClientId) {
-      const stored = getStoredDrafts();
-      const key = getDraftKey(currClientId, currEventId, currDate);
-      const draft = stored[key];
-      if (draft && (draft.anamnese || draft.treatment || draft.motif)) {
-        setNewNote(prevNote => ({
-          ...prevNote,
-          anamnese: draft.anamnese || '',
-          treatment: draft.treatment || '',
-          category: draft.category || 'treatment',
-          date: draft.date || currDate,
-          motif: draft.motif || '',
-          eventId: draft.eventId || currEventId,
-        }));
-        setActiveDraftNotice(true);
-      } else {
-        setNewNote(prevNote => ({
-          ...prevNote,
-          anamnese: '',
-          treatment: '',
-          category: 'treatment',
-          motif: '',
-        }));
-        setActiveDraftNotice(false);
+      if (prev.clientId !== currClientId) {
+        const found = getClientDraft(currClientId);
+        if (found) {
+          setNewNote({
+            anamnese: found.draft.anamnese || '',
+            treatment: found.draft.treatment || '',
+            category: found.draft.category || 'treatment',
+            date: found.draft.date || new Date().toISOString().split('T')[0],
+            motif: found.draft.motif || '',
+            eventId: found.draft.eventId || '',
+          });
+          setActiveDraftNotice(true);
+        } else {
+          setNewNote({
+            anamnese: '',
+            treatment: '',
+            category: 'treatment',
+            date: new Date().toISOString().split('T')[0],
+            motif: '',
+            eventId: '',
+          });
+          setActiveDraftNotice(false);
+        }
       }
     } else {
       setNewNote({
@@ -534,8 +607,8 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
       setActiveDraftNotice(false);
     }
 
-    prevSessionRef.current = { clientId: currClientId, eventId: currEventId, date: currDate };
-  }, [selectedClient?.id, newNote.eventId, newNote.date]);
+    prevSessionRef.current = { clientId: currClientId, eventId: newNoteRef.current.eventId, date: newNoteRef.current.date };
+  }, [selectedClient?.id]);
   
   const [isAddInvoiceOpen, setIsAddInvoiceOpen] = useState(false);
   const [newInvoiceBillingPlan, setNewInvoiceBillingPlan] = useState<'single' | 'bono3' | 'bono5' | 'deduct_bono' | 'custom'>('single');
@@ -2338,16 +2411,40 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
     if (targetClient) {
       setSelectedClient(targetClient);
       setActiveTab('clients');
-      if (event.start) {
-        const evDate = new Date(event.start);
-        const dateStr = evDate.toISOString().split('T')[0];
-        setNewNote(prev => ({
-          ...prev,
+      const evDate = event.start ? new Date(event.start) : new Date();
+      const dateStr = evDate.toISOString().split('T')[0];
+      const existingDraft = getClientDraft(targetClient.id, event.id) || getClientDraft(targetClient.id);
+
+      if (existingDraft) {
+        setNewNote({
+          anamnese: existingDraft.draft.anamnese || '',
+          treatment: existingDraft.draft.treatment || '',
+          category: existingDraft.draft.category || 'treatment',
+          date: existingDraft.draft.date || dateStr,
+          motif: existingDraft.draft.motif || event.summary || '',
+          eventId: event.id || existingDraft.draft.eventId || '',
+        });
+        setActiveDraftNotice(true);
+      } else {
+        setNewNote({
+          anamnese: '',
+          treatment: '',
+          category: 'treatment',
           date: dateStr,
-          motif: event.summary || prev.motif,
+          motif: event.summary || '',
           eventId: event.id || '',
-        }));
+        });
+        setActiveDraftNotice(false);
       }
+
+      setTimeout(() => {
+        const noteFormElem = document.getElementById('new-note-form');
+        if (noteFormElem) {
+          noteFormElem.scrollIntoView({ behavior: 'smooth' });
+          const firstField = noteFormElem.querySelector('input, textarea') as HTMLInputElement | HTMLTextAreaElement | null;
+          if (firstField) firstField.focus();
+        }
+      }, 100);
     } else {
       const fallbackName = event.clientName || (event.summary ? event.summary.split('-')[0].trim() : '');
       if (fallbackName && fallbackName.length > 1) {
@@ -3471,22 +3568,31 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                         <button
                           type="button"
                           onClick={() => {
-                            if (d.client) {
-                              setSelectedClient(d.client);
-                              setNewNote({
-                                anamnese: d.anamnese || '',
-                                treatment: d.treatment || '',
-                                category: d.category || 'treatment',
-                                date: d.date || new Date().toISOString().split('T')[0],
-                                motif: d.motif || '',
-                                eventId: d.eventId || '',
-                              });
-                              setActiveDraftNotice(true);
+                            const targetCl = d.client || clients.find(c => c.id === d.clientId);
+                            if (targetCl) {
+                              setSelectedClient(targetCl);
                             }
+                            setNewNote({
+                              anamnese: d.anamnese || '',
+                              treatment: d.treatment || '',
+                              category: d.category || 'treatment',
+                              date: d.date || new Date().toISOString().split('T')[0],
+                              motif: d.motif || '',
+                              eventId: d.eventId || '',
+                            });
+                            setActiveDraftNotice(true);
+                            setTimeout(() => {
+                              const noteFormElem = document.getElementById('new-note-form');
+                              if (noteFormElem) {
+                                noteFormElem.scrollIntoView({ behavior: 'smooth' });
+                                const firstField = noteFormElem.querySelector('input, textarea') as HTMLInputElement | HTMLTextAreaElement | null;
+                                if (firstField) firstField.focus();
+                              }
+                            }, 100);
                           }}
                           className="flex-1 text-left min-w-0 cursor-pointer"
                         >
-                          <p className="font-bold text-amber-950 truncate">{d.client?.name}</p>
+                          <p className="font-bold text-amber-950 truncate">{d.client?.name || d.clientName || 'Patient'}</p>
                           <p className="text-[10px] text-amber-800/80 truncate">
                             {d.motif || d.anamnese.substring(0, 40) || (lang === 'fr' ? 'Brouillon de consultation' : 'Draft note')}
                           </p>
@@ -3555,7 +3661,21 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                       >
                         <button
                           type="button"
-                          onClick={() => setSelectedClient(c)}
+                          onClick={() => {
+                            setSelectedClient(c);
+                            const found = getClientDraft(c.id);
+                            if (found) {
+                              setNewNote({
+                                anamnese: found.draft.anamnese || '',
+                                treatment: found.draft.treatment || '',
+                                category: found.draft.category || 'treatment',
+                                date: found.draft.date || new Date().toISOString().split('T')[0],
+                                motif: found.draft.motif || '',
+                                eventId: found.draft.eventId || '',
+                              });
+                              setActiveDraftNotice(true);
+                            }
+                          }}
                           className="flex-1 flex items-center gap-3 overflow-hidden text-left cursor-pointer"
                         >
                           <div className={`w-9 h-9 rounded-full flex-shrink-0 flex items-center justify-center text-xs font-bold ${
@@ -3843,23 +3963,53 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                       </div>
                     </div>
 
-                    {/* Patient Quick Add Note Button */}
+                    {/* Patient Quick Add / Continue Draft Button */}
                     <div className="flex items-center justify-end pt-3 border-t border-black/5">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const noteFormElem = document.getElementById('new-note-form');
-                          if (noteFormElem) {
-                            noteFormElem.scrollIntoView({ behavior: 'smooth' });
-                            const firstField = noteFormElem.querySelector('input, textarea') as HTMLInputElement | HTMLTextAreaElement | null;
-                            if (firstField) firstField.focus();
-                          }
-                        }}
-                        className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-bold bg-primary text-white hover:bg-primary/90 transition-all shadow-xs cursor-pointer"
-                      >
-                        <Plus size={13} />
-                        <span>{lang === 'fr' ? 'Ajouter une note' : lang === 'es' ? 'Añadir una nota' : 'Add a note'}</span>
-                      </button>
+                      {selectedClient && hasClientDraft(selectedClient.id) ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const found = getClientDraft(selectedClient.id);
+                            if (found) {
+                              setNewNote({
+                                anamnese: found.draft.anamnese || '',
+                                treatment: found.draft.treatment || '',
+                                category: found.draft.category || 'treatment',
+                                date: found.draft.date || new Date().toISOString().split('T')[0],
+                                motif: found.draft.motif || '',
+                                eventId: found.draft.eventId || '',
+                              });
+                              setActiveDraftNotice(true);
+                            }
+                            const noteFormElem = document.getElementById('new-note-form');
+                            if (noteFormElem) {
+                              noteFormElem.scrollIntoView({ behavior: 'smooth' });
+                              const firstField = noteFormElem.querySelector('input, textarea') as HTMLInputElement | HTMLTextAreaElement | null;
+                              if (firstField) firstField.focus();
+                            }
+                          }}
+                          className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white transition-all shadow-xs cursor-pointer border border-amber-500"
+                        >
+                          <StickyNote size={13} className="text-amber-200" />
+                          <span>{lang === 'fr' ? 'Continuer le brouillon' : lang === 'es' ? 'Continuar borrador' : 'Continue draft'}</span>
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const noteFormElem = document.getElementById('new-note-form');
+                            if (noteFormElem) {
+                              noteFormElem.scrollIntoView({ behavior: 'smooth' });
+                              const firstField = noteFormElem.querySelector('input, textarea') as HTMLInputElement | HTMLTextAreaElement | null;
+                              if (firstField) firstField.focus();
+                            }
+                          }}
+                          className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-bold bg-primary text-white hover:bg-primary/90 transition-all shadow-xs cursor-pointer"
+                        >
+                          <Plus size={13} />
+                          <span>{lang === 'fr' ? 'Ajouter une note' : lang === 'es' ? 'Añadir una nota' : 'Add a note'}</span>
+                        </button>
+                      )}
                     </div>
                   </div>
 
@@ -4256,30 +4406,60 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                             <FileCheck size={11} className="text-sky-600" />
                                             <span>{lang === 'fr' ? 'Voir la note au dossier' : lang === 'es' ? 'Ver nota en ficha' : 'View note in file'} ↓</span>
                                           </button>
-                                        ) : (
-                                          <button
-                                            type="button"
-                                            onClick={() => {
-                                              const isoDate = evDate.toISOString().split('T')[0];
-                                              setNewNote(prev => ({
-                                                ...prev,
-                                                date: isoDate,
-                                                motif: ev.summary || prev.motif,
-                                                eventId: ev.id,
-                                              }));
-                                              const noteFormElem = document.getElementById('new-note-form');
-                                              if (noteFormElem) {
-                                                noteFormElem.scrollIntoView({ behavior: 'smooth' });
-                                                const firstField = noteFormElem.querySelector('input, textarea') as HTMLInputElement | HTMLTextAreaElement | null;
-                                                if (firstField) firstField.focus();
+                                        ) : (() => {
+                                          const apptDraft = getClientDraft(selectedClient.id, ev.id) || getClientDraft(selectedClient.id);
+                                          const isDraftPending = Boolean(apptDraft && (apptDraft.draft.anamnese?.trim() || apptDraft.draft.treatment?.trim() || apptDraft.draft.motif?.trim()));
+
+                                          return (
+                                            <button
+                                              type="button"
+                                              onClick={() => {
+                                                const isoDate = evDate.toISOString().split('T')[0];
+                                                if (isDraftPending && apptDraft) {
+                                                  setNewNote({
+                                                    anamnese: apptDraft.draft.anamnese || '',
+                                                    treatment: apptDraft.draft.treatment || '',
+                                                    category: apptDraft.draft.category || 'treatment',
+                                                    date: apptDraft.draft.date || isoDate,
+                                                    motif: apptDraft.draft.motif || ev.summary || '',
+                                                    eventId: ev.id || apptDraft.draft.eventId || '',
+                                                  });
+                                                  setActiveDraftNotice(true);
+                                                } else {
+                                                  setNewNote(prev => ({
+                                                    ...prev,
+                                                    date: isoDate,
+                                                    motif: ev.summary || prev.motif,
+                                                    eventId: ev.id,
+                                                  }));
+                                                }
+                                                const noteFormElem = document.getElementById('new-note-form');
+                                                if (noteFormElem) {
+                                                  noteFormElem.scrollIntoView({ behavior: 'smooth' });
+                                                  const firstField = noteFormElem.querySelector('input, textarea') as HTMLInputElement | HTMLTextAreaElement | null;
+                                                  if (firstField) firstField.focus();
+                                                }
+                                              }}
+                                              className={isDraftPending
+                                                ? "text-amber-900 hover:text-amber-950 font-bold inline-flex items-center gap-1.5 bg-amber-100 hover:bg-amber-200 px-2.5 py-0.5 rounded-lg border border-amber-300 transition-all cursor-pointer text-[10px] shadow-2xs"
+                                                : "text-primary hover:underline font-bold inline-flex items-center gap-1 cursor-pointer"
                                               }
-                                            }}
-                                            className="text-primary hover:underline font-bold inline-flex items-center gap-1 cursor-pointer"
-                                          >
-                                            <Plus size={11} />
-                                            <span>{lang === 'fr' ? 'Rédiger une note pour ce RDV' : 'Write note for this appointment'}</span>
-                                          </button>
-                                        )}
+                                              title={isDraftPending ? (lang === 'fr' ? 'Reprendre la rédaction du brouillon pour ce patient' : 'Continuar borrador') : undefined}
+                                            >
+                                              {isDraftPending ? (
+                                                <>
+                                                  <StickyNote size={12} className="text-amber-700 animate-pulse" />
+                                                  <span>{lang === 'fr' ? 'Continuer le brouillon' : lang === 'es' ? 'Continuar borrador' : 'Continue draft'}</span>
+                                                </>
+                                              ) : (
+                                                <>
+                                                  <Plus size={11} />
+                                                  <span>{lang === 'fr' ? 'Rédiger une note pour ce RDV' : 'Write note for this appointment'}</span>
+                                                </>
+                                              )}
+                                            </button>
+                                          );
+                                        })()}
 
                                         {!paidInvoice && !isBonoRedeemed && (
                                           <button
@@ -8017,14 +8197,36 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                     <div className="space-y-3 pt-1">
                       {/* Status badges row: Note clinique & Facture */}
                       <div className="grid grid-cols-2 gap-2 text-xs">
-                        <div className={`p-2.5 rounded-xl border flex items-center gap-2 ${
-                          hasNote ? 'bg-emerald-50/80 border-emerald-200 text-emerald-900' : 'bg-slate-50 border-slate-200 text-slate-600'
-                        }`}>
-                          <FileText size={14} className={hasNote ? 'text-emerald-700' : 'text-slate-400'} />
-                          <span className="truncate text-[11px] font-semibold">
-                            {hasNote ? (lang === 'fr' ? '✓ Note clinique' : '✓ Nota guardada') : (lang === 'fr' ? 'Sans note clinique' : 'Sin nota')}
-                          </span>
-                        </div>
+                        {(() => {
+                          const evDraft = clientId ? (getClientDraft(clientId, ev.id) || getClientDraft(clientId)) : null;
+                          const hasDraft = Boolean(evDraft && (evDraft.draft.anamnese?.trim() || evDraft.draft.treatment?.trim() || evDraft.draft.motif?.trim()));
+
+                          return (
+                            <div className={`p-2.5 rounded-xl border flex items-center gap-2 ${
+                              hasNote 
+                                ? 'bg-emerald-50/80 border-emerald-200 text-emerald-900' 
+                                : hasDraft
+                                ? 'bg-amber-50/90 border-amber-300 text-amber-900'
+                                : 'bg-slate-50 border-slate-200 text-slate-600'
+                            }`}>
+                              {hasNote ? (
+                                <FileText size={14} className="text-emerald-700" />
+                              ) : hasDraft ? (
+                                <StickyNote size={14} className="text-amber-700 animate-pulse" />
+                              ) : (
+                                <FileText size={14} className="text-slate-400" />
+                              )}
+                              <span className="truncate text-[11px] font-semibold">
+                                {hasNote 
+                                  ? (lang === 'fr' ? '✓ Note clinique' : '✓ Nota guardada') 
+                                  : hasDraft
+                                  ? (lang === 'fr' ? 'Brouillon en attente' : 'Borrador pendiente')
+                                  : (lang === 'fr' ? 'Sans note clinique' : 'Sin nota')
+                                }
+                              </span>
+                            </div>
+                          );
+                        })()}
 
                         <div className={`p-2.5 rounded-xl border flex items-center gap-2 ${
                           isBonoDeducted
@@ -8112,20 +8314,39 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                     </button>
 
                     {/* Patient File & Notes button (for appointments) */}
-                    {!isOther && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setSelectedAppointmentForDetails(null);
-                          handleGoToNotes(ev);
-                        }}
-                        className="flex-1 sm:flex-initial px-4 py-2.5 bg-[#009cb2] hover:bg-[#00838f] text-white rounded-xl text-xs font-bold transition-all shadow-xs flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap"
-                      >
-                        <FileText size={14} className="shrink-0" />
-                        <span>{lang === 'fr' ? "Fiche & Notes" : "Ficha y Notas"}</span>
-                        <ArrowRight size={13} className="shrink-0" />
-                      </button>
-                    )}
+                    {!isOther && (() => {
+                      const evDraft = clientId ? (getClientDraft(clientId, ev.id) || getClientDraft(clientId)) : null;
+                      const hasDraft = Boolean(evDraft && (evDraft.draft.anamnese?.trim() || evDraft.draft.treatment?.trim() || evDraft.draft.motif?.trim()));
+
+                      return (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedAppointmentForDetails(null);
+                            handleGoToNotes(ev);
+                          }}
+                          className={hasDraft
+                            ? "flex-1 sm:flex-initial px-4 py-2.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-white rounded-xl text-xs font-bold transition-all shadow-xs flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap border border-amber-400"
+                            : "flex-1 sm:flex-initial px-4 py-2.5 bg-[#009cb2] hover:bg-[#00838f] text-white rounded-xl text-xs font-bold transition-all shadow-xs flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap"
+                          }
+                          title={hasDraft ? (lang === 'fr' ? "Continuer la rédaction du brouillon pour ce rendez-vous" : "Continuar borrador") : undefined}
+                        >
+                          {hasDraft ? (
+                            <>
+                              <StickyNote size={14} className="shrink-0 text-amber-100" />
+                              <span>{lang === 'fr' ? "Continuer le brouillon" : lang === 'es' ? "Continuar borrador" : "Continue draft"}</span>
+                              <ArrowRight size={13} className="shrink-0" />
+                            </>
+                          ) : (
+                            <>
+                              <FileText size={14} className="shrink-0" />
+                              <span>{lang === 'fr' ? "Fiche & Notes" : "Ficha y Notas"}</span>
+                              <ArrowRight size={13} className="shrink-0" />
+                            </>
+                          )}
+                        </button>
+                      );
+                    })()}
                   </div>
                 </div>
               </motion.div>
@@ -8210,22 +8431,30 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
               {(!editingEvent.eventType || editingEvent.eventType === 'appointment') && (() => {
                 const associatedNote = clientNotes.find(n => n.eventId && n.eventId === editingEvent.id);
                 const associatedInv = invoices.find(i => (i.eventId && i.eventId === editingEvent.id) || (i.noteId && i.noteId === editingEvent.id));
+                const editClient = editingEvent.clientId ? clients.find(c => c.id === editingEvent.clientId) : (editingEvent.clientName ? clients.find(c => c.name.toLowerCase() === editingEvent.clientName?.toLowerCase()) : undefined);
+                const editDraft = editClient ? (getClientDraft(editClient.id, editingEvent.id) || getClientDraft(editClient.id)) : null;
+                const isDraftPending = Boolean(!associatedNote && editDraft && (editDraft.draft.anamnese?.trim() || editDraft.draft.treatment?.trim() || editDraft.draft.motif?.trim()));
 
                 return (
-                  <div className="mb-4 bg-emerald-50 border border-emerald-200/80 rounded-2xl p-3.5 space-y-2.5">
+                  <div className={`mb-4 rounded-2xl p-3.5 space-y-2.5 border ${
+                    isDraftPending ? 'bg-amber-50/90 border-amber-300' : 'bg-emerald-50 border-emerald-200/80'
+                  }`}>
                     <div className="flex items-center justify-between gap-3">
                       <div>
-                        <p className="text-xs font-bold text-emerald-900 flex items-center gap-1.5">
-                          <FileCheck size={15} className="text-emerald-700" />
+                        <p className={`text-xs font-bold flex items-center gap-1.5 ${
+                          isDraftPending ? 'text-amber-950' : 'text-emerald-900'
+                        }`}>
+                          {isDraftPending ? <StickyNote size={15} className="text-amber-700" /> : <FileCheck size={15} className="text-emerald-700" />}
                           {lang === 'fr' ? 'Dossier Patient & Prise de notes' : lang === 'es' ? 'Historial del Paciente & Notas' : 'Patient File & Clinical Notes'}
                         </p>
-                        <p className="text-[10px] text-emerald-700 mt-0.5">
+                        <p className={`text-[10px] mt-0.5 ${
+                          isDraftPending ? 'text-amber-800 font-medium' : 'text-emerald-700'
+                        }`}>
                           {associatedNote
                             ? (lang === 'fr' ? '✓ Une note clinique est rédigée pour ce rendez-vous' : '✓ Nota clínica redactada para esta cita')
-                            : (hasClientDraft(editingEvent.clientId) 
-                               ? (lang === 'fr' ? 'Un brouillon est en attente pour cette consultation' : 'Tiene un borrador pendiente')
-                               : (lang === 'fr' ? 'Ouvrir la fiche clinique pour ce rendez-vous' : 'Abrir ficha clínica para esta cita')
-                            )
+                            : isDraftPending
+                              ? (lang === 'fr' ? 'Un brouillon est sauvegardé et prêt à être continué' : 'Tiene un borrador pendiente')
+                              : (lang === 'fr' ? 'Ouvrir la fiche clinique pour ce rendez-vous' : 'Abrir ficha clínica para esta cita')
                           }
                         </p>
                       </div>
@@ -8237,27 +8466,42 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                             handleGoToNotes(editingEvent);
                           }
                         }}
-                        className="px-3.5 py-2 bg-primary hover:bg-primary/95 text-white rounded-xl text-xs font-bold transition-all shadow-xs shrink-0 flex items-center gap-1 cursor-pointer"
+                        className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all shadow-xs shrink-0 flex items-center gap-1.5 cursor-pointer ${
+                          isDraftPending
+                            ? 'bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-white border border-amber-400'
+                            : 'bg-primary hover:bg-primary/95 text-white'
+                        }`}
                       >
-                        <span>
-                          {associatedNote 
-                            ? (lang === 'fr' ? 'Consulter la note' : 'Ver nota') 
-                            : (hasClientDraft(editingEvent.clientId)
-                               ? (lang === 'fr' ? 'Continuer le brouillon' : 'Continuar borrador')
-                               : (lang === 'fr' ? 'Prendre des notes' : 'Tomar notas')
-                            )
-                          }
-                        </span>
+                        {isDraftPending ? (
+                          <>
+                            <StickyNote size={13} className="text-amber-100" />
+                            <span>{lang === 'fr' ? 'Continuer le brouillon' : 'Continuar borrador'}</span>
+                          </>
+                        ) : (
+                          <span>
+                            {associatedNote 
+                              ? (lang === 'fr' ? 'Consulter la note' : 'Ver nota') 
+                              : (lang === 'fr' ? 'Prendre des notes' : 'Tomar notas')
+                            }
+                          </span>
+                        )}
                         <ArrowRight size={13} />
                       </button>
                     </div>
 
                     {/* Status badges for this event in edit modal */}
-                    <div className="flex items-center gap-2 pt-2 border-t border-emerald-200/60 text-[10px] flex-wrap">
+                    <div className={`flex items-center gap-2 pt-2 border-t text-[10px] flex-wrap ${
+                      isDraftPending ? 'border-amber-200' : 'border-emerald-200/60'
+                    }`}>
                       {associatedNote ? (
                         <span className="font-bold text-sky-800 bg-sky-100 px-2 py-0.5 rounded-md inline-flex items-center gap-1 border border-sky-300">
                           <FileCheck size={11} className="text-sky-700" />
                           <span>{lang === 'fr' ? '✓ Note rédigée' : '✓ Nota redactada'}</span>
+                        </span>
+                      ) : isDraftPending ? (
+                        <span className="font-bold text-amber-900 bg-amber-100 px-2 py-0.5 rounded-md inline-flex items-center gap-1 border border-amber-300">
+                          <StickyNote size={11} className="text-amber-700 animate-pulse" />
+                          <span>{lang === 'fr' ? 'Brouillon en attente' : 'Borrador pendiente'}</span>
                         </span>
                       ) : (
                         <span className="font-medium text-amber-800 bg-amber-100/70 px-2 py-0.5 rounded-md inline-flex items-center gap-1 border border-amber-300">
