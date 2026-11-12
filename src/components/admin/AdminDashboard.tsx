@@ -8222,7 +8222,10 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                         <p className="text-[10px] text-emerald-700 mt-0.5">
                           {associatedNote
                             ? (lang === 'fr' ? '✓ Une note clinique est rédigée pour ce rendez-vous' : '✓ Nota clínica redactada para esta cita')
-                            : (lang === 'fr' ? 'Ouvrir la fiche clinique pour ce rendez-vous' : 'Abrir ficha clínica para esta cita')
+                            : (hasClientDraft(editingEvent.clientId) 
+                               ? (lang === 'fr' ? 'Un brouillon est en attente pour cette consultation' : 'Tiene un borrador pendiente')
+                               : (lang === 'fr' ? 'Ouvrir la fiche clinique pour ce rendez-vous' : 'Abrir ficha clínica para esta cita')
+                            )
                           }
                         </p>
                       </div>
@@ -8236,7 +8239,15 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                         }}
                         className="px-3.5 py-2 bg-primary hover:bg-primary/95 text-white rounded-xl text-xs font-bold transition-all shadow-xs shrink-0 flex items-center gap-1 cursor-pointer"
                       >
-                        <span>{associatedNote ? (lang === 'fr' ? 'Consulter la note' : 'Ver nota') : (lang === 'fr' ? 'Prendre des notes' : 'Tomar notas')}</span>
+                        <span>
+                          {associatedNote 
+                            ? (lang === 'fr' ? 'Consulter la note' : 'Ver nota') 
+                            : (hasClientDraft(editingEvent.clientId)
+                               ? (lang === 'fr' ? 'Continuer le brouillon' : 'Continuar borrador')
+                               : (lang === 'fr' ? 'Prendre des notes' : 'Tomar notas')
+                            )
+                          }
+                        </span>
                         <ArrowRight size={13} />
                       </button>
                     </div>
