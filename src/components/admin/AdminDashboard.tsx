@@ -364,6 +364,24 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
   };
 
   const [draftsMap, setDraftsMap] = useState(getStoredDrafts);
+
+  const hasClientDraft = (clientId: string) => {
+    return Object.keys(draftsMap).some(k => k.startsWith(clientId + '_'));
+  };
+
+  const allActiveDrafts = useMemo(() => {
+    const drafts = getStoredDrafts();
+    return Object.entries(drafts).map(([key, draft]) => {
+      const clientId = key.split('_')[0];
+      const client = clients.find(c => c.id === clientId);
+      return {
+        key,
+        clientId,
+        client,
+        ...draft
+      };
+    }).filter(d => d.client && (d.anamnese?.trim() || d.treatment?.trim() || d.motif?.trim()));
+  }, [draftsMap, clients]);
   const [activeDraftNotice, setActiveDraftNotice] = useState<boolean>(false);
   const prevSessionRef = useRef<{ clientId: string | null; eventId: string; date: string }>({
     clientId: null,
@@ -3434,6 +3452,64 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                 </button>
               </div>
 
+              {/* Pending Drafts Notice Box */}
+              {allActiveDrafts.length > 0 && (
+                <div className="mb-3 p-3 rounded-2xl bg-amber-50/90 border border-amber-200 shadow-2xs space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <div className="w-6 h-6 rounded-lg bg-amber-200/80 text-amber-900 flex items-center justify-center shrink-0">
+                        <StickyNote size={13} />
+                      </div>
+                      <span className="text-xs font-bold text-amber-950">
+                        {lang === 'fr' ? `Brouillons en attente (${allActiveDrafts.length})` : lang === 'es' ? `Borradores pendientes (${allActiveDrafts.length})` : `Pending Drafts (${allActiveDrafts.length})`}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="space-y-1.5 max-h-36 overflow-y-auto pr-1">
+                    {allActiveDrafts.map((d) => (
+                      <div key={d.key} className="flex items-center justify-between gap-2 p-2 bg-white/90 rounded-xl border border-amber-200/60 text-xs shadow-2xs">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (d.client) {
+                              setSelectedClient(d.client);
+                              setNewNote({
+                                anamnese: d.anamnese || '',
+                                treatment: d.treatment || '',
+                                category: d.category || 'treatment',
+                                date: d.date || new Date().toISOString().split('T')[0],
+                                motif: d.motif || '',
+                                eventId: d.eventId || '',
+                              });
+                              setActiveDraftNotice(true);
+                            }
+                          }}
+                          className="flex-1 text-left min-w-0 cursor-pointer"
+                        >
+                          <p className="font-bold text-amber-950 truncate">{d.client?.name}</p>
+                          <p className="text-[10px] text-amber-800/80 truncate">
+                            {d.motif || d.anamnese.substring(0, 40) || (lang === 'fr' ? 'Brouillon de consultation' : 'Draft note')}
+                          </p>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const current = getStoredDrafts();
+                            delete current[d.key];
+                            localStorage.setItem(NOTE_DRAFTS_STORAGE_KEY, JSON.stringify(current));
+                            setDraftsMap({ ...current });
+                          }}
+                          className="p-1 text-amber-700/60 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer shrink-0"
+                          title={lang === 'fr' ? "Supprimer ce brouillon" : "Discard draft"}
+                        >
+                          <X size={13} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {/* Search bar */}
               <div className="relative mb-3">
                 <Search size={15} className="absolute left-3.5 top-3.5 text-gray-400" />
@@ -3490,24 +3566,13 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                           <div className="overflow-hidden min-w-0">
                             <p className="text-xs font-bold truncate flex items-center gap-1.5 flex-wrap">
                               <span className="truncate">{c.name}</span>
-                              {(() => {
-                                const activity = clientActivityMap[c.id];
-                                if (!activity || activity.total === 0) return (
-                                  <span className="bg-gray-100 text-gray-400 px-1.5 py-0.2 rounded text-[9px] font-bold uppercase tracking-widest border border-gray-200" title={lang === 'fr' ? 'Dossier vide' : 'Empty record'}>Vide</span>
-                                );
-                                return (
-                                  <span className="bg-emerald-100 text-emerald-800 px-1.5 py-0.2 rounded text-[9px] font-bold uppercase tracking-widest border border-emerald-200" title={`${activity.noteCount} notes, ${activity.invCount} invoices, ${activity.evCount} events`}>
-                                    {activity.total} rec.
-                                  </span>
-                                );
-                              })()}
                               {c.profileNote && (
                                 <span className="inline-flex items-center gap-0.5 text-amber-800 bg-amber-100/90 px-1.5 py-0.2 rounded-full text-[9px] font-semibold shrink-0" title={c.profileNote}>
                                   <Pin size={9} className="fill-amber-700/40" />
                                   <span>Note</span>
                                 </span>
                               )}
-                              {draftsMap[c.id] && (
+                              {hasClientDraft(c.id) && (
                                 <span className="inline-flex items-center gap-0.5 text-amber-800 bg-amber-100/90 border border-amber-300/60 px-1.5 py-0.2 rounded-full text-[9px] font-semibold shrink-0" title={lang === 'fr' ? "Brouillon de consultation en cours" : "Draft in progress"}>
                                   <StickyNote size={9} className="text-amber-700" />
                                   <span>{lang === 'fr' ? "Brouillon" : "Draft"}</span>
@@ -5674,7 +5739,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                             })}
                           </div>
 
-                          {/* Hourly Slot Rows (respecting intervals between appointments) */}
+                          {/* Hourly Slot Rows */}
                           <div className="divide-y divide-slate-200/70">
                             {hours.map((hourStr, hIdx) => {
                               const hourNum = parseInt(hourStr.split(':')[0], 10);
@@ -5685,7 +5750,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                   className="grid grid-cols-[64px_repeat(7,minmax(140px,1fr))] min-h-[66px]"
                                 >
                                   {/* Left Hour Label - Sticky on horizontal scroll for tablet and mobile */}
-                                  <div className="py-2.5 pr-2.5 text-right font-mono text-[11px] font-bold text-slate-500 select-none bg-slate-50 border-r border-slate-200/80 sticky left-0 z-20 w-[64px] min-w-[64px] shrink-0 shadow-[2px_0_6px_-2px_rgba(0,0,0,0.08)]">
+                                  <div className="py-2.5 pr-2.5 text-right font-mono text-[11px] font-bold text-slate-500 select-none bg-slate-50 border-r border-slate-200/80 sticky left-0 z-20 w-[64px] min-w-[64px] shrink-0 shadow-[2px_0_6px_-2px_rgba(0,0,0,0.08)] flex items-center justify-end">
                                     {hourStr}
                                   </div>
 
@@ -5705,28 +5770,36 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                       <div
                                         key={dayIdx}
                                         data-is-today={dayItem.isToday ? "true" : undefined}
-                                        className={`p-1 border-r border-slate-200/60 last:border-r-0 relative group/slot transition-colors flex flex-col justify-start ${
+                                        className={`p-1 border-r border-slate-200/60 last:border-r-0 relative group/slot transition-colors min-h-[72px] ${
                                           dayItem.isToday ? 'bg-[#e0f5f7]/25' : 'bg-white'
                                         }`}
                                       >
                                         {slotEvents.length > 0 ? (
-                                          <div className="space-y-1 w-full">
-                                            {slotEvents.map((ev, sIdx) => renderAppointmentCard(ev, `${dayItem.dateString}-${hourNum}-${ev.id || sIdx}-${sIdx}`))}
-                                            <button
-                                              type="button"
-                                              onClick={() => handleQuickAddEvent(dayItem.dateString, hourStr)}
-                                              className="w-full py-0.5 text-[9px] font-bold text-[#009cb2] hover:bg-cyan-50/80 rounded border border-dashed border-[#009cb2]/30 transition-all flex items-center justify-center gap-1 opacity-0 group-hover/slot:opacity-100 cursor-pointer"
-                                              title={lang === 'fr' ? `Ajouter un autre RDV dans l'heure (${hourStr})` : `Add another appointment at ${hourStr}`}
-                                            >
-                                              <Plus size={10} />
-                                              <span>{lang === 'fr' ? `+ RDV (${hourStr})` : `+ Add`}</span>
-                                            </button>
+                                          <div className="relative w-full h-full min-h-[64px]">
+                                            {slotEvents.map((ev, sIdx) => {
+                                              try {
+                                                const evDate = new Date(ev.start);
+                                                const mins = evDate.getMinutes();
+                                                const topPercent = Math.min(85, Math.max(0, (mins / 60) * 100));
+                                                return (
+                                                  <div 
+                                                    key={ev.id || sIdx} 
+                                                    style={{ top: `${topPercent}%` }}
+                                                    className="absolute left-1 right-1 z-10"
+                                                  >
+                                                    {renderAppointmentCard(ev, `${dayItem.dateString}-${hourNum}-${ev.id || sIdx}-${sIdx}`)}
+                                                  </div>
+                                                );
+                                              } catch {
+                                                return <div key={sIdx}>{renderAppointmentCard(ev, `${dayItem.dateString}-${hourNum}-${ev.id || sIdx}-${sIdx}`)}</div>;
+                                              }
+                                            })}
                                           </div>
                                         ) : (
                                           <button
                                             type="button"
                                             onClick={() => handleQuickAddEvent(dayItem.dateString, hourStr)}
-                                            className="w-full h-full min-h-[58px] rounded-lg border border-dashed border-transparent hover:border-[#009cb2]/40 hover:bg-[#009cb2]/5 flex items-center justify-center text-[#009cb2] opacity-0 group-hover/slot:opacity-100 transition-all cursor-pointer"
+                                            className="w-full h-full min-h-[64px] rounded-lg border border-dashed border-transparent hover:border-[#009cb2]/40 hover:bg-[#009cb2]/5 flex items-center justify-center text-[#009cb2] opacity-0 group-hover/slot:opacity-100 transition-all cursor-pointer"
                                             title={lang === 'fr' ? `Ajouter à ${hourStr}` : `Add at ${hourStr}`}
                                           >
                                             <Plus size={14} className="stroke-[2.5]" />
@@ -5828,7 +5901,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                       </div>
 
                                       {/* Slot Content */}
-                                      <div className="flex-1 space-y-2">
+                                      <div className="flex-1 relative min-h-[72px]">
                                         {slotEvents.length > 0 ? (
                                           <div className="space-y-1.5">
                                             {slotEvents.map((ev, sIdx) => renderAppointmentCard(ev, `${currentDateStr}-${hourNum}-${ev.id || sIdx}-${sIdx}`))}
