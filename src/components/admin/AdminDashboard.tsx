@@ -731,7 +731,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
     title: "Sesión de osteopatía",
     date: new Date().toISOString().split('T')[0],
     startTime: '10:00',
-    endTime: '11:00',
+    endTime: '10:55',
     description: '',
     eventType: 'appointment',
   });
@@ -2696,7 +2696,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
         title: getDefaultAppointmentTitle(lang),
         date: new Date().toISOString().split('T')[0],
         startTime: '10:00',
-        endTime: '11:00',
+        endTime: '10:55',
         description: '',
         eventType: 'appointment',
       });
@@ -8051,7 +8051,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                           const [hours, minutes] = startTime.split(':').map(Number);
                           const date = new Date();
                           date.setHours(hours);
-                          date.setMinutes((minutes || 0) + (newEvent.eventType === 'appointment' ? 55 : 30));
+                          date.setMinutes((minutes || 0) + 55);
                           const endTime = `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
                           setNewEvent(prev => ({ ...prev, startTime, endTime }));
                         }}
@@ -8071,7 +8071,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                 const [h, m] = [parseInt(currentH, 10), parseInt(min, 10)];
                                 const date = new Date();
                                 date.setHours(h);
-                                date.setMinutes((m || 0) + (newEvent.eventType === 'appointment' ? 55 : 30));
+                                date.setMinutes((m || 0) + 55);
                                 const endTime = `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
                                 setNewEvent(prev => ({ ...prev, startTime, endTime }));
                               }}
@@ -8728,7 +8728,16 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                         step="60"
                         required
                         value={editingEvent.startTime}
-                        onChange={(e) => setEditingEvent(prev => prev ? { ...prev, startTime: e.target.value } : null)}
+                        onChange={(e) => {
+                          const startTime = e.target.value;
+                          if (!startTime) return;
+                          const [hours, minutes] = startTime.split(':').map(Number);
+                          const date = new Date();
+                          date.setHours(hours);
+                          date.setMinutes((minutes || 0) + 55);
+                          const endTime = `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+                          setEditingEvent(prev => prev ? { ...prev, startTime, endTime } : null);
+                        }}
                         className="w-full p-2.5 bg-secondary rounded-xl border border-black/5 text-xs font-mono font-bold focus:outline-none focus:ring-1 focus:ring-primary focus:bg-white transition-all"
                       />
                       {/* Minute presets :00, :15, :30, :45 */}
@@ -8745,7 +8754,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                 const [h, m] = [parseInt(currentH, 10), parseInt(min, 10)];
                                 const date = new Date();
                                 date.setHours(h);
-                                date.setMinutes((m || 0) + (editingEvent?.eventType === 'appointment' ? 55 : 30));
+                                date.setMinutes((m || 0) + 55);
                                 const endTime = `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
                                 setEditingEvent(prev => prev ? ({ ...prev, startTime, endTime }) : null);
                               }}
