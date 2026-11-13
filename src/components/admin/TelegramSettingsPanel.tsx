@@ -22,18 +22,18 @@ import {
 } from 'lucide-react';
 import { TelegramConfigResponse, TelegramPreviewResponse } from '../../types';
 import { Language } from '../../translations';
+import {
+  DetectedChat,
+  loadNotificationConfig,
+  saveNotificationConfig,
+  detectNotificationChats,
+  getNotificationPreview,
+  sendNotificationNow,
+} from '../../lib/notificationsService';
 
 interface TelegramSettingsPanelProps {
   lang: Language;
   onStatusChange?: (enabled: boolean, configured: boolean) => void;
-}
-
-interface DetectedChat {
-  chatId: string;
-  label: string;
-  username?: string;
-  type: string;
-  lastMessage?: string;
 }
 
 const UI_TEXT = {
@@ -249,18 +249,8 @@ export default function TelegramSettingsPanel({ lang, onStatusChange }: Telegram
       timezone: string;
     }) => {
       try {
-        const params = new URLSearchParams({
-          language: opts.language,
-          includePhone: String(opts.includePhone),
-          includeMotif: String(opts.includeMotif),
-          includeBono: String(opts.includeBono),
-          timezone: opts.timezone,
-        });
-        const res = await fetch(`/api/telegram/preview?${params.toString()}`);
-        if (res.ok) {
-          const data: TelegramPreviewResponse = await res.json();
-          setPreview(data);
-        }
+        const data = await getNotificationPreview(opts);
+        setPreview(data);
       } catch (err) {
         console.warn('Failed to fetch notification preview:', err);
       }
@@ -272,9 +262,7 @@ export default function TelegramSettingsPanel({ lang, onStatusChange }: Telegram
     async (silent = false) => {
       try {
         if (!silent) setIsLoading(true);
-        const res = await fetch('/api/telegram/config');
-        if (!res.ok) throw new Error('API unavailable');
-        const data: TelegramConfigResponse = await res.json();
+        const data = await loadNotificationConfig();
         setConfig(data);
         setEnabled(data.enabled);
         setBotTokenInput(data.hasBotToken ? data.botTokenMasked : '');
@@ -337,7 +325,18 @@ export default function TelegramSettingsPanel({ lang, onStatusChange }: Telegram
       setFeedback(null);
       const nextEnabled = typeof overrideEnabled === 'boolean' ? overrideEnabled : enabled;
 
-      const payload: Record<string, any> = {
+      const payload: {
+        enabled: boolean;
+        botToken?: string;
+        chatId: string;
+        chatLabel: string;
+        sendTime: string;
+        timezone: string;
+        language: 'fr' | 'es' | 'en';
+        includePhone: boolean;
+        includeMotif: boolean;
+        includeBono: boolean;
+      } = {
         enabled: nextEnabled,
         chatId: chatIdInput.trim(),
         chatLabel: chatLabelInput.trim(),
@@ -355,20 +354,16 @@ export default function TelegramSettingsPanel({ lang, onStatusChange }: Telegram
         payload.botToken = botTokenInput.trim();
       }
 
-      const res = await fetch('/api/telegram/config', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      const json = await res.json();
-      if (!res.ok || !json.ok) {
-        throw new Error(json.error || txt.errSave);
-      }
-
-      const saved: TelegramConfigResponse = json.config;
+      const saved = await saveNotificationConfig(payload);
       setConfig(saved);
       setEnabled(saved.enabled);
       setBotTokenInput(saved.hasBotToken ? saved.botTokenMasked : '');
+      if (saved.chatId) {
+        setChatIdInput(saved.chatId);
+      }
+      if (saved.chatLabel) {
+        setChatLabelInput(saved.chatLabel);
+      }
       const connected = Boolean(saved.hasBotToken && saved.chatId);
       if (connected) {
         setShowConnectionFields(false);
@@ -393,24 +388,16 @@ export default function TelegramSettingsPanel({ lang, onStatusChange }: Telegram
     try {
       setIsDetecting(true);
       setFeedback(null);
-      const res = await fetch('/api/telegram/detect-chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          botToken: botTokenInput.includes('••••') ? undefined : botTokenInput.trim(),
-        }),
-      });
-      const json = await res.json();
-      if (!res.ok || !json.ok) {
-        throw new Error(json.error || txt.errDetect);
-      }
+      const result = await detectNotificationChats(
+        botTokenInput.includes('••••') ? undefined : botTokenInput.trim()
+      );
 
-      const chats: DetectedChat[] = json.chats || [];
+      const chats: DetectedChat[] = result.chats || [];
       setDetectedChats(chats);
 
-      if (json.config) {
-        setConfig(json.config);
-        setBotTokenInput(json.config.hasBotToken ? json.config.botTokenMasked : '');
+      if (result.config) {
+        setConfig(result.config);
+        setBotTokenInput(result.config.hasBotToken ? result.config.botTokenMasked : '');
       }
 
       if (chats.length > 0) {
@@ -441,14 +428,9 @@ export default function TelegramSettingsPanel({ lang, onStatusChange }: Telegram
 
       await handleSave();
 
-      const res = await fetch('/api/telegram/send-test', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mode }),
-      });
-      const json = await res.json();
+      const json = await sendNotificationNow(mode, { bypassEnabledCheck: true });
 
-      if (!res.ok || !json.ok) {
+      if (!json.ok) {
         throw new Error(json.error || txt.errSend);
       }
 

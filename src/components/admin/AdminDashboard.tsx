@@ -13,6 +13,7 @@ import { Client, ClientNote, Invoice, CalendarEvent, EventType, GoogleReview, Cl
 import { api, supabase, isSupabaseConfigured, SUPABASE_SQL_SETUP, capitalizeFirstName, sortInvoicesByDate, normalizeInvoiceDescription } from '../../lib/supabase';
 import SpineLogo from '../SpineLogo';
 import TelegramSettingsPanel from './TelegramSettingsPanel';
+import { loadNotificationConfig, sendNotificationNow } from '../../lib/notificationsService';
 import { useTranslation } from '../../App';
 import { Language, translations } from '../../translations';
 
@@ -198,8 +199,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
   });
 
   useEffect(() => {
-    fetch('/api/telegram/config')
-      .then(res => (res.ok ? res.json() : null))
+    loadNotificationConfig()
       .then(data => {
         if (data) {
           setTelegramStatus({
@@ -210,6 +210,13 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
         }
       })
       .catch(() => {});
+
+    // Check if today's morning summary is due when dashboard opens or is active
+    sendNotificationNow('digest', { enforceTimeWindow: true }).catch(() => {});
+    const notifTimer = setInterval(() => {
+      sendNotificationNow('digest', { enforceTimeWindow: true }).catch(() => {});
+    }, 60000);
+    return () => clearInterval(notifTimer);
   }, []);
   
   // Google Reviews management state
