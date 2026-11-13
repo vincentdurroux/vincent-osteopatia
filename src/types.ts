@@ -89,3 +89,48 @@ export interface GoogleReview {
   text: string;
   created_at?: string;
 }
+
+export interface TelegramAppointmentItem {
+  id: string;
+  start: string;
+  end: string;
+  timeRange: string;
+  clientId?: string;
+  clientName: string;
+  phone?: string;
+  motif?: string;
+  hasBono?: boolean;
+  bonoSessionsRemaining?: number;
+  bonoType?: string;
+}
+
+export interface TelegramConfigResponse {
+  enabled: boolean;
+  hasBotToken: boolean;
+  botTokenMasked: string;
+  envBotTokenConfigured: boolean;
+  chatId: string;
+  chatLabel: string;
+  envChatIdConfigured: boolean;
+  sendTime: string;
+  timezone: string;
+  language: 'fr' | 'es' | 'en';
+  includePhone: boolean;
+  includeMotif: boolean;
+  includeBono: boolean;
+  lastSentDate: string | null;
+  lastSentAt: string | null;
+  lastSentCount: number;
+  lastStatus: 'sent' | 'skipped_no_patients' | 'error' | null;
+  lastError: string | null;
+  cronSecret: string;
+  botUsername?: string;
+}
+
+export interface TelegramPreviewResponse {
+  dateStr: string;
+  dateFormatted: string;
+  timezone: string;
+  appointments: TelegramAppointmentItem[];
+  messageText: string;
+}

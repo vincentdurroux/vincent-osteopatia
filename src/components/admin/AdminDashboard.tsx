@@ -7,11 +7,12 @@ import {
   ChevronRight, Pencil, ChevronLeft, ChevronDown, LayoutGrid, List, ArrowRight,
   Copy, CheckCircle2, XCircle, AlertTriangle, Database, Server, UserPlus, User,
   Tag, BadgePercent, Percent, Sparkles, IdCard, X, Columns3, Lock, Coffee, Briefcase, Bookmark, Pin, StickyNote,
-  ArrowUpDown, ArrowUp, ArrowDown, ExternalLink, Info, Star, Cloud
+  ArrowUpDown, ArrowUp, ArrowDown, ExternalLink, Info, Star, Cloud, Send
 } from 'lucide-react';
 import { Client, ClientNote, Invoice, CalendarEvent, EventType, GoogleReview, ClinicalNoteDraftItem } from '../../types';
 import { api, supabase, isSupabaseConfigured, SUPABASE_SQL_SETUP, capitalizeFirstName, sortInvoicesByDate, normalizeInvoiceDescription } from '../../lib/supabase';
 import SpineLogo from '../SpineLogo';
+import TelegramSettingsPanel from './TelegramSettingsPanel';
 import { useTranslation } from '../../App';
 import { Language, translations } from '../../translations';
 
@@ -134,7 +135,7 @@ const formatRecapSubtitle = (
   return `${months[mIdx]} ${year}`;
 };
 
-type TabType = 'overview' | 'clients' | 'calendar' | 'billing' | 'reviews';
+type TabType = 'overview' | 'clients' | 'calendar' | 'billing' | 'reviews' | 'telegram';
 
 const DEFAULT_PATIENT_FORM = {
   firstName: '',
@@ -188,6 +189,27 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
       setCurrentTime(new Date());
     }, 15000);
     return () => clearInterval(clockInterval);
+  }, []);
+
+  // Telegram morning digest status badge
+  const [telegramStatus, setTelegramStatus] = useState<{ enabled: boolean; configured: boolean; sendTime?: string }>({
+    enabled: false,
+    configured: false,
+  });
+
+  useEffect(() => {
+    fetch('/api/telegram/config')
+      .then(res => (res.ok ? res.json() : null))
+      .then(data => {
+        if (data) {
+          setTelegramStatus({
+            enabled: Boolean(data.enabled),
+            configured: Boolean(data.hasBotToken && data.chatId),
+            sendTime: data.sendTime,
+          });
+        }
+      })
+      .catch(() => {});
   }, []);
   
   // Google Reviews management state
@@ -3011,6 +3033,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
             { id: 'calendar', label: t.admin.tabs.calendar, icon: Calendar },
             { id: 'billing', label: t.admin.tabs.billing, icon: FileText },
             { id: 'reviews', label: 'Google Reviews', icon: Star },
+            { id: 'telegram', label: 'Telegram', icon: Send },
           ].map(item => {
             const Icon = item.icon;
             const isActive = activeTab === item.id;
@@ -3089,6 +3112,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
               { id: 'calendar', label: t.admin.tabs.calendar, icon: Calendar },
               { id: 'billing', label: t.admin.tabs.billing, icon: FileText },
               { id: 'reviews', label: 'Google Reviews', icon: Star },
+              { id: 'telegram', label: 'Telegram', icon: Send },
             ].map(item => {
               const Icon = item.icon;
               const isActive = activeTab === item.id;
@@ -3101,14 +3125,19 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                     }
                     setActiveTab(item.id as TabType);
                   }}
-                  className={`flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl transition-all whitespace-nowrap w-full text-xs font-semibold uppercase tracking-wider cursor-pointer ${
+                  className={`flex items-center justify-between gap-2.5 px-3.5 py-2.5 rounded-xl transition-all whitespace-nowrap w-full text-xs font-semibold uppercase tracking-wider cursor-pointer ${
                     isActive 
                       ? 'bg-primary text-white shadow-md shadow-primary/10' 
                       : 'text-gray-600 hover:bg-black/5'
                   }`}
                 >
-                  <Icon size={16} />
-                  <span>{item.label}</span>
+                  <span className="flex items-center gap-2.5">
+                    <Icon size={16} />
+                    <span>{item.label}</span>
+                  </span>
+                  {item.id === 'telegram' && telegramStatus.enabled && telegramStatus.configured && (
+                    <span className={`w-2 h-2 rounded-full ${isActive ? 'bg-emerald-300' : 'bg-emerald-500'}`} />
+                  )}
                 </button>
               );
             })}
@@ -3287,7 +3316,24 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setActiveTab('telegram')}
+                        className={`flex items-center gap-1.5 px-3 py-2 rounded-2xl text-xs font-bold transition-all border cursor-pointer ${
+                          telegramStatus.enabled && telegramStatus.configured
+                            ? 'bg-sky-50 hover:bg-sky-100 text-[#0077b5] border-sky-200'
+                            : 'bg-[#f4f4ec] hover:bg-black/5 text-gray-600 border-black/5'
+                        }`}
+                        title={lang === 'fr' ? 'Configurer le récapitulatif matinal Telegram' : 'Configurar resumen matinal en Telegram'}
+                      >
+                        <Send size={13} />
+                        <span>
+                          {telegramStatus.enabled && telegramStatus.configured
+                            ? `Telegram ${telegramStatus.sendTime || '08:00'}`
+                            : 'Telegram'}
+                        </span>
+                      </button>
                       <button
                         onClick={() => setIsAddEventOpen(true)}
                         className="flex items-center gap-1.5 px-3.5 py-2 bg-primary hover:bg-primary/95 text-white rounded-2xl text-xs font-bold transition-all shadow-sm"
@@ -7237,6 +7283,16 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
 
             </div>
           </div>
+        )}
+
+        {/* TAB 6: TELEGRAM MORNING DIGEST */}
+        {activeTab === 'telegram' && (
+          <TelegramSettingsPanel
+            lang={lang}
+            onStatusChange={(enabled, configured) =>
+              setTelegramStatus(prev => ({ ...prev, enabled, configured }))
+            }
+          />
         )}
 
       </main>

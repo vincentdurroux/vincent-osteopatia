@@ -2197,14 +2197,18 @@ export const api = {
         }
 
         if (!error && data) {
-          const remoteEvents = data.map(row => enrichEvent(mapEventFromDB(row)));
+          const filteredData = data.filter((row: any) => row.id !== '00000000-0000-4000-8000-743567000001' && row.summary !== '__SYS_TELEGRAM_CONFIG__');
+          const remoteEvents = filteredData.map(row => enrichEvent(mapEventFromDB(row)));
           return remoteEvents.sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
         }
       } catch (err) {
         console.warn('Supabase getLocalEvents exception:', err);
       }
     }
-    return localEvents.map(enrichEvent).sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
+    return localEvents
+      .filter(ev => ev.id !== '00000000-0000-4000-8000-743567000001' && ev.summary !== '__SYS_TELEGRAM_CONFIG__')
+      .map(enrichEvent)
+      .sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
   },
 
   async createLocalEvent(event: Omit<CalendarEvent, 'id'> & { id?: string }): Promise<CalendarEvent> {
