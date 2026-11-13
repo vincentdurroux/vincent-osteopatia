@@ -1,6 +1,7 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
-  Send,
+  Bell,
+  BellOff,
   Clock,
   CheckCircle2,
   AlertTriangle,
@@ -12,15 +13,12 @@ import {
   FileText,
   Ticket,
   Globe,
-  Bot,
   MessageSquare,
-  Bell,
-  BellOff,
   CalendarCheck,
-  HelpCircle,
+  Send,
+  Settings2,
   KeyRound,
   UserCheck,
-  ExternalLink,
 } from 'lucide-react';
 import { TelegramConfigResponse, TelegramPreviewResponse } from '../../types';
 import { Language } from '../../translations';
@@ -38,7 +36,180 @@ interface DetectedChat {
   lastMessage?: string;
 }
 
+const UI_TEXT = {
+  fr: {
+    title: 'Notifications',
+    subtitle:
+      'Recevez chaque matin le récapitulatif de vos patients du jour (uniquement lorsque des patients sont programmés).',
+    activeBadge: 'Envoi matinal actif',
+    pausedBadge: 'En pause',
+    scheduleTitle: 'Horaire matinal & Contenu du récapitulatif',
+    scheduleSubtitle: 'Silence automatique les jours sans patient programmé.',
+    activeRule:
+      "Règle active : la notification n'est envoyée que si au moins 1 rendez-vous patient est programmé dans la journée (les créneaux bloqués sont ignorés).",
+    sendTimeLabel: "Heure d'envoi",
+    timezoneLabel: 'Fuseau horaire',
+    messageLangLabel: 'Langue du message',
+    includedInfoLabel: 'Informations incluses par patient',
+    phoneLabel: 'Téléphone',
+    motifLabel: 'Motif / Remarque',
+    bonoLabel: 'Statut Bono',
+    saveBtn: 'Enregistrer les paramètres',
+    connectedChannelTitle: 'Canal de réception connecté',
+    activeRecipient: 'Destinataire actif',
+    configureRecipientBelow: 'Configurez votre destinataire ci-dessous',
+    hideBtn: 'Masquer',
+    editConnectionBtn: 'Modifier la connexion',
+    botTokenLabel: 'Token du Bot',
+    savedBadge: '✓ Enregistré',
+    recipientIdLabel: 'Identifiant Destinataire (Chat ID)',
+    detectBtn: 'Détecter automatiquement',
+    lastStatusLabel: 'Dernier état',
+    statusSent: (count: number) => `✓ Envoyé (${count} patient${count > 1 ? 's' : ''})`,
+    statusSkipped: 'Ignoré (0 patient ce jour-là)',
+    statusError: (err: string) => `Erreur : ${err}`,
+    statusReady: 'Prêt pour le prochain envoi',
+    lastSentLabel: 'Dernier envoi',
+    cronLabel: 'URL Webhook Cron (pour réveil matinal externe type cron-job.org) :',
+    copiedBtn: 'Copié',
+    copyBtn: 'Copier',
+    previewTitle: "Aperçu de la notification d'aujourd'hui",
+    patientCount: (count: number) => `${count} patient${count > 1 ? 's' : ''}`,
+    noPatientsTitle: "Aucun patient programmé aujourd'hui",
+    noPatientsDesc: (dateStr: string) =>
+      `Pour le ${dateStr || 'jour'}, aucune notification matinale ne sera envoyée.`,
+    sendDigestBtn: "Envoyer le récapitulatif d'aujourd'hui",
+    sendTestBtn: 'Envoyer une notification test',
+    errServer: 'Impossible de contacter le serveur de notifications.',
+    savedFeedback: 'Paramètres de notifications sauvegardés et synchronisés.',
+    errSave: 'Erreur lors de la sauvegarde.',
+    errDetect: 'Erreur lors de la détection.',
+    detectedFeedback: (label: string, id: string) => `Destinataire détecté : ${label} (${id}).`,
+    errSend: "Échec de l'envoi de la notification.",
+    skippedNoPatientsFeedback:
+      "Aucun patient programmé aujourd'hui — aucun récapitulatif n'a été envoyé.",
+    sentSuccessFeedback: 'Notification envoyée avec succès !',
+  },
+  es: {
+    title: 'Notificaciones',
+    subtitle:
+      'Reciba cada mañana el resumen de sus pacientes del día (solo los días con citas programadas).',
+    activeBadge: 'Envío matinal activo',
+    pausedBadge: 'En pausa',
+    scheduleTitle: 'Horario matinal y Contenido del resumen',
+    scheduleSubtitle: 'Silencio automático los días sin pacientes programados.',
+    activeRule:
+      'Regla activa: la notificación solo se envía si hay al menos 1 cita de paciente programada en el día (los horarios bloqueados se ignoran).',
+    sendTimeLabel: 'Hora de envío',
+    timezoneLabel: 'Zona horaria',
+    messageLangLabel: 'Idioma del mensaje',
+    includedInfoLabel: 'Información incluida por paciente',
+    phoneLabel: 'Teléfono',
+    motifLabel: 'Motivo / Nota',
+    bonoLabel: 'Estado Bono',
+    saveBtn: 'Guardar configuración',
+    connectedChannelTitle: 'Canal de recepción conectado',
+    activeRecipient: 'Destinatario activo',
+    configureRecipientBelow: 'Configure su destinatario a continuación',
+    hideBtn: 'Ocultar',
+    editConnectionBtn: 'Editar conexión',
+    botTokenLabel: 'Token del Bot',
+    savedBadge: '✓ Guardado',
+    recipientIdLabel: 'ID del Destinatario (Chat ID)',
+    detectBtn: 'Detectar automáticamente',
+    lastStatusLabel: 'Último estado',
+    statusSent: (count: number) => `✓ Enviado (${count} paciente${count > 1 ? 's' : ''})`,
+    statusSkipped: 'Omitido (0 pacientes ese día)',
+    statusError: (err: string) => `Error: ${err}`,
+    statusReady: 'Listo para el próximo envío',
+    lastSentLabel: 'Último envío',
+    cronLabel: 'URL Webhook Cron (para activación matinal externa tipo cron-job.org):',
+    copiedBtn: 'Copiado',
+    copyBtn: 'Copiar',
+    previewTitle: 'Vista previa de la notificación de hoy',
+    patientCount: (count: number) => `${count} paciente${count > 1 ? 's' : ''}`,
+    noPatientsTitle: 'No hay pacientes programados hoy',
+    noPatientsDesc: (dateStr: string) =>
+      `Para el ${dateStr || 'día de hoy'}, no se enviará ninguna notificación matinal.`,
+    sendDigestBtn: 'Enviar el resumen de hoy',
+    sendTestBtn: 'Enviar notificación de prueba',
+    errServer: 'No se pudo conectar con el servidor de notificaciones.',
+    savedFeedback: 'Configuración de notificaciones guardada y sincronizada.',
+    errSave: 'Error al guardar la configuración.',
+    errDetect: 'Error durante la detección.',
+    detectedFeedback: (label: string, id: string) => `Destinatario detectado: ${label} (${id}).`,
+    errSend: 'Error al enviar la notificación.',
+    skippedNoPatientsFeedback:
+      'No hay pacientes programados hoy — no se envió ningún resumen.',
+    sentSuccessFeedback: '¡Notificación enviada con éxito!',
+  },
+  en: {
+    title: 'Notifications',
+    subtitle:
+      'Receive a daily morning summary of your scheduled patients (only on days with appointments).',
+    activeBadge: 'Morning digest active',
+    pausedBadge: 'Paused',
+    scheduleTitle: 'Morning Schedule & Summary Content',
+    scheduleSubtitle: 'Automatic silence on days with no scheduled patients.',
+    activeRule:
+      'Active rule: the notification is only sent if at least 1 patient appointment is scheduled for the day (blocked slots are ignored).',
+    sendTimeLabel: 'Send time',
+    timezoneLabel: 'Timezone',
+    messageLangLabel: 'Message language',
+    includedInfoLabel: 'Information included per patient',
+    phoneLabel: 'Phone number',
+    motifLabel: 'Reason / Note',
+    bonoLabel: 'Bono status',
+    saveBtn: 'Save settings',
+    connectedChannelTitle: 'Connected Receiving Channel',
+    activeRecipient: 'Active recipient',
+    configureRecipientBelow: 'Configure your recipient below',
+    hideBtn: 'Hide',
+    editConnectionBtn: 'Edit connection',
+    botTokenLabel: 'Bot Token',
+    savedBadge: '✓ Saved',
+    recipientIdLabel: 'Recipient ID (Chat ID)',
+    detectBtn: 'Auto-detect',
+    lastStatusLabel: 'Last status',
+    statusSent: (count: number) => `✓ Sent (${count} patient${count > 1 ? 's' : ''})`,
+    statusSkipped: 'Skipped (0 patients that day)',
+    statusError: (err: string) => `Error: ${err}`,
+    statusReady: 'Ready for next scheduled send',
+    lastSentLabel: 'Last sent',
+    cronLabel: 'Cron Webhook URL (for external morning trigger like cron-job.org):',
+    copiedBtn: 'Copied',
+    copyBtn: 'Copy',
+    previewTitle: "Today's Notification Preview",
+    patientCount: (count: number) => `${count} patient${count > 1 ? 's' : ''}`,
+    noPatientsTitle: 'No patients scheduled today',
+    noPatientsDesc: (dateStr: string) =>
+      `For ${dateStr || 'today'}, no morning notification will be sent.`,
+    sendDigestBtn: "Send today's summary",
+    sendTestBtn: 'Send test notification',
+    errServer: 'Unable to reach the notifications server.',
+    savedFeedback: 'Notification settings saved and synced.',
+    errSave: 'Error saving settings.',
+    errDetect: 'Error detecting recipient.',
+    detectedFeedback: (label: string, id: string) => `Recipient detected: ${label} (${id}).`,
+    errSend: 'Failed to send notification.',
+    skippedNoPatientsFeedback: 'No patients scheduled today — no summary was sent.',
+    sentSuccessFeedback: 'Notification sent successfully!',
+  },
+};
+
 export default function TelegramSettingsPanel({ lang, onStatusChange }: TelegramSettingsPanelProps) {
+  const txt = UI_TEXT[lang] || UI_TEXT.fr;
+
+  const onStatusChangeRef = useRef(onStatusChange);
+  useEffect(() => {
+    onStatusChangeRef.current = onStatusChange;
+  }, [onStatusChange]);
+
+  const langRef = useRef(lang);
+  useEffect(() => {
+    langRef.current = lang;
+  }, [lang]);
+
   const [config, setConfig] = useState<TelegramConfigResponse | null>(null);
   const [preview, setPreview] = useState<TelegramPreviewResponse | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -46,7 +217,7 @@ export default function TelegramSettingsPanel({ lang, onStatusChange }: Telegram
   const [isDetecting, setIsDetecting] = useState(false);
   const [isTestingPing, setIsTestingPing] = useState(false);
   const [isTestingDigest, setIsTestingDigest] = useState(false);
-  const [showGuide, setShowGuide] = useState(false);
+  const [showConnectionFields, setShowConnectionFields] = useState(false);
   const [copiedCron, setCopiedCron] = useState(false);
 
   // Form states
@@ -56,7 +227,7 @@ export default function TelegramSettingsPanel({ lang, onStatusChange }: Telegram
   const [chatLabelInput, setChatLabelInput] = useState('');
   const [sendTime, setSendTime] = useState('08:00');
   const [timezone, setTimezone] = useState('Europe/Madrid');
-  const [messageLang, setMessageLang] = useState<'fr' | 'es' | 'en'>('fr');
+  const [messageLang, setMessageLang] = useState<'fr' | 'es' | 'en'>(lang);
   const [includePhone, setIncludePhone] = useState(true);
   const [includeMotif, setIncludeMotif] = useState(true);
   const [includeBono, setIncludeBono] = useState(true);
@@ -64,21 +235,26 @@ export default function TelegramSettingsPanel({ lang, onStatusChange }: Telegram
   const [detectedChats, setDetectedChats] = useState<DetectedChat[]>([]);
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
 
+  // Keep message preview language aligned when user switches UI language in header
+  useEffect(() => {
+    setMessageLang(lang);
+  }, [lang]);
+
   const fetchPreview = useCallback(
-    async (opts?: {
-      language?: 'fr' | 'es' | 'en';
-      includePhone?: boolean;
-      includeMotif?: boolean;
-      includeBono?: boolean;
-      timezone?: string;
+    async (opts: {
+      language: 'fr' | 'es' | 'en';
+      includePhone: boolean;
+      includeMotif: boolean;
+      includeBono: boolean;
+      timezone: string;
     }) => {
       try {
         const params = new URLSearchParams({
-          language: opts?.language || messageLang,
-          includePhone: String(opts?.includePhone ?? includePhone),
-          includeMotif: String(opts?.includeMotif ?? includeMotif),
-          includeBono: String(opts?.includeBono ?? includeBono),
-          timezone: opts?.timezone || timezone,
+          language: opts.language,
+          includePhone: String(opts.includePhone),
+          includeMotif: String(opts.includeMotif),
+          includeBono: String(opts.includeBono),
+          timezone: opts.timezone,
         });
         const res = await fetch(`/api/telegram/preview?${params.toString()}`);
         if (res.ok) {
@@ -86,61 +262,63 @@ export default function TelegramSettingsPanel({ lang, onStatusChange }: Telegram
           setPreview(data);
         }
       } catch (err) {
-        console.warn('Failed to fetch Telegram preview:', err);
+        console.warn('Failed to fetch notification preview:', err);
       }
     },
-    [messageLang, includePhone, includeMotif, includeBono, timezone]
+    []
   );
 
-  const loadConfig = useCallback(async () => {
-    try {
-      setIsLoading(true);
-      const res = await fetch('/api/telegram/config');
-      if (!res.ok) throw new Error('API unavailable');
-      const data: TelegramConfigResponse = await res.json();
-      setConfig(data);
-      setEnabled(data.enabled);
-      setBotTokenInput(data.hasBotToken ? data.botTokenMasked : '');
-      setChatIdInput(data.chatId || '');
-      setChatLabelInput(data.chatLabel || '');
-      setSendTime(data.sendTime || '08:00');
-      setTimezone(data.timezone || 'Europe/Madrid');
-      setMessageLang(data.language || 'fr');
-      setIncludePhone(data.includePhone);
-      setIncludeMotif(data.includeMotif);
-      setIncludeBono(data.includeBono);
-      if (!data.hasBotToken) {
-        setShowGuide(true);
+  const loadConfig = useCallback(
+    async (silent = false) => {
+      try {
+        if (!silent) setIsLoading(true);
+        const res = await fetch('/api/telegram/config');
+        if (!res.ok) throw new Error('API unavailable');
+        const data: TelegramConfigResponse = await res.json();
+        setConfig(data);
+        setEnabled(data.enabled);
+        setBotTokenInput(data.hasBotToken ? data.botTokenMasked : '');
+        setChatIdInput(data.chatId || '');
+        setChatLabelInput(data.chatLabel || '');
+        setSendTime(data.sendTime || '08:00');
+        setTimezone(data.timezone || 'Europe/Madrid');
+        const initialLang = langRef.current || data.language || 'fr';
+        setMessageLang(initialLang);
+        setIncludePhone(data.includePhone);
+        setIncludeMotif(data.includeMotif);
+        setIncludeBono(data.includeBono);
+
+        const alreadyConnected = Boolean(data.hasBotToken && data.chatId);
+        if (!silent) {
+          setShowConnectionFields(!alreadyConnected);
+        }
+        onStatusChangeRef.current?.(data.enabled, alreadyConnected);
+
+        await fetchPreview({
+          language: initialLang,
+          includePhone: data.includePhone,
+          includeMotif: data.includeMotif,
+          includeBono: data.includeBono,
+          timezone: data.timezone || 'Europe/Madrid',
+        });
+      } catch (err) {
+        console.error('Failed to load Notifications config:', err);
+        const currentTxt = UI_TEXT[langRef.current] || UI_TEXT.fr;
+        setFeedback({
+          type: 'error',
+          text: currentTxt.errServer,
+        });
+      } finally {
+        if (!silent) setIsLoading(false);
       }
-
-      onStatusChange?.(data.enabled, Boolean(data.hasBotToken && data.chatId));
-
-      await fetchPreview({
-        language: data.language,
-        includePhone: data.includePhone,
-        includeMotif: data.includeMotif,
-        includeBono: data.includeBono,
-        timezone: data.timezone,
-      });
-    } catch (err) {
-      console.error('Failed to load Telegram config:', err);
-      setFeedback({
-        type: 'error',
-        text:
-          lang === 'fr'
-            ? 'Impossible de contacter le serveur de notifications.'
-            : 'No se pudo conectar con el servidor de notificaciones.',
-      });
-    } finally {
-      setIsLoading(false);
-    }
-  }, [lang]);
+    },
+    [fetchPreview]
+  );
 
   useEffect(() => {
-    loadConfig();
+    loadConfig(false);
   }, [loadConfig]);
 
-  // Refresh live preview whenever formatting options change
   useEffect(() => {
     if (!isLoading) {
       fetchPreview({
@@ -171,7 +349,6 @@ export default function TelegramSettingsPanel({ lang, onStatusChange }: Telegram
         includeBono,
       };
 
-      // Only send botToken if modified (doesn't contain masked dots) or explicitly cleared
       if (botTokenInput.trim() === '') {
         payload.botToken = '__CLEAR__';
       } else if (!botTokenInput.includes('••••')) {
@@ -185,28 +362,27 @@ export default function TelegramSettingsPanel({ lang, onStatusChange }: Telegram
       });
       const json = await res.json();
       if (!res.ok || !json.ok) {
-        throw new Error(json.error || 'Save failed');
+        throw new Error(json.error || txt.errSave);
       }
 
       const saved: TelegramConfigResponse = json.config;
       setConfig(saved);
       setEnabled(saved.enabled);
       setBotTokenInput(saved.hasBotToken ? saved.botTokenMasked : '');
-      onStatusChange?.(saved.enabled, Boolean(saved.hasBotToken && saved.chatId));
+      const connected = Boolean(saved.hasBotToken && saved.chatId);
+      if (connected) {
+        setShowConnectionFields(false);
+      }
+      onStatusChangeRef.current?.(saved.enabled, connected);
 
       setFeedback({
         type: 'success',
-        text:
-          lang === 'fr'
-            ? 'Paramètres Telegram sauvegardés et synchronisés.'
-            : lang === 'es'
-            ? 'Configuración de Telegram guardada y sincronizada.'
-            : 'Telegram settings saved and synced.',
+        text: txt.savedFeedback,
       });
     } catch (err: any) {
       setFeedback({
         type: 'error',
-        text: err?.message || 'Erreur lors de la sauvegarde.',
+        text: err?.message || txt.errSave,
       });
     } finally {
       setIsSaving(false);
@@ -226,7 +402,7 @@ export default function TelegramSettingsPanel({ lang, onStatusChange }: Telegram
       });
       const json = await res.json();
       if (!res.ok || !json.ok) {
-        throw new Error(json.error || 'Détection impossible.');
+        throw new Error(json.error || txt.errDetect);
       }
 
       const chats: DetectedChat[] = json.chats || [];
@@ -237,31 +413,20 @@ export default function TelegramSettingsPanel({ lang, onStatusChange }: Telegram
         setBotTokenInput(json.config.hasBotToken ? json.config.botTokenMasked : '');
       }
 
-      if (chats.length === 0) {
-        setFeedback({
-          type: 'info',
-          text:
-            lang === 'fr'
-              ? `Bot @${json.botUsername || ''} reconnu ! Envoyez-lui "/start" sur Telegram puis cliquez à nouveau sur "Détecter mon Chat ID".`
-              : `Bot @${json.botUsername || ''} conectado. Envíele "/start" en Telegram y vuelva a pulsar Detectar.`,
-        });
-      } else {
+      if (chats.length > 0) {
         const first = chats[0];
         setChatIdInput(first.chatId);
         setChatLabelInput(first.label);
-        onStatusChange?.(enabled, true);
+        onStatusChangeRef.current?.(enabled, true);
         setFeedback({
           type: 'success',
-          text:
-            lang === 'fr'
-              ? `Chat détecté : ${first.label} (${first.chatId}). N'oubliez pas d'enregistrer !`
-              : `Chat detectado: ${first.label} (${first.chatId}).`,
+          text: txt.detectedFeedback(first.label, first.chatId),
         });
       }
     } catch (err: any) {
       setFeedback({
         type: 'error',
-        text: err?.message || 'Erreur lors de la détection du Chat ID.',
+        text: err?.message || txt.errDetect,
       });
     } finally {
       setIsDetecting(false);
@@ -274,7 +439,6 @@ export default function TelegramSettingsPanel({ lang, onStatusChange }: Telegram
       else setIsTestingDigest(true);
       setFeedback(null);
 
-      // Save latest settings first so the test uses current token/chatId/options
       await handleSave();
 
       const res = await fetch('/api/telegram/send-test', {
@@ -285,32 +449,25 @@ export default function TelegramSettingsPanel({ lang, onStatusChange }: Telegram
       const json = await res.json();
 
       if (!res.ok || !json.ok) {
-        throw new Error(json.error || 'Échec de l’envoi Telegram.');
+        throw new Error(json.error || txt.errSend);
       }
 
       if (json.action === 'skipped_no_patients') {
         setFeedback({
           type: 'info',
-          text:
-            lang === 'fr'
-              ? "Aucun patient programmé aujourd'hui — aucun récapitulatif n'a été envoyé (utilisez « Tester la connexion » pour vérifier votre bot)."
-              : "No hay pacientes programados hoy — no se envió resumen.",
+          text: txt.skippedNoPatientsFeedback,
         });
       } else {
         setFeedback({
           type: 'success',
-          text:
-            json.message ||
-            (lang === 'fr'
-              ? 'Notification envoyée sur votre Telegram !'
-              : '¡Notificación enviada a su Telegram!'),
+          text: txt.sentSuccessFeedback,
         });
       }
-      await loadConfig();
+      await loadConfig(true);
     } catch (err: any) {
       setFeedback({
         type: 'error',
-        text: err?.message || 'Erreur lors du test Telegram.',
+        text: err?.message || txt.errSend,
       });
     } finally {
       setIsTestingPing(false);
@@ -330,7 +487,11 @@ export default function TelegramSettingsPanel({ lang, onStatusChange }: Telegram
     setTimeout(() => setCopiedCron(false), 2500);
   };
 
-  const isConfigured = Boolean((config?.hasBotToken || (botTokenInput && !botTokenInput.includes('••••'))) && chatIdInput.trim());
+  const isConfigured = Boolean(
+    (config?.hasBotToken || (botTokenInput && !botTokenInput.includes('••••'))) && chatIdInput.trim()
+  );
+
+  const localeCode = lang === 'fr' ? 'fr-FR' : lang === 'es' ? 'es-ES' : 'en-GB';
 
   if (isLoading) {
     return (
@@ -346,24 +507,12 @@ export default function TelegramSettingsPanel({ lang, onStatusChange }: Telegram
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h2 className="text-2xl sm:text-3xl font-serif font-bold text-primary flex items-center gap-2.5">
-            <span className="w-10 h-10 rounded-2xl bg-[#229ED9]/15 text-[#229ED9] flex items-center justify-center shrink-0">
-              <Send size={20} />
+            <span className="w-10 h-10 rounded-2xl bg-primary/10 text-primary flex items-center justify-center shrink-0">
+              <Bell size={20} />
             </span>
-            <span>
-              {lang === 'fr'
-                ? 'Notifications Telegram'
-                : lang === 'es'
-                ? 'Notificaciones Telegram'
-                : 'Telegram Notifications'}
-            </span>
+            <span>{txt.title}</span>
           </h2>
-          <p className="text-xs sm:text-sm text-gray-500 mt-1">
-            {lang === 'fr'
-              ? 'Recevez chaque matin sur Telegram le récapitulatif de vos patients du jour (uniquement les jours avec consultations).'
-              : lang === 'es'
-              ? 'Reciba cada mañana en Telegram el resumen de sus pacientes del día (solo los días con citas).'
-              : 'Receive a daily morning Telegram digest of your scheduled patients (only on days with appointments).'}
-          </p>
+          <p className="text-xs sm:text-sm text-gray-500 mt-1">{txt.subtitle}</p>
         </div>
 
         {/* Master Activation Toggle Card */}
@@ -375,13 +524,7 @@ export default function TelegramSettingsPanel({ lang, onStatusChange }: Telegram
               <BellOff size={16} className="text-gray-400" />
             )}
             <span className="text-xs font-bold text-gray-700">
-              {enabled
-                ? lang === 'fr'
-                  ? 'Envoi matinal actif'
-                  : 'Envío matinal activo'
-                : lang === 'fr'
-                ? 'En pause'
-                : 'En pausa'}
+              {enabled ? txt.activeBadge : txt.pausedBadge}
             </span>
           </div>
           <button
@@ -430,218 +573,30 @@ export default function TelegramSettingsPanel({ lang, onStatusChange }: Telegram
 
       {/* Main 2-column layout */}
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 items-start">
-        {/* LEFT COLUMN: Configuration & Schedule */}
+        {/* LEFT COLUMN: Schedule & Connection */}
         <div className="xl:col-span-7 space-y-5">
-          {/* Card 1: Bot Connection */}
-          <div className="bg-white p-5 sm:p-6 rounded-3xl border border-black/5 shadow-xs space-y-4">
-            <div className="flex items-center justify-between gap-3">
-              <div className="flex items-center gap-2.5">
-                <div className="w-9 h-9 rounded-xl bg-[#229ED9]/10 text-[#229ED9] flex items-center justify-center">
-                  <Bot size={18} />
-                </div>
-                <div>
-                  <h3 className="text-base font-serif font-bold text-primary">
-                    {lang === 'fr' ? '1. Connexion à votre Bot Telegram' : '1. Conexión con su Bot de Telegram'}
-                  </h3>
-                  <p className="text-[11px] text-gray-500">
-                    {config?.botUsername
-                      ? `Bot connecté : @${config.botUsername}`
-                      : lang === 'fr'
-                      ? 'Créez un bot gratuit en 1 minute via @BotFather'
-                      : 'Cree un bot gratuito en 1 minuto con @BotFather'}
-                  </p>
-                </div>
-              </div>
-
-              <button
-                type="button"
-                onClick={() => setShowGuide(!showGuide)}
-                className="flex items-center gap-1 text-[11px] font-bold text-[#229ED9] hover:bg-[#229ED9]/10 px-2.5 py-1.5 rounded-xl transition-colors cursor-pointer"
-              >
-                <HelpCircle size={14} />
-                <span>{showGuide ? (lang === 'fr' ? 'Masquer le guide' : 'Ocultar guía') : (lang === 'fr' ? 'Comment faire ?' : '¿Cómo hacerlo?')}</span>
-              </button>
-            </div>
-
-            {showGuide && (
-              <div className="p-4 rounded-2xl bg-sky-50/70 border border-sky-200/80 text-xs text-sky-950 space-y-3">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <p className="font-bold text-sky-900">
-                    {lang === 'fr' ? 'Configuration rapide en 3 étapes :' : 'Configuración rápida en 3 pasos:'}
-                  </p>
-                  <a
-                    href="https://t.me/BotFather"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#229ED9] hover:bg-[#1d8cc1] text-white rounded-xl text-[11px] font-bold transition-all shadow-2xs"
-                  >
-                    <span>{lang === 'fr' ? 'Ouvrir @BotFather dans Telegram' : 'Abrir @BotFather en Telegram'}</span>
-                    <ExternalLink size={12} />
-                  </a>
-                </div>
-                <ol className="list-decimal list-inside space-y-2 text-[11px] leading-relaxed">
-                  <li>
-                    {lang === 'fr' ? (
-                      <>
-                        Cliquez sur le bouton bleu ci-dessus (ou cherchez <b>@BotFather</b> dans la barre de recherche Telegram avec le badge bleu officiel).
-                      </>
-                    ) : (
-                      <>Pulse el botón azul de arriba o busque <b>@BotFather</b> en Telegram.</>
-                    )}
-                  </li>
-                  <li>
-                    {lang === 'fr' ? (
-                      <>
-                        Appuyez sur <b>Démarrer</b>, envoyez <code>/newbot</code>, puis choisissez un nom (ex : <i>Vincent Osteo</i>) et un identifiant finissant par <code>bot</code> (ex : <i>vincent_osteo_bot</i>).
-                      </>
-                    ) : (
-                      <>Pulse <b>Iniciar</b>, envíe <code>/newbot</code> y elija un nombre e identificador acabado en <code>bot</code>.</>
-                    )}
-                  </li>
-                  <li>
-                    {lang === 'fr' ? (
-                      <>
-                        @BotFather vous répond avec un code long (<b>HTTP API Token</b>) : copiez-le et collez-le dans le champ <b>Bot Token</b> ci-dessous.
-                      </>
-                    ) : (
-                      <>Copie el <b>HTTP API Token</b> que le envía @BotFather y péguelo abajo.</>
-                    )}
-                  </li>
-                  <li>
-                    {lang === 'fr' ? (
-                      <>
-                        Ouvrez ensuite la conversation avec <b>votre nouveau bot</b> (le lien <code>t.me/...</code> donné par @BotFather), appuyez sur <b>Démarrer (/start)</b>, puis cliquez ici sur <b>« Détecter mon Chat ID »</b>.
-                      </>
-                    ) : (
-                      <>Abra su nuevo bot en Telegram, pulse <b>Iniciar (/start)</b> y vuelva aquí para pulsar <b>Detectar Chat ID</b>.</>
-                    )}
-                  </li>
-                </ol>
-                {config?.botUsername && (
-                  <div className="pt-1">
-                    <a
-                      href={`https://t.me/${config.botUsername}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-sky-100 text-sky-900 border border-sky-200 rounded-xl text-[11px] font-bold transition-all"
-                    >
-                      <span>{lang === 'fr' ? `Ouvrir mon bot @${config.botUsername}` : `Abrir mi bot @${config.botUsername}`}</span>
-                      <ExternalLink size={12} />
-                    </a>
-                  </div>
-                )}
-              </div>
-            )}
-
-            <div className="space-y-3.5">
-              {/* Bot Token */}
-              <div>
-                <div className="flex items-center justify-between mb-1">
-                  <label className="text-[11px] font-bold uppercase tracking-wider text-gray-500 flex items-center gap-1.5">
-                    <KeyRound size={12} />
-                    <span>Bot Token (@BotFather)</span>
-                  </label>
-                  {config?.hasBotToken && (
-                    <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full">
-                      ✓ {config.envBotTokenConfigured ? 'Variable serveur' : 'Enregistré'}
-                    </span>
-                  )}
-                </div>
-                <input
-                  type="text"
-                  value={botTokenInput}
-                  onChange={(e) => setBotTokenInput(e.target.value)}
-                  disabled={config?.envBotTokenConfigured}
-                  placeholder="123456789:ABCdefGHIjklMNOpqrSTUvwxYZ"
-                  className="w-full px-3.5 py-2.5 bg-secondary rounded-xl border border-black/5 text-xs font-mono focus:outline-none focus:ring-1 focus:ring-primary focus:bg-white transition-all disabled:opacity-60"
-                />
-              </div>
-
-              {/* Chat ID + Auto-detect */}
-              <div>
-                <div className="flex items-center justify-between mb-1">
-                  <label className="text-[11px] font-bold uppercase tracking-wider text-gray-500 flex items-center gap-1.5">
-                    <UserCheck size={12} />
-                    <span>Chat ID {chatLabelInput ? `(${chatLabelInput})` : ''}</span>
-                  </label>
-                </div>
-                <div className="flex flex-col sm:flex-row gap-2">
-                  <input
-                    type="text"
-                    value={chatIdInput}
-                    onChange={(e) => setChatIdInput(e.target.value)}
-                    disabled={config?.envChatIdConfigured}
-                    placeholder="Ex: 512345678"
-                    className="flex-1 px-3.5 py-2.5 bg-secondary rounded-xl border border-black/5 text-xs font-mono focus:outline-none focus:ring-1 focus:ring-primary focus:bg-white transition-all disabled:opacity-60"
-                  />
-                  <button
-                    type="button"
-                    onClick={handleDetectChat}
-                    disabled={isDetecting || (!botTokenInput.trim() && !config?.hasBotToken)}
-                    className="px-4 py-2.5 bg-[#229ED9] hover:bg-[#1d8cc1] disabled:opacity-50 text-white rounded-xl text-xs font-bold transition-all shadow-2xs flex items-center justify-center gap-1.5 cursor-pointer shrink-0"
-                  >
-                    <RefreshCw size={13} className={isDetecting ? 'animate-spin' : ''} />
-                    <span>{lang === 'fr' ? 'Détecter mon Chat ID' : 'Detectar Chat ID'}</span>
-                  </button>
-                </div>
-
-                {detectedChats.length > 1 && (
-                  <div className="mt-2 flex flex-wrap gap-1.5">
-                    {detectedChats.map((c) => (
-                      <button
-                        key={c.chatId}
-                        type="button"
-                        onClick={() => {
-                          setChatIdInput(c.chatId);
-                          setChatLabelInput(c.label);
-                        }}
-                        className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold border cursor-pointer transition-all ${
-                          chatIdInput === c.chatId
-                            ? 'bg-primary text-white border-primary'
-                            : 'bg-secondary text-gray-700 border-black/5 hover:bg-white'
-                        }`}
-                      >
-                        {c.label} ({c.chatId})
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-
-          {/* Card 2: Schedule & Content Rules */}
+          {/* Card 1: Schedule & Content Rules */}
           <div className="bg-white p-5 sm:p-6 rounded-3xl border border-black/5 shadow-xs space-y-4">
             <div className="flex items-center gap-2.5">
               <div className="w-9 h-9 rounded-xl bg-primary/10 text-primary flex items-center justify-center">
                 <Clock size={18} />
               </div>
               <div>
-                <h3 className="text-base font-serif font-bold text-primary">
-                  {lang === 'fr' ? '2. Horaire matinal & Contenu du message' : '2. Horario matinal y Contenido'}
-                </h3>
-                <p className="text-[11px] text-gray-500">
-                  {lang === 'fr'
-                    ? 'Silence automatique les jours sans patient programmé.'
-                    : 'Silencio automático los días sin pacientes programados.'}
-                </p>
+                <h3 className="text-base font-serif font-bold text-primary">{txt.scheduleTitle}</h3>
+                <p className="text-[11px] text-gray-500">{txt.scheduleSubtitle}</p>
               </div>
             </div>
 
             {/* Condition highlight */}
             <div className="p-3 rounded-2xl bg-emerald-50/70 border border-emerald-200/70 flex items-center gap-2.5 text-xs text-emerald-900">
               <CalendarCheck size={16} className="text-emerald-700 shrink-0" />
-              <span>
-                {lang === 'fr'
-                  ? "Règle active : la notification n'est envoyée que si au moins 1 rendez-vous patient est programmé dans la journée (les créneaux bloqués sont ignorés)."
-                  : 'Regla activa: solo se envía si hay al menos 1 paciente programado hoy.'}
-              </span>
+              <span>{txt.activeRule}</span>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div>
                 <label className="text-[11px] font-bold uppercase tracking-wider text-gray-500 block mb-1">
-                  {lang === 'fr' ? "Heure d'envoi" : 'Hora de envío'}
+                  {txt.sendTimeLabel}
                 </label>
                 <input
                   type="time"
@@ -653,7 +608,7 @@ export default function TelegramSettingsPanel({ lang, onStatusChange }: Telegram
 
               <div>
                 <label className="text-[11px] font-bold uppercase tracking-wider text-gray-500 block mb-1">
-                  {lang === 'fr' ? 'Fuseau horaire' : 'Zona horaria'}
+                  {txt.timezoneLabel}
                 </label>
                 <select
                   value={timezone}
@@ -670,7 +625,7 @@ export default function TelegramSettingsPanel({ lang, onStatusChange }: Telegram
               <div>
                 <label className="text-[11px] font-bold uppercase tracking-wider text-gray-500 block mb-1 flex items-center gap-1">
                   <Globe size={11} />
-                  <span>{lang === 'fr' ? 'Langue du message' : 'Idioma'}</span>
+                  <span>{txt.messageLangLabel}</span>
                 </label>
                 <select
                   value={messageLang}
@@ -687,7 +642,7 @@ export default function TelegramSettingsPanel({ lang, onStatusChange }: Telegram
             {/* Content Checkboxes */}
             <div className="pt-2 space-y-2">
               <p className="text-[11px] font-bold uppercase tracking-wider text-gray-500">
-                {lang === 'fr' ? 'Informations incluses par patient' : 'Datos incluidos por paciente'}
+                {txt.includedInfoLabel}
               </p>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
                 <label className="flex items-center gap-2 p-2.5 rounded-xl bg-secondary/70 border border-black/5 cursor-pointer hover:bg-secondary transition-colors text-xs font-semibold text-gray-700">
@@ -698,7 +653,7 @@ export default function TelegramSettingsPanel({ lang, onStatusChange }: Telegram
                     className="rounded text-primary focus:ring-primary"
                   />
                   <Phone size={13} className="text-primary/70 shrink-0" />
-                  <span>{lang === 'fr' ? 'Téléphone' : 'Teléfono'}</span>
+                  <span>{txt.phoneLabel}</span>
                 </label>
 
                 <label className="flex items-center gap-2 p-2.5 rounded-xl bg-secondary/70 border border-black/5 cursor-pointer hover:bg-secondary transition-colors text-xs font-semibold text-gray-700">
@@ -709,7 +664,7 @@ export default function TelegramSettingsPanel({ lang, onStatusChange }: Telegram
                     className="rounded text-primary focus:ring-primary"
                   />
                   <FileText size={13} className="text-primary/70 shrink-0" />
-                  <span>{lang === 'fr' ? 'Motif / Remarque' : 'Motivo / Nota'}</span>
+                  <span>{txt.motifLabel}</span>
                 </label>
 
                 <label className="flex items-center gap-2 p-2.5 rounded-xl bg-secondary/70 border border-black/5 cursor-pointer hover:bg-secondary transition-colors text-xs font-semibold text-gray-700">
@@ -720,7 +675,7 @@ export default function TelegramSettingsPanel({ lang, onStatusChange }: Telegram
                     className="rounded text-primary focus:ring-primary"
                   />
                   <Ticket size={13} className="text-primary/70 shrink-0" />
-                  <span>{lang === 'fr' ? 'Statut Bono' : 'Estado Bono'}</span>
+                  <span>{txt.bonoLabel}</span>
                 </label>
               </div>
             </div>
@@ -733,52 +688,146 @@ export default function TelegramSettingsPanel({ lang, onStatusChange }: Telegram
                 className="px-5 py-2.5 bg-primary hover:bg-primary/95 disabled:opacity-50 text-white rounded-2xl text-xs font-bold uppercase tracking-wider transition-all shadow-sm flex items-center gap-2 cursor-pointer"
               >
                 {isSaving ? <RefreshCw size={14} className="animate-spin" /> : <Check size={14} />}
-                <span>{lang === 'fr' ? 'Enregistrer les paramètres' : 'Guardar configuración'}</span>
+                <span>{txt.saveBtn}</span>
               </button>
             </div>
           </div>
 
-          {/* Card 3: Execution Status & Optional External Cron */}
-          <div className="bg-white p-5 sm:p-6 rounded-3xl border border-black/5 shadow-xs space-y-3">
-            <h4 className="text-xs font-bold uppercase tracking-wider text-gray-500">
-              {lang === 'fr' ? 'Statut du planificateur & Webhook Cron' : 'Estado del programador y Webhook Cron'}
-            </h4>
+          {/* Card 2: Connected Channel Status (Collapsed by default when already configured) */}
+          <div className="bg-white p-5 sm:p-6 rounded-3xl border border-black/5 shadow-xs space-y-4">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-emerald-50 text-emerald-700 flex items-center justify-center">
+                  <CheckCircle2 size={18} />
+                </div>
+                <div>
+                  <h3 className="text-base font-serif font-bold text-primary">
+                    {txt.connectedChannelTitle}
+                  </h3>
+                  <p className="text-[11px] text-gray-500">
+                    {config?.hasBotToken && config?.chatId
+                      ? `${chatLabelInput || txt.activeRecipient} ${config.botUsername ? `• @${config.botUsername}` : ''}`
+                      : txt.configureRecipientBelow}
+                  </p>
+                </div>
+              </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+              <button
+                type="button"
+                onClick={() => setShowConnectionFields(!showConnectionFields)}
+                className="flex items-center gap-1.5 text-[11px] font-bold text-gray-600 hover:text-primary bg-secondary hover:bg-black/5 px-3 py-1.5 rounded-xl transition-colors cursor-pointer"
+              >
+                <Settings2 size={13} />
+                <span>{showConnectionFields ? txt.hideBtn : txt.editConnectionBtn}</span>
+              </button>
+            </div>
+
+            {showConnectionFields && (
+              <div className="space-y-3.5 pt-2 border-t border-black/5">
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-[11px] font-bold uppercase tracking-wider text-gray-500 flex items-center gap-1.5">
+                      <KeyRound size={12} />
+                      <span>{txt.botTokenLabel}</span>
+                    </label>
+                    {config?.hasBotToken && (
+                      <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full">
+                        {txt.savedBadge}
+                      </span>
+                    )}
+                  </div>
+                  <input
+                    type="text"
+                    value={botTokenInput}
+                    onChange={(e) => setBotTokenInput(e.target.value)}
+                    placeholder="123456789:ABCdef..."
+                    className="w-full px-3.5 py-2.5 bg-secondary rounded-xl border border-black/5 text-xs font-mono focus:outline-none focus:ring-1 focus:ring-primary focus:bg-white transition-all"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[11px] font-bold uppercase tracking-wider text-gray-500 flex items-center gap-1.5 mb-1">
+                    <UserCheck size={12} />
+                    <span>
+                      {txt.recipientIdLabel} {chatLabelInput ? `— ${chatLabelInput}` : ''}
+                    </span>
+                  </label>
+                  <div className="flex flex-col sm:flex-row gap-2">
+                    <input
+                      type="text"
+                      value={chatIdInput}
+                      onChange={(e) => setChatIdInput(e.target.value)}
+                      placeholder="Ex: 512345678"
+                      className="flex-1 px-3.5 py-2.5 bg-secondary rounded-xl border border-black/5 text-xs font-mono focus:outline-none focus:ring-1 focus:ring-primary focus:bg-white transition-all"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleDetectChat}
+                      disabled={isDetecting || (!botTokenInput.trim() && !config?.hasBotToken)}
+                      className="px-4 py-2.5 bg-primary hover:bg-primary/95 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition-all shadow-2xs flex items-center justify-center gap-1.5 cursor-pointer shrink-0"
+                    >
+                      <RefreshCw size={13} className={isDetecting ? 'animate-spin' : ''} />
+                      <span>{txt.detectBtn}</span>
+                    </button>
+                  </div>
+
+                  {detectedChats.length > 1 && (
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      {detectedChats.map((c) => (
+                        <button
+                          key={c.chatId}
+                          type="button"
+                          onClick={() => {
+                            setChatIdInput(c.chatId);
+                            setChatLabelInput(c.label);
+                          }}
+                          className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold border cursor-pointer transition-all ${
+                            chatIdInput === c.chatId
+                              ? 'bg-primary text-white border-primary'
+                              : 'bg-secondary text-gray-700 border-black/5 hover:bg-white'
+                          }`}
+                        >
+                          {c.label} ({c.chatId})
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Execution Status & Optional Cron */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs pt-1">
               <div className="p-3 rounded-2xl bg-[#fbfbfa] border border-black/5">
                 <span className="text-[10px] font-bold uppercase text-gray-400 block">
-                  {lang === 'fr' ? 'Dernier état' : 'Último estado'}
+                  {txt.lastStatusLabel}
                 </span>
                 <p className="font-bold text-gray-800 mt-0.5">
                   {config?.lastStatus === 'sent'
-                    ? `✓ Envoyé (${config.lastSentCount} patient${config.lastSentCount > 1 ? 's' : ''})`
+                    ? txt.statusSent(config.lastSentCount)
                     : config?.lastStatus === 'skipped_no_patients'
-                    ? 'Ignoré (0 patient ce jour-là)'
+                    ? txt.statusSkipped
                     : config?.lastStatus === 'error'
-                    ? `Erreur : ${config.lastError}`
-                    : 'Aucun envoi automatique effectué'}
+                    ? txt.statusError(config.lastError || '')
+                    : txt.statusReady}
                 </p>
               </div>
 
               <div className="p-3 rounded-2xl bg-[#fbfbfa] border border-black/5">
                 <span className="text-[10px] font-bold uppercase text-gray-400 block">
-                  {lang === 'fr' ? 'Dernier contrôle / envoi' : 'Última comprobación'}
+                  {txt.lastSentLabel}
                 </span>
                 <p className="font-bold text-gray-800 mt-0.5">
                   {config?.lastSentAt
-                    ? new Date(config.lastSentAt).toLocaleString(lang === 'fr' ? 'fr-FR' : 'es-ES')
+                    ? new Date(config.lastSentAt).toLocaleString(localeCode)
                     : '—'}
                 </p>
               </div>
             </div>
 
-            {cronWebhookUrl && (
+            {cronWebhookUrl && showConnectionFields && (
               <div className="pt-2 border-t border-black/5 space-y-1.5">
-                <p className="text-[11px] text-gray-500 leading-relaxed">
-                  {lang === 'fr'
-                    ? "Astuce fiabilité 24h/24 : si le serveur cloud se met en veille la nuit, vous pouvez appeler cette URL chaque matin (ex: via cron-job.org gratuit à 08:00) pour garantir le réveil :"
-                    : 'Consejo de fiabilidad 24/7: si su servidor entra en reposo por la noche, puede llamar esta URL cada mañana (ej. con cron-job.org):'}
-                </p>
+                <p className="text-[11px] text-gray-500 leading-relaxed">{txt.cronLabel}</p>
                 <div className="flex items-center gap-2">
                   <input
                     type="text"
@@ -792,7 +841,7 @@ export default function TelegramSettingsPanel({ lang, onStatusChange }: Telegram
                     className="px-3 py-2 bg-secondary hover:bg-black/5 text-gray-700 rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer shrink-0"
                   >
                     {copiedCron ? <Check size={13} className="text-emerald-600" /> : <Copy size={13} />}
-                    <span>{copiedCron ? 'Copié' : 'Copier'}</span>
+                    <span>{copiedCron ? txt.copiedBtn : txt.copyBtn}</span>
                   </button>
                 </div>
               </div>
@@ -800,49 +849,40 @@ export default function TelegramSettingsPanel({ lang, onStatusChange }: Telegram
           </div>
         </div>
 
-        {/* RIGHT COLUMN: Live Telegram Message Preview & Test Actions */}
+        {/* RIGHT COLUMN: Live Notification Preview & Test Actions */}
         <div className="xl:col-span-5 space-y-5">
           <div className="bg-white p-5 sm:p-6 rounded-3xl border border-black/5 shadow-xs space-y-4">
             <div className="flex items-center justify-between gap-2">
               <div className="flex items-center gap-2">
-                <MessageSquare size={18} className="text-[#229ED9]" />
-                <h3 className="text-base font-serif font-bold text-primary">
-                  {lang === 'fr' ? "Aperçu du message d'aujourd'hui" : 'Vista previa del mensaje de hoy'}
-                </h3>
+                <MessageSquare size={18} className="text-primary" />
+                <h3 className="text-base font-serif font-bold text-primary">{txt.previewTitle}</h3>
               </div>
-              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-[#229ED9]/10 text-[#229ED9]">
-                {preview?.appointments.length || 0}{' '}
-                {lang === 'fr'
-                  ? `patient${(preview?.appointments.length || 0) > 1 ? 's' : ''}`
-                  : `paciente${(preview?.appointments.length || 0) > 1 ? 's' : ''}`}
+              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-primary/10 text-primary">
+                {txt.patientCount(preview?.appointments.length || 0)}
               </span>
             </div>
 
-            {/* Telegram Chat Simulation Bubble */}
-            <div className="rounded-2xl bg-[#e6ebee] p-4 border border-black/5 min-h-[200px] flex flex-col justify-between">
+            {/* Notification Preview Card */}
+            <div className="rounded-2xl bg-[#f4f4ec] p-4 border border-black/5 min-h-[200px] flex flex-col justify-between">
               {preview && preview.appointments.length > 0 ? (
-                <div className="bg-white rounded-2xl rounded-tl-sm p-4 shadow-xs border border-black/5 text-xs text-gray-800 whitespace-pre-wrap leading-relaxed font-sans">
+                <div className="bg-white rounded-2xl p-4 shadow-xs border border-black/5 text-xs text-gray-800 whitespace-pre-wrap leading-relaxed font-sans">
                   {preview.messageText}
                 </div>
               ) : (
                 <div className="bg-white/90 rounded-2xl p-5 text-center space-y-2 my-auto border border-dashed border-gray-300">
                   <CalendarCheck size={24} className="mx-auto text-gray-400" />
-                  <p className="text-xs font-bold text-gray-700">
-                    {lang === 'fr'
-                      ? "Aucun patient programmé aujourd'hui"
-                      : 'No hay pacientes programados hoy'}
-                  </p>
+                  <p className="text-xs font-bold text-gray-700">{txt.noPatientsTitle}</p>
                   <p className="text-[11px] text-gray-500">
-                    {lang === 'fr'
-                      ? `Pour le ${preview?.dateFormatted || "jour"}, aucune notification matinale ne sera envoyée.`
-                      : 'No se enviará notificación matinal los días sin pacientes.'}
+                    {txt.noPatientsDesc(preview?.dateFormatted || '')}
                   </p>
                 </div>
               )}
 
               <div className="mt-3 flex items-center justify-between text-[10px] text-gray-500 px-1">
                 <span>{preview?.dateStr}</span>
-                <span>{sendTime} • {timezone}</span>
+                <span>
+                  {sendTime} • {timezone}
+                </span>
               </div>
             </div>
 
@@ -852,14 +892,10 @@ export default function TelegramSettingsPanel({ lang, onStatusChange }: Telegram
                 type="button"
                 onClick={() => handleSendTest('digest')}
                 disabled={isTestingDigest || !isConfigured || (preview?.appointments.length || 0) === 0}
-                className="w-full py-2.5 px-4 bg-[#229ED9] hover:bg-[#1d8cc1] disabled:opacity-45 text-white rounded-2xl text-xs font-bold uppercase tracking-wider transition-all shadow-sm flex items-center justify-center gap-2 cursor-pointer"
+                className="w-full py-2.5 px-4 bg-primary hover:bg-primary/95 disabled:opacity-45 text-white rounded-2xl text-xs font-bold uppercase tracking-wider transition-all shadow-sm flex items-center justify-center gap-2 cursor-pointer"
               >
                 {isTestingDigest ? <RefreshCw size={14} className="animate-spin" /> : <Send size={14} />}
-                <span>
-                  {lang === 'fr'
-                    ? "Envoyer le récapitulatif d'aujourd'hui sur Telegram"
-                    : 'Enviar resumen de hoy a Telegram'}
-                </span>
+                <span>{txt.sendDigestBtn}</span>
               </button>
 
               <button
@@ -868,12 +904,12 @@ export default function TelegramSettingsPanel({ lang, onStatusChange }: Telegram
                 disabled={isTestingPing || !isConfigured}
                 className="w-full py-2.5 px-4 bg-secondary hover:bg-black/5 disabled:opacity-45 text-gray-700 rounded-2xl text-xs font-bold transition-all border border-black/5 flex items-center justify-center gap-2 cursor-pointer"
               >
-                {isTestingPing ? <RefreshCw size={14} className="animate-spin" /> : <CheckCircle2 size={14} className="text-emerald-600" />}
-                <span>
-                  {lang === 'fr'
-                    ? 'Tester la connexion (message test)'
-                    : 'Probar conexión (mensaje de prueba)'}
-                </span>
+                {isTestingPing ? (
+                  <RefreshCw size={14} className="animate-spin" />
+                ) : (
+                  <CheckCircle2 size={14} className="text-emerald-600" />
+                )}
+                <span>{txt.sendTestBtn}</span>
               </button>
             </div>
           </div>

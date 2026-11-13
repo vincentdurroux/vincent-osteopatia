@@ -7,7 +7,7 @@ import {
   ChevronRight, Pencil, ChevronLeft, ChevronDown, LayoutGrid, List, ArrowRight,
   Copy, CheckCircle2, XCircle, AlertTriangle, Database, Server, UserPlus, User,
   Tag, BadgePercent, Percent, Sparkles, IdCard, X, Columns3, Lock, Coffee, Briefcase, Bookmark, Pin, StickyNote,
-  ArrowUpDown, ArrowUp, ArrowDown, ExternalLink, Info, Star, Cloud, Send
+  ArrowUpDown, ArrowUp, ArrowDown, ExternalLink, Info, Star, Cloud, Send, Bell
 } from 'lucide-react';
 import { Client, ClientNote, Invoice, CalendarEvent, EventType, GoogleReview, ClinicalNoteDraftItem } from '../../types';
 import { api, supabase, isSupabaseConfigured, SUPABASE_SQL_SETUP, capitalizeFirstName, sortInvoicesByDate, normalizeInvoiceDescription } from '../../lib/supabase';
@@ -191,10 +191,10 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
     return () => clearInterval(clockInterval);
   }, []);
 
-  // Telegram morning digest status badge
+  // Morning notifications digest status badge
   const [telegramStatus, setTelegramStatus] = useState<{ enabled: boolean; configured: boolean; sendTime?: string }>({
-    enabled: false,
-    configured: false,
+    enabled: true,
+    configured: true,
   });
 
   useEffect(() => {
@@ -204,7 +204,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
         if (data) {
           setTelegramStatus({
             enabled: Boolean(data.enabled),
-            configured: Boolean(data.hasBotToken && data.chatId),
+            configured: Boolean(data.ntfyTopic || (data.hasBotToken && data.chatId)),
             sendTime: data.sendTime,
           });
         }
@@ -3032,8 +3032,8 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
             { id: 'clients', label: t.admin.tabs.clients, icon: Users },
             { id: 'calendar', label: t.admin.tabs.calendar, icon: Calendar },
             { id: 'billing', label: t.admin.tabs.billing, icon: FileText },
-            { id: 'reviews', label: 'Google Reviews', icon: Star },
-            { id: 'telegram', label: 'Telegram', icon: Send },
+            { id: 'reviews', label: lang === 'fr' ? 'Avis Google' : lang === 'es' ? 'Reseñas Google' : 'Google Reviews', icon: Star },
+            { id: 'telegram', label: lang === 'fr' ? 'Notifications' : lang === 'es' ? 'Notificaciones' : 'Notifications', icon: Bell },
           ].map(item => {
             const Icon = item.icon;
             const isActive = activeTab === item.id;
@@ -3111,8 +3111,8 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
               { id: 'clients', label: t.admin.tabs.clients, icon: Users },
               { id: 'calendar', label: t.admin.tabs.calendar, icon: Calendar },
               { id: 'billing', label: t.admin.tabs.billing, icon: FileText },
-              { id: 'reviews', label: 'Google Reviews', icon: Star },
-              { id: 'telegram', label: 'Telegram', icon: Send },
+              { id: 'reviews', label: lang === 'fr' ? 'Avis Google' : lang === 'es' ? 'Reseñas Google' : 'Google Reviews', icon: Star },
+              { id: 'telegram', label: lang === 'fr' ? 'Notifications' : lang === 'es' ? 'Notificaciones' : 'Notifications', icon: Bell },
             ].map(item => {
               const Icon = item.icon;
               const isActive = activeTab === item.id;
@@ -3226,7 +3226,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                        <div className="flex items-center justify-between gap-2 border-b border-gray-100 pb-2">
                          <p className="text-base font-bold text-gray-900 truncate">{group.name}</p>
                          <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 text-[10px] font-bold uppercase tracking-wider">
-                           {group.clients.length} profiles
+                           {group.clients.length} {lang === 'fr' ? 'profils' : lang === 'es' ? 'perfiles' : 'profiles'}
                          </span>
                        </div>
                        
@@ -3237,18 +3237,20 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                <div className="flex items-center gap-2">
                                  <span className="font-mono text-[9px] text-gray-400 font-bold">{c.id.substring(0, 8)}...</span>
                                  {cIdx === 0 && (
-                                   <span className="bg-emerald-600 text-white px-1.5 py-0.2 rounded text-[9px] font-bold uppercase tracking-widest">Keep</span>
+                                   <span className="bg-emerald-600 text-white px-1.5 py-0.2 rounded text-[9px] font-bold uppercase tracking-widest">
+                                     {lang === 'fr' ? 'Conserver' : lang === 'es' ? 'Conservar' : 'Keep'}
+                                   </span>
                                  )}
                                </div>
                                <span className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold ${c.totalRecords > 0 ? 'bg-emerald-600 text-white' : 'bg-gray-200 text-gray-500'}`}>
-                                 {c.totalRecords} {lang === 'fr' ? 'enreg.' : 'records'}
+                                 {c.totalRecords} {lang === 'fr' ? 'enreg.' : lang === 'es' ? 'reg.' : 'records'}
                                </span>
                              </div>
                              
                              <div className="flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-gray-500 font-medium">
-                               <div className="flex items-center gap-1"><FileText size={10} className="text-primary/60" /> {c.noteCount} notes</div>
-                               <div className="flex items-center gap-1"><CreditCard size={10} className="text-primary/60" /> {c.invoiceCount} invoices</div>
-                               <div className="flex items-center gap-1"><CalendarIcon size={10} className="text-primary/60" /> {c.eventCount} events</div>
+                               <div className="flex items-center gap-1"><FileText size={10} className="text-primary/60" /> {c.noteCount} {lang === 'fr' ? 'notes' : lang === 'es' ? 'notas' : 'notes'}</div>
+                               <div className="flex items-center gap-1"><CreditCard size={10} className="text-primary/60" /> {c.invoiceCount} {lang === 'fr' ? 'factures' : lang === 'es' ? 'facturas' : 'invoices'}</div>
+                               <div className="flex items-center gap-1"><CalendarIcon size={10} className="text-primary/60" /> {c.eventCount} {lang === 'fr' ? 'RDV' : lang === 'es' ? 'citas' : 'events'}</div>
                              </div>
                              
                              {cIdx > 0 && (
@@ -3258,7 +3260,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                  className="w-full mt-1.5 py-1.5 bg-white hover:bg-rose-50 text-rose-600 rounded-xl text-[10px] font-bold border border-rose-200 hover:border-rose-300 transition-all shadow-2xs cursor-pointer flex items-center justify-center gap-1.5"
                                >
                                  <Trash2 size={11} />
-                                 <span>{lang === 'fr' ? 'Supprimer ce doublon' : 'Delete duplicate'}</span>
+                                 <span>{lang === 'fr' ? 'Supprimer ce doublon' : lang === 'es' ? 'Eliminar duplicado' : 'Delete duplicate'}</span>
                                </button>
                              )}
                            </div>
@@ -3311,7 +3313,9 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                         <p className="text-xs text-gray-500">
                           {lang === 'fr' 
                             ? "Consultez vos rendez-vous et cliquez sur \"Prise de notes\" pour ouvrir directement le dossier patient." 
-                            : "View appointments and click \"Take Notes\" to open the patient file directly."}
+                            : lang === 'es'
+                              ? "Consulte sus citas y haga clic en \"Tomar notas\" para abrir directamente la ficha del paciente."
+                              : "View appointments and click \"Take Notes\" to open the patient file directly."}
                         </p>
                       </div>
                     </div>
@@ -3322,16 +3326,22 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                         onClick={() => setActiveTab('telegram')}
                         className={`flex items-center gap-1.5 px-3 py-2 rounded-2xl text-xs font-bold transition-all border cursor-pointer ${
                           telegramStatus.enabled && telegramStatus.configured
-                            ? 'bg-sky-50 hover:bg-sky-100 text-[#0077b5] border-sky-200'
+                            ? 'bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border-emerald-200'
                             : 'bg-[#f4f4ec] hover:bg-black/5 text-gray-600 border-black/5'
                         }`}
-                        title={lang === 'fr' ? 'Configurer le récapitulatif matinal Telegram' : 'Configurar resumen matinal en Telegram'}
+                        title={
+                          lang === 'fr'
+                            ? 'Configurer les notifications matinales'
+                            : lang === 'es'
+                              ? 'Configurar notificaciones matinales'
+                              : 'Configure morning notifications'
+                        }
                       >
-                        <Send size={13} />
+                        <Bell size={13} />
                         <span>
                           {telegramStatus.enabled && telegramStatus.configured
-                            ? `Telegram ${telegramStatus.sendTime || '08:00'}`
-                            : 'Telegram'}
+                            ? `${lang === 'es' ? 'Notificaciones' : 'Notifications'} ${telegramStatus.sendTime || '08:00'}`
+                            : lang === 'es' ? 'Notificaciones' : 'Notifications'}
                         </span>
                       </button>
                       <button
@@ -3339,7 +3349,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                         className="flex items-center gap-1.5 px-3.5 py-2 bg-primary hover:bg-primary/95 text-white rounded-2xl text-xs font-bold transition-all shadow-sm"
                       >
                         <Plus size={14} />
-                        <span>{lang === 'fr' ? "Nouveau RDV" : "New Appointment"}</span>
+                        <span>{lang === 'fr' ? "Nouveau RDV" : lang === 'es' ? "Nueva cita" : "New Appointment"}</span>
                       </button>
                       <button
                         onClick={() => {
@@ -3348,7 +3358,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                         }}
                         className="flex items-center gap-1.5 px-3.5 py-2 bg-[#f4f4ec] hover:bg-black/5 text-gray-700 rounded-2xl text-xs font-bold transition-all border border-black/5"
                       >
-                        <span>{lang === 'fr' ? "Voir l'agenda complet" : "Full calendar"}</span>
+                        <span>{lang === 'fr' ? "Voir l'agenda complet" : lang === 'es' ? "Ver agenda completa" : "Full calendar"}</span>
                         <ArrowRight size={14} />
                       </button>
                     </div>
@@ -3359,14 +3369,15 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                     <div className="space-y-3 pt-2">
                       <p className="text-[11px] font-bold uppercase tracking-wider text-emerald-800 flex items-center gap-1.5">
                         <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                        {lang === 'fr' ? "Consultations prévues aujourd'hui" : "Appointments scheduled today"} ({todayAppointmentsCount})
+                        {lang === 'fr' ? "Consultations prévues aujourd'hui" : lang === 'es' ? "Consultas previstas hoy" : "Appointments scheduled today"} ({todayAppointmentsCount})
                       </p>
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                         {todayEvents.map((event, idx) => {
                           const isOther = event.eventType && event.eventType !== 'appointment';
                           const timeStatus = getAppointmentTimeStatus(event);
-                          const startTime = new Date(event.start).toLocaleTimeString(lang === 'fr' ? 'fr-FR' : 'es-ES', { hour: '2-digit', minute: '2-digit' });
-                          const endTime = new Date(event.end).toLocaleTimeString(lang === 'fr' ? 'fr-FR' : 'es-ES', { hour: '2-digit', minute: '2-digit' });
+                          const localeCode = lang === 'fr' ? 'fr-FR' : lang === 'es' ? 'es-ES' : 'en-GB';
+                          const startTime = new Date(event.start).toLocaleTimeString(localeCode, { hour: '2-digit', minute: '2-digit' });
+                          const endTime = new Date(event.end).toLocaleTimeString(localeCode, { hour: '2-digit', minute: '2-digit' });
 
                           return (
                             <div 
@@ -3442,7 +3453,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                   className={`p-1.5 rounded-lg transition-all opacity-70 group-hover:opacity-100 ${
                                     isOther ? 'hover:bg-amber-200 text-amber-900' : 'hover:bg-emerald-200/60 text-emerald-800'
                                   }`}
-                                  title={lang === 'fr' ? "Modifier l'événement" : "Edit event"}
+                                  title={lang === 'fr' ? "Modifier l'événement" : lang === 'es' ? "Editar evento" : "Edit event"}
                                 >
                                   <Pencil size={13} />
                                 </button>
@@ -3461,13 +3472,13 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                     className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold transition-all shadow-xs"
                                   >
                                     <Pencil size={12} />
-                                    <span>{lang === 'fr' ? "Modifier" : "Edit"}</span>
+                                    <span>{lang === 'fr' ? "Modifier" : lang === 'es' ? "Editar" : "Edit"}</span>
                                   </button>
                                 ) : (
                                   <button
                                     onClick={() => handleGoToNotes(event)}
                                     className="flex items-center gap-1.5 px-3 py-1.5 bg-primary hover:bg-primary/95 text-white rounded-xl text-xs font-bold transition-all shadow-xs group/btn"
-                                    title={lang === 'fr' ? "Ouvrir la fiche médicale et rédiger les notes cliniques" : "Open medical record and write clinical notes"}
+                                    title={lang === 'fr' ? "Ouvrir la fiche médicale et rédiger les notes cliniques" : lang === 'es' ? "Abrir la ficha médica y redactar notas clínicas" : "Open medical record and write clinical notes"}
                                   >
                                     <FileCheck size={13} />
                                     <span>{lang === 'fr' ? "Prise de notes" : lang === 'es' ? "Tomar notas" : "Take Notes"}</span>
@@ -3489,10 +3500,10 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                           </div>
                           <div>
                             <p className="text-xs font-bold text-gray-700">
-                              {lang === 'fr' ? "Aucun rendez-vous prévu pour aujourd'hui." : "No appointments scheduled for today."}
+                              {lang === 'fr' ? "Aucun rendez-vous prévu pour aujourd'hui." : lang === 'es' ? "No hay citas programadas para hoy." : "No appointments scheduled for today."}
                             </p>
                             <p className="text-[11px] text-gray-400">
-                              {new Date().toLocaleDateString(lang === 'fr' ? 'fr-FR' : 'es-ES', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
+                              {new Date().toLocaleDateString(lang === 'fr' ? 'fr-FR' : lang === 'es' ? 'es-ES' : 'en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
                             </p>
                           </div>
                         </div>
@@ -3501,7 +3512,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                           onClick={() => setIsAddEventOpen(true)}
                           className="px-3.5 py-1.5 bg-primary text-white hover:bg-primary/95 rounded-xl text-xs font-bold transition-all"
                         >
-                          {lang === 'fr' ? "+ Planifier un rendez-vous" : "+ Schedule appointment"}
+                          {lang === 'fr' ? "+ Planifier un rendez-vous" : lang === 'es' ? "+ Programar una cita" : "+ Schedule appointment"}
                         </button>
                       </div>
 
@@ -3509,11 +3520,12 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                       {upcomingEvents.length > 0 && (
                         <div>
                           <p className="text-[11px] font-bold uppercase tracking-wider text-gray-400 mb-2">
-                            {lang === 'fr' ? "Prochaines consultations à venir" : "Upcoming appointments"}
+                            {lang === 'fr' ? "Prochaines consultations à venir" : lang === 'es' ? "Próximas consultas" : "Upcoming appointments"}
                           </p>
                           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                             {upcomingEvents.map((event, idx) => {
                               const isOther = event.eventType && event.eventType !== 'appointment';
+                              const localeCode = lang === 'fr' ? 'fr-FR' : lang === 'es' ? 'es-ES' : 'en-GB';
                               return (
                                 <div
                                   key={event.id ? `${event.id}-${idx}` : `upcoming-${idx}`}
@@ -3526,10 +3538,10 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                   <div>
                                     <div className="flex items-center justify-between text-[10px] text-gray-400 font-bold mb-1">
                                       <span>
-                                        {new Date(event.start).toLocaleDateString(lang === 'fr' ? 'fr-FR' : 'es-ES', { weekday: 'short', day: 'numeric', month: 'short' })}
+                                        {new Date(event.start).toLocaleDateString(localeCode, { weekday: 'short', day: 'numeric', month: 'short' })}
                                       </span>
                                       <span className={isOther ? "text-amber-800 font-bold" : "text-primary font-bold"}>
-                                        {new Date(event.start).toLocaleTimeString(lang === 'fr' ? 'fr-FR' : 'es-ES', { hour: '2-digit', minute: '2-digit' })}
+                                        {new Date(event.start).toLocaleTimeString(localeCode, { hour: '2-digit', minute: '2-digit' })}
                                       </span>
                                     </div>
                                     <div className="flex items-center gap-1.5">
@@ -3557,16 +3569,16 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                       className="text-[11px] text-gray-500 hover:text-primary transition-colors flex items-center gap-1 font-medium"
                                     >
                                       <Pencil size={11} />
-                                      <span>{lang === 'fr' ? "Détails" : "Details"}</span>
+                                      <span>{lang === 'fr' ? "Détails" : lang === 'es' ? "Detalles" : "Details"}</span>
                                     </button>
                                     {!isOther && (
                                       <button
                                         onClick={() => handleGoToNotes(event)}
                                         className="flex items-center gap-1 px-2.5 py-1 bg-primary/10 hover:bg-primary text-primary hover:text-white rounded-lg text-[11px] font-bold transition-all"
-                                        title={lang === 'fr' ? "Ouvrir la fiche et prendre des notes" : "Open file and take notes"}
+                                        title={lang === 'fr' ? "Ouvrir la fiche et prendre des notes" : lang === 'es' ? "Abrir la ficha y tomar notas" : "Open file and take notes"}
                                       >
                                         <FileCheck size={11} />
-                                        <span>{lang === 'fr' ? "Notes" : "Notes"}</span>
+                                        <span>{lang === 'fr' ? "Notes" : lang === 'es' ? "Notas" : "Notes"}</span>
                                       </button>
                                     )}
                                   </div>
@@ -9722,10 +9734,14 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
               <div>
                 <h2 className="text-2xl sm:text-3xl font-serif font-bold text-primary flex items-center gap-2">
                   <Star className="fill-amber-400 text-amber-400 shrink-0" size={24} />
-                  <span>Google Reviews</span>
+                  <span>{lang === 'fr' ? 'Avis Google' : lang === 'es' ? 'Reseñas de Google' : 'Google Reviews'}</span>
                 </h2>
                 <p className="text-xs sm:text-sm text-gray-500 mt-1">
-                  Manage real Google patient reviews displayed on your website homepage.
+                  {lang === 'fr'
+                    ? "Gérez les vrais avis Google de vos patients affichés sur la page d'accueil de votre site."
+                    : lang === 'es'
+                      ? 'Gestione las reseñas reales de Google de sus pacientes mostradas en la página de inicio.'
+                      : 'Manage real Google patient reviews displayed on your website homepage.'}
                 </p>
               </div>
 
@@ -9740,7 +9756,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                   className="px-4 py-2 bg-primary hover:bg-primary/95 text-white rounded-xl text-xs font-bold uppercase tracking-wider transition-all shadow-md flex items-center gap-1.5 cursor-pointer"
                 >
                   <Plus size={15} />
-                  <span>Add review</span>
+                  <span>{lang === 'fr' ? 'Ajouter un avis' : lang === 'es' ? 'Añadir reseña' : 'Add review'}</span>
                 </button>
               </div>
             </div>
@@ -9762,15 +9778,29 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                   <div>
                     <p className="text-sm font-bold text-gray-800">
                       {!tableDiagnostics?.googleReviews 
-                        ? 'Base de données non initialisée' 
-                        : customReviews.length > 0 ? 'Synchronisation Cloud active' : 'Base de données prête'}
+                        ? (lang === 'fr' ? 'Base de données non initialisée' : lang === 'es' ? 'Base de datos no inicializada' : 'Database not initialized')
+                        : customReviews.length > 0
+                          ? (lang === 'fr' ? 'Synchronisation Cloud active' : lang === 'es' ? 'Sincronización en la nube activa' : 'Cloud sync active')
+                          : (lang === 'fr' ? 'Base de données prête' : lang === 'es' ? 'Base de datos lista' : 'Database ready')}
                     </p>
                     <p className="text-xs text-gray-500 mt-0.5 leading-relaxed">
                       {!tableDiagnostics?.googleReviews 
-                        ? "La table des avis n'existe pas encore dans votre base de données Supabase." 
+                        ? (lang === 'fr'
+                            ? "La table des avis n'existe pas encore dans votre base de données Supabase."
+                            : lang === 'es'
+                              ? 'La tabla de reseñas aún no existe en su base de datos Supabase.'
+                              : 'The reviews table does not exist yet in your Supabase database.')
                         : customReviews.length > 0 
-                          ? `Vos ${customReviews.length} avis sont sauvegardés en ligne et visibles par tous vos patients.`
-                          : "Ajoutez votre premier avis pour le synchroniser sur votre site internet."}
+                          ? (lang === 'fr'
+                              ? `Vos ${customReviews.length} avis sont sauvegardés en ligne et visibles par tous vos patients.`
+                              : lang === 'es'
+                                ? `Sus ${customReviews.length} reseñas están guardadas en línea y son visibles para todos sus pacientes.`
+                                : `Your ${customReviews.length} reviews are saved online and visible to all your patients.`)
+                          : (lang === 'fr'
+                              ? 'Ajoutez votre premier avis pour le synchroniser sur votre site internet.'
+                              : lang === 'es'
+                                ? 'Añada su primera reseña para sincronizarla en su sitio web.'
+                                : 'Add your first review to sync it on your website.')}
                     </p>
                   </div>
                 </div>
@@ -9782,7 +9812,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                         onClick={runDiagnostics}
                         disabled={isDiagnosing}
                         className="p-2 bg-gray-100 hover:bg-gray-200 text-gray-600 rounded-xl transition-all disabled:opacity-50"
-                        title="Vérifier à nouveau"
+                        title={lang === 'fr' ? 'Vérifier à nouveau' : lang === 'es' ? 'Comprobar de nuevo' : 'Check again'}
                       >
                         <RefreshCw size={14} className={isDiagnosing ? 'animate-spin' : ''} />
                       </button>
@@ -9791,13 +9821,13 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                         className="flex items-center gap-1.5 px-3 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold transition-all shadow-sm active:scale-95"
                       >
                         {copiedSql ? <Check size={14} /> : <FileText size={14} />}
-                        <span>{copiedSql ? 'Copié !' : 'Initialiser (SQL)'}</span>
+                        <span>{copiedSql ? (lang === 'fr' ? 'Copié !' : lang === 'es' ? '¡Copiado!' : 'Copied!') : (lang === 'fr' ? 'Initialiser (SQL)' : lang === 'es' ? 'Inicializar (SQL)' : 'Initialize (SQL)')}</span>
                       </button>
                     </>
                   ) : (
                     customReviews.length > 0 && (
                       <span className="text-[10px] font-bold text-emerald-700 bg-emerald-100 px-2 py-1 rounded-full flex items-center gap-1 border border-emerald-200">
-                        <Check size={11} /> Cloud Sync OK
+                        <Check size={11} /> {lang === 'fr' ? 'Synchro Cloud OK' : lang === 'es' ? 'Sincro Cloud OK' : 'Cloud Sync OK'}
                       </span>
                     )
                   )}
@@ -9819,7 +9849,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                           <div className="min-w-0 flex-1">
                             <h4 className="font-bold text-sm text-gray-900 leading-tight truncate">{rev.author}</h4>
                             <span className="text-[11px] text-gray-400 mt-0.5 block">
-                            {new Date(Number(rev.date)).toLocaleDateString(lang === 'fr' ? 'fr-FR' : 'es-ES')}
+                            {new Date(Number(rev.date)).toLocaleDateString(lang === 'fr' ? 'fr-FR' : lang === 'es' ? 'es-ES' : 'en-GB')}
                           </span>
                           </div>
                         </div>
@@ -9837,7 +9867,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                     <div className="pt-3 border-t border-black/5 flex flex-wrap items-center justify-between gap-2">
                       <span className="inline-flex items-center gap-1 text-[10px] text-emerald-700 font-medium">
                         <CheckCircle2 size={12} className="text-emerald-600 shrink-0" />
-                        <span>Verified Google Review</span>
+                        <span>{lang === 'fr' ? 'Avis Google vérifié' : lang === 'es' ? 'Reseña de Google verificada' : 'Verified Google Review'}</span>
                       </span>
                       <div className="flex items-center gap-1.5 shrink-0">
                         <button
@@ -9856,7 +9886,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                           className="px-2.5 py-1 text-xs text-primary hover:bg-primary/5 rounded-lg font-semibold transition-colors flex items-center gap-1 cursor-pointer"
                         >
                           <Pencil size={12} />
-                          <span>Edit</span>
+                          <span>{lang === 'fr' ? 'Modifier' : lang === 'es' ? 'Editar' : 'Edit'}</span>
                         </button>
                         <button
                           type="button"
@@ -9864,7 +9894,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                           className="px-2.5 py-1 text-xs text-rose-600 hover:bg-rose-50 rounded-lg font-semibold transition-colors flex items-center gap-1 cursor-pointer"
                         >
                           <Trash2 size={12} />
-                          <span>Delete</span>
+                          <span>{lang === 'fr' ? 'Supprimer' : lang === 'es' ? 'Eliminar' : 'Delete'}</span>
                         </button>
                       </div>
                     </div>
@@ -10297,7 +10327,11 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
               <div className="flex items-center justify-between pb-3 border-b border-black/5 mb-4">
                 <h3 className="font-serif text-lg font-bold text-gray-900 flex items-center gap-2">
                   <Star className="fill-amber-400 text-amber-400" size={18} />
-                  <span>{editingReviewIndex !== null ? 'Edit Google Review' : 'Add Google Review'}</span>
+                  <span>
+                    {editingReviewIndex !== null
+                      ? (lang === 'fr' ? 'Modifier l\'avis Google' : lang === 'es' ? 'Editar reseña de Google' : 'Edit Google Review')
+                      : (lang === 'fr' ? 'Ajouter un avis Google' : lang === 'es' ? 'Añadir reseña de Google' : 'Add Google Review')}
+                  </span>
                 </h3>
                 <button
                   onClick={() => setIsAddReviewModalOpen(false)}
@@ -10311,12 +10345,12 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="block text-[10px] font-bold uppercase tracking-wider text-gray-500 mb-1">
-                      Patient Name
+                      {lang === 'fr' ? 'Nom du patient' : lang === 'es' ? 'Nombre del paciente' : 'Patient Name'}
                     </label>
                     <input
                       type="text"
                       required
-                      placeholder="e.g., Sarah Connor"
+                      placeholder={lang === 'fr' ? 'ex. Sarah Connor' : lang === 'es' ? 'ej. Sarah Connor' : 'e.g., Sarah Connor'}
                       value={reviewForm.author}
                       onChange={e => setReviewForm(prev => ({ ...prev, author: e.target.value }))}
                       className="w-full px-3 py-2 text-xs border border-stone-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
@@ -10324,11 +10358,11 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                   </div>
                   <div>
                     <label className="block text-[10px] font-bold uppercase tracking-wider text-gray-500 mb-1">
-                      Initials
+                      {lang === 'fr' ? 'Initiales' : lang === 'es' ? 'Iniciales' : 'Initials'}
                     </label>
                     <input
                       type="text"
-                      placeholder="e.g., SC"
+                      placeholder={lang === 'fr' ? 'ex. SC' : lang === 'es' ? 'ej. SC' : 'e.g., SC'}
                       maxLength={3}
                       value={reviewForm.initials}
                       onChange={e => setReviewForm(prev => ({ ...prev, initials: e.target.value.toUpperCase() }))}
@@ -10340,7 +10374,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="block text-[10px] font-bold uppercase tracking-wider text-gray-500 mb-1">
-                      Review Date
+                      {lang === 'fr' ? "Date de l'avis" : lang === 'es' ? 'Fecha de la reseña' : 'Review Date'}
                     </label>
                     <input
                       type="date"
@@ -10352,28 +10386,34 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                   </div>
                   <div>
                     <label className="block text-[10px] font-bold uppercase tracking-wider text-gray-500 mb-1">
-                      Rating (Stars)
+                      {lang === 'fr' ? 'Note (étoiles)' : lang === 'es' ? 'Valoración (estrellas)' : 'Rating (Stars)'}
                     </label>
                     <select
                       value={reviewForm.rating}
                       onChange={e => setReviewForm(prev => ({ ...prev, rating: Number(e.target.value) }))}
                       className="w-full px-3 py-2 text-xs border border-stone-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
                     >
-                      <option value={5}>5 Stars ★★★★★ (Recommended)</option>
-                      <option value={4}>4 Stars ★★★★☆</option>
-                      <option value={3}>3 Stars ★★★☆☆</option>
+                      <option value={5}>{lang === 'fr' ? '5 Étoiles ★★★★★ (Recommandé)' : lang === 'es' ? '5 Estrellas ★★★★★ (Recomendado)' : '5 Stars ★★★★★ (Recommended)'}</option>
+                      <option value={4}>{lang === 'fr' ? '4 Étoiles ★★★★☆' : lang === 'es' ? '4 Estrellas ★★★★☆' : '4 Stars ★★★★☆'}</option>
+                      <option value={3}>{lang === 'fr' ? '3 Étoiles ★★★☆☆' : lang === 'es' ? '3 Estrellas ★★★☆☆' : '3 Stars ★★★☆☆'}</option>
                     </select>
                   </div>
                 </div>
 
                 <div>
                   <label className="block text-[10px] font-bold uppercase tracking-wider text-gray-500 mb-1">
-                    Google Review Text
+                    {lang === 'fr' ? "Texte de l'avis Google" : lang === 'es' ? 'Texto de la reseña de Google' : 'Google Review Text'}
                   </label>
                   <textarea
                     required
                     rows={4}
-                    placeholder="Paste the exact patient review left on Google Business Profile..."
+                    placeholder={
+                      lang === 'fr'
+                        ? "Collez l'avis exact laissé par le patient sur votre fiche Google..."
+                        : lang === 'es'
+                          ? 'Pegue la reseña exacta dejada por el paciente en su perfil de Google...'
+                          : 'Paste the exact patient review left on Google Business Profile...'
+                    }
                     value={reviewForm.text}
                     onChange={e => setReviewForm(prev => ({ ...prev, text: e.target.value }))}
                     className="w-full px-3 py-2 text-xs border border-stone-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"

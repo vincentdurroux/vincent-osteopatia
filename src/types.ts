@@ -125,6 +125,8 @@ export interface TelegramConfigResponse {
   lastError: string | null;
   cronSecret: string;
   botUsername?: string;
+  ntfyTopic?: string;
+  ntfyEnabled?: boolean;
 }
 
 export interface TelegramPreviewResponse {

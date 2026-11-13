@@ -30,12 +30,15 @@ const supabase =
   supabaseUrl && supabaseAnonKey ? createClient(supabaseUrl, supabaseAnonKey) : null;
 
 const DATA_DIR = path.resolve(process.cwd(), '.data');
-const CONFIG_FILE = path.join(DATA_DIR, 'telegram-config.json');
+const CONFIG_FILE = path.join(DATA_DIR, 'notifications-config.json');
+const LEGACY_CONFIG_FILE = path.join(DATA_DIR, 'telegram-config.json');
 const SYS_CONFIG_EVENT_ID = '00000000-0000-4000-8000-743567000001';
 const SYS_CONFIG_SUMMARY = '__SYS_TELEGRAM_CONFIG__';
 
-interface StoredTelegramConfig {
+interface StoredNotificationConfig {
   enabled: boolean;
+  ntfyEnabled: boolean;
+  ntfyTopic: string;
   botToken: string;
   botUsername?: string;
   chatId: string;
@@ -69,9 +72,11 @@ interface AppointmentItem {
   bonoType?: string;
 }
 
-function defaultConfig(): StoredTelegramConfig {
+function defaultConfig(): StoredNotificationConfig {
   return {
     enabled: false,
+    ntfyEnabled: false,
+    ntfyTopic: '',
     botToken: '',
     botUsername: '',
     chatId: '',
@@ -87,7 +92,7 @@ function defaultConfig(): StoredTelegramConfig {
     lastSentCount: 0,
     lastStatus: null,
     lastError: null,
-    cronSecret: process.env.TELEGRAM_CRON_SECRET || crypto.randomBytes(12).toString('hex'),
+    cronSecret: crypto.randomBytes(12).toString('hex'),
     updatedAt: 0,
   };
 }
@@ -104,28 +109,32 @@ function maskToken(token: string): string {
   return `${token.slice(0, 6)}••••••${token.slice(-4)}`;
 }
 
-function readLocalConfigFile(): Partial<StoredTelegramConfig> | null {
+function readLocalConfigFile(): Partial<StoredNotificationConfig> | null {
   try {
     if (fs.existsSync(CONFIG_FILE)) {
       const raw = fs.readFileSync(CONFIG_FILE, 'utf-8');
       return JSON.parse(raw);
     }
+    if (fs.existsSync(LEGACY_CONFIG_FILE)) {
+      const raw = fs.readFileSync(LEGACY_CONFIG_FILE, 'utf-8');
+      return JSON.parse(raw);
+    }
   } catch (err) {
-    console.warn('[Telegram] Failed to read local config file:', err);
+    console.warn('[Notifications] Failed to read local config file:', err);
   }
   return null;
 }
 
-function writeLocalConfigFile(cfg: StoredTelegramConfig) {
+function writeLocalConfigFile(cfg: StoredNotificationConfig) {
   try {
     ensureDataDir();
     fs.writeFileSync(CONFIG_FILE, JSON.stringify(cfg, null, 2), 'utf-8');
   } catch (err) {
-    console.warn('[Telegram] Failed to write local config file:', err);
+    console.warn('[Notifications] Failed to write local config file:', err);
   }
 }
 
-async function readSupabaseConfig(): Promise<Partial<StoredTelegramConfig> | null> {
+async function readSupabaseConfig(): Promise<Partial<StoredNotificationConfig> | null> {
   if (!supabase) return null;
   try {
     const { data, error } = await supabase
@@ -138,12 +147,12 @@ async function readSupabaseConfig(): Promise<Partial<StoredTelegramConfig> | nul
       return JSON.parse(data.description);
     }
   } catch (err) {
-    console.warn('[Telegram] Failed to read Supabase config:', err);
+    console.warn('[Notifications] Failed to read Supabase config:', err);
   }
   return null;
 }
 
-async function writeSupabaseConfig(cfg: StoredTelegramConfig): Promise<void> {
+async function writeSupabaseConfig(cfg: StoredNotificationConfig): Promise<void> {
   if (!supabase) return;
   try {
     await supabase.from('calendar_events').upsert({
@@ -154,20 +163,19 @@ async function writeSupabaseConfig(cfg: StoredTelegramConfig): Promise<void> {
       end: '1970-01-01T00:01:00+00:00',
     });
   } catch (err) {
-    console.warn('[Telegram] Failed to persist config to Supabase:', err);
+    console.warn('[Notifications] Failed to persist config to Supabase:', err);
   }
 }
 
-let cachedConfig: StoredTelegramConfig | null = null;
+let cachedConfig: StoredNotificationConfig | null = null;
 
-async function loadConfig(): Promise<StoredTelegramConfig> {
+async function loadConfig(): Promise<StoredNotificationConfig> {
   const base = defaultConfig();
   const localCfg = readLocalConfigFile();
   const remoteCfg = await readSupabaseConfig();
 
-  let merged: StoredTelegramConfig = { ...base };
+  let merged: StoredNotificationConfig = { ...base };
 
-  // Merge whichever persisted store is newer (remote vs local)
   if (localCfg && remoteCfg) {
     const localTime = Number(localCfg.updatedAt || 0);
     const remoteTime = Number(remoteCfg.updatedAt || 0);
@@ -181,17 +189,12 @@ async function loadConfig(): Promise<StoredTelegramConfig> {
     merged = { ...base, ...localCfg };
   }
 
-  // Env overrides if provided
-  if (process.env.TELEGRAM_BOT_TOKEN?.trim()) {
-    merged.botToken = process.env.TELEGRAM_BOT_TOKEN.trim();
+  if (!merged.ntfyTopic) {
+    merged.ntfyTopic = base.ntfyTopic;
   }
-  if (process.env.TELEGRAM_CHAT_ID?.trim()) {
-    merged.chatId = process.env.TELEGRAM_CHAT_ID.trim();
+  if (typeof merged.ntfyEnabled !== 'boolean') {
+    merged.ntfyEnabled = true;
   }
-  if (process.env.TELEGRAM_CRON_SECRET?.trim()) {
-    merged.cronSecret = process.env.TELEGRAM_CRON_SECRET.trim();
-  }
-
   if (!merged.cronSecret) {
     merged.cronSecret = crypto.randomBytes(12).toString('hex');
   }
@@ -200,8 +203,8 @@ async function loadConfig(): Promise<StoredTelegramConfig> {
   return merged;
 }
 
-async function saveConfig(next: StoredTelegramConfig): Promise<StoredTelegramConfig> {
-  const withTimestamp: StoredTelegramConfig = {
+async function saveConfig(next: StoredNotificationConfig): Promise<StoredNotificationConfig> {
+  const withTimestamp: StoredNotificationConfig = {
     ...next,
     updatedAt: Date.now(),
   };
@@ -211,25 +214,27 @@ async function saveConfig(next: StoredTelegramConfig): Promise<StoredTelegramCon
   return withTimestamp;
 }
 
-function getEffectiveBotToken(cfg: StoredTelegramConfig): string {
-  return process.env.TELEGRAM_BOT_TOKEN?.trim() || cfg.botToken?.trim() || '';
+function getEffectiveBotToken(cfg: StoredNotificationConfig): string {
+  return cfg.botToken?.trim() || '';
 }
 
-function getEffectiveChatId(cfg: StoredTelegramConfig): string {
-  return process.env.TELEGRAM_CHAT_ID?.trim() || cfg.chatId?.trim() || '';
+function getEffectiveChatId(cfg: StoredNotificationConfig): string {
+  return cfg.chatId?.trim() || '';
 }
 
-function toPublicConfig(cfg: StoredTelegramConfig) {
+function toPublicConfig(cfg: StoredNotificationConfig) {
   const effectiveToken = getEffectiveBotToken(cfg);
   const effectiveChatId = getEffectiveChatId(cfg);
   return {
     enabled: Boolean(cfg.enabled),
+    ntfyEnabled: cfg.ntfyEnabled !== false,
+    ntfyTopic: cfg.ntfyTopic || '',
     hasBotToken: Boolean(effectiveToken),
     botTokenMasked: maskToken(effectiveToken),
-    envBotTokenConfigured: Boolean(process.env.TELEGRAM_BOT_TOKEN?.trim()),
+    envBotTokenConfigured: false,
     chatId: effectiveChatId,
     chatLabel: cfg.chatLabel || '',
-    envChatIdConfigured: Boolean(process.env.TELEGRAM_CHAT_ID?.trim()),
+    envChatIdConfigured: false,
     sendTime: cfg.sendTime || '08:00',
     timezone: cfg.timezone || 'Europe/Madrid',
     language: cfg.language || 'fr',
@@ -322,7 +327,7 @@ const GENERIC_APPOINTMENT_SUMMARIES = new Set([
   'osteopathy session',
 ]);
 
-async function getTodayAppointments(cfg: StoredTelegramConfig): Promise<{
+async function getTodayAppointments(cfg: StoredNotificationConfig): Promise<{
   dateStr: string;
   dateFormatted: string;
   appointments: AppointmentItem[];
@@ -426,7 +431,6 @@ async function getTodayAppointments(cfg: StoredTelegramConfig): Promise<{
         summaryStr ||
         'Patient';
 
-      // Extract motif if description or non-generic summary differs from clientName
       let motif = cleanDesc;
       if (
         !motif &&
@@ -459,13 +463,13 @@ async function getTodayAppointments(cfg: StoredTelegramConfig): Promise<{
     appointments.sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
     return { dateStr: todayStr, dateFormatted, appointments };
   } catch (err) {
-    console.error('[Telegram] Failed to load today appointments:', err);
+    console.error('[Notifications] Failed to load today appointments:', err);
     return { dateStr: todayStr, dateFormatted, appointments: [] };
   }
 }
 
 function formatDigestMessage(
-  cfg: StoredTelegramConfig,
+  cfg: StoredNotificationConfig,
   dateFormatted: string,
   appointments: AppointmentItem[],
   forHtml: boolean = true
@@ -477,12 +481,7 @@ function formatDigestMessage(
   const b = (s: string) => (forHtml ? `<b>${escapeHtml(s)}</b>` : s);
   const esc = (s: string) => (forHtml ? escapeHtml(s) : s);
 
-  const header =
-    lang === 'fr'
-      ? `🦴 ${b('Vincent Osteopatía')} — ${b(capitalizedDate)}`
-      : lang === 'es'
-      ? `🦴 ${b('Vincent Osteopatía')} — ${b(capitalizedDate)}`
-      : `🦴 ${b('Vincent Osteopatía')} — ${b(capitalizedDate)}`;
+  const header = `🦴 ${b('Vincent Osteopatía')} — ${b(capitalizedDate)}`;
 
   const subheader =
     lang === 'fr'
@@ -525,6 +524,31 @@ function formatDigestMessage(
   return lines.join('\n').trim();
 }
 
+async function sendNtfyNotification(
+  topic: string,
+  title: string,
+  plainText: string
+): Promise<{ ok: boolean; error?: string }> {
+  if (!topic) return { ok: false, error: 'Missing topic' };
+  try {
+    const res = await fetch(`https://ntfy.sh/${encodeURIComponent(topic)}`, {
+      method: 'POST',
+      headers: {
+        Title: title,
+        Priority: 'default',
+        Tags: 'calendar,clipboard',
+      },
+      body: plainText,
+    });
+    if (!res.ok) {
+      return { ok: false, error: `Notification push HTTP ${res.status}` };
+    }
+    return { ok: true };
+  } catch (err: any) {
+    return { ok: false, error: err?.message || 'Network error sending push notification' };
+  }
+}
+
 async function sendTelegramMessage(
   botToken: string,
   chatId: string,
@@ -543,11 +567,11 @@ async function sendTelegramMessage(
     });
     const json = (await res.json()) as { ok: boolean; description?: string };
     if (!json.ok) {
-      return { ok: false, error: json.description || `Telegram HTTP ${res.status}` };
+      return { ok: false, error: json.description || `HTTP ${res.status}` };
     }
     return { ok: true };
   } catch (err: any) {
-    return { ok: false, error: err?.message || 'Network error calling Telegram API' };
+    return { ok: false, error: err?.message || 'Network error' };
   }
 }
 
@@ -570,17 +594,7 @@ async function checkAndSendMorningDigest(options: {
   try {
     const cfg = cachedConfig || (await loadConfig());
     if (!options.bypassEnabledCheck && !cfg.enabled) {
-      return { action: 'skipped_disabled', count: 0, message: 'Telegram notifications disabled' };
-    }
-
-    const botToken = getEffectiveBotToken(cfg);
-    const chatId = getEffectiveChatId(cfg);
-    if (!botToken || !chatId) {
-      return {
-        action: 'error',
-        count: 0,
-        error: 'Bot Token ou Chat ID manquant.',
-      };
+      return { action: 'skipped_disabled', count: 0, message: 'Notifications désactivées' };
     }
 
     const timeZone = cfg.timezone || 'Europe/Madrid';
@@ -596,7 +610,6 @@ async function checkAndSendMorningDigest(options: {
       const targetMinutes = (isNaN(hh) ? 8 : hh) * 60 + (isNaN(mm) ? 0 : mm);
       const currentMinutes = getZonedMinutesOfDay(now, timeZone);
 
-      // Send within [targetMinutes, targetMinutes + 240] (up to 4 hours after configured morning time)
       if (currentMinutes < targetMinutes || currentMinutes > targetMinutes + 240) {
         return { action: 'skipped_window', count: 0 };
       }
@@ -623,19 +636,48 @@ async function checkAndSendMorningDigest(options: {
       };
     }
 
+    const plainMessage = formatDigestMessage(cfg, dateFormatted, appointments, false);
     const htmlMessage = formatDigestMessage(cfg, dateFormatted, appointments, true);
-    const sendResult = await sendTelegramMessage(botToken, chatId, htmlMessage);
 
-    if (!sendResult.ok) {
+    let anySent = false;
+    let lastErr = '';
+
+    // 1. Send via zero-secret Push channel (ntfy) if enabled
+    if (cfg.ntfyEnabled !== false && cfg.ntfyTopic) {
+      const title =
+        cfg.language === 'fr'
+          ? `Vincent Osteo — ${appointments.length} patient(s) aujourd'hui`
+          : `Vincent Osteo — ${appointments.length} paciente(s) hoy`;
+      const ntfyRes = await sendNtfyNotification(cfg.ntfyTopic, title, plainMessage);
+      if (ntfyRes.ok) {
+        anySent = true;
+      } else if (ntfyRes.error) {
+        lastErr = ntfyRes.error;
+      }
+    }
+
+    // 2. Also send via Telegram if optional Bot Token & Chat ID were configured
+    const botToken = getEffectiveBotToken(cfg);
+    const chatId = getEffectiveChatId(cfg);
+    if (botToken && chatId) {
+      const tgRes = await sendTelegramMessage(botToken, chatId, htmlMessage);
+      if (tgRes.ok) {
+        anySent = true;
+      } else if (tgRes.error) {
+        lastErr = tgRes.error;
+      }
+    }
+
+    if (!anySent) {
       await saveConfig({
         ...cfg,
         lastStatus: 'error',
-        lastError: sendResult.error || 'Telegram API error',
+        lastError: lastErr || 'Aucun canal de notification actif',
       });
       return {
         action: 'error',
         count: appointments.length,
-        error: sendResult.error,
+        error: lastErr || 'Erreur lors de l’envoi de la notification.',
       };
     }
 
@@ -651,7 +693,7 @@ async function checkAndSendMorningDigest(options: {
     return {
       action: 'sent',
       count: appointments.length,
-      message: `Récapitulatif envoyé pour ${appointments.length} patient(s).`,
+      message: `Notification récapitulative envoyée (${appointments.length} patient${appointments.length > 1 ? 's' : ''}).`,
     };
   } finally {
     isSendingDigest = false;
@@ -669,13 +711,13 @@ async function startServer() {
     res.json({ ok: true, timestamp: new Date().toISOString() });
   });
 
-  // Get Telegram configuration (masked token)
+  // Get Notification configuration
   app.get('/api/telegram/config', async (_req: Request, res: Response) => {
     const cfg = await loadConfig();
     res.json(toPublicConfig(cfg));
   });
 
-  // Update Telegram configuration
+  // Update Notification configuration
   app.post('/api/telegram/config', async (req: Request, res: Response) => {
     try {
       const current = await loadConfig();
@@ -696,9 +738,14 @@ async function startServer() {
         nextSendTime = body.sendTime.trim();
       }
 
-      const next: StoredTelegramConfig = {
+      const next: StoredNotificationConfig = {
         ...current,
         enabled: typeof body.enabled === 'boolean' ? body.enabled : current.enabled,
+        ntfyEnabled: typeof body.ntfyEnabled === 'boolean' ? body.ntfyEnabled : current.ntfyEnabled,
+        ntfyTopic:
+          typeof body.ntfyTopic === 'string' && body.ntfyTopic.trim()
+            ? body.ntfyTopic.trim()
+            : current.ntfyTopic,
         botToken: nextToken,
         botUsername: typeof body.botUsername === 'string' ? body.botUsername.trim() : current.botUsername,
         chatId: typeof body.chatId === 'string' ? body.chatId.trim() : current.chatId,
@@ -721,7 +768,7 @@ async function startServer() {
     }
   });
 
-  // Auto-detect Chat ID from Telegram Bot getUpdates
+  // Auto-detect Chat ID if user optionally connects a bot
   app.post('/api/telegram/detect-chat', async (req: Request, res: Response) => {
     try {
       const cfg = await loadConfig();
@@ -732,7 +779,7 @@ async function startServer() {
           : getEffectiveBotToken(cfg);
 
       if (!token) {
-        res.status(400).json({ ok: false, error: 'Veuillez d’abord saisir votre Bot Token Telegram.' });
+        res.status(400).json({ ok: false, error: 'Veuillez saisir un Bot Token.' });
         return;
       }
 
@@ -746,7 +793,7 @@ async function startServer() {
       if (!meJson.ok) {
         res.status(400).json({
           ok: false,
-          error: meJson.description || 'Token Telegram invalide.',
+          error: meJson.description || 'Token invalide.',
         });
         return;
       }
@@ -761,7 +808,7 @@ async function startServer() {
       if (!updatesJson.ok) {
         res.status(400).json({
           ok: false,
-          error: updatesJson.description || 'Impossible de lire les messages du bot.',
+          error: updatesJson.description || 'Impossible de lire les messages.',
         });
         return;
       }
@@ -791,8 +838,7 @@ async function startServer() {
 
       const chats = Array.from(chatsMap.values()).reverse();
 
-      // Save botUsername (and token if newly supplied)
-      const updatedCfg: StoredTelegramConfig = {
+      const updatedCfg: StoredNotificationConfig = {
         ...cfg,
         botToken: rawInputToken && !rawInputToken.includes('••••') ? rawInputToken : cfg.botToken,
         botUsername: meJson.result?.username || cfg.botUsername,
@@ -811,7 +857,7 @@ async function startServer() {
         config: toPublicConfig(updatedCfg),
       });
     } catch (err: any) {
-      res.status(500).json({ ok: false, error: err?.message || 'Erreur lors de la détection Telegram.' });
+      res.status(500).json({ ok: false, error: err?.message || 'Erreur lors de la détection.' });
     }
   });
 
@@ -820,7 +866,7 @@ async function startServer() {
     try {
       const cfg = await loadConfig();
       const langParam = req.query.language;
-      const previewCfg: StoredTelegramConfig = {
+      const previewCfg: StoredNotificationConfig = {
         ...cfg,
         language:
           langParam === 'fr' || langParam === 'es' || langParam === 'en'
@@ -859,32 +905,46 @@ async function startServer() {
       const cfg = await loadConfig();
       const mode = req.body?.mode === 'ping' ? 'ping' : 'digest';
 
-      const botToken = getEffectiveBotToken(cfg);
-      const chatId = getEffectiveChatId(cfg);
-
-      if (!botToken || !chatId) {
-        res.status(400).json({
-          ok: false,
-          error: 'Veuillez renseigner le Bot Token et le Chat ID avant de tester.',
-        });
-        return;
-      }
-
       if (mode === 'ping') {
         const lang = cfg.language || 'fr';
-        const pingText =
+        const plainPing =
           lang === 'fr'
-            ? `✅ <b>Connexion Telegram réussie !</b>\n\nVotre cabinet <b>Vincent Osteopatía</b> vous enverra ici chaque matin à <b>${escapeHtml(cfg.sendTime)}</b> le récapitulatif de vos patients (uniquement les jours avec rendez-vous).`
+            ? `✅ Notifications activées !\n\nVotre cabinet Vincent Osteopatía vous enverra chaque matin à ${cfg.sendTime} le récapitulatif de vos patients (uniquement les jours avec rendez-vous).`
             : lang === 'es'
-            ? `✅ <b>¡Conexión con Telegram exitosa!</b>\n\nSu clínica <b>Vincent Osteopatía</b> le enviará cada mañana a las <b>${escapeHtml(cfg.sendTime)}</b> el resumen de sus pacientes (solo los días con citas).`
-            : `✅ <b>Telegram connected successfully!</b>\n\n<b>Vincent Osteopatía</b> will send your daily patient digest here at <b>${escapeHtml(cfg.sendTime)}</b> (only on days with scheduled patients).`;
+            ? `✅ ¡Notificaciones activadas!\n\nSu clínica Vincent Osteopatía le enviará cada mañana a las ${cfg.sendTime} el resumen de sus pacientes (solo los días con citas).`
+            : `✅ Notifications enabled!\n\nVincent Osteopatía will send your daily patient digest at ${cfg.sendTime} (only on days with scheduled patients).`;
 
-        const sendRes = await sendTelegramMessage(botToken, chatId, pingText);
-        if (!sendRes.ok) {
-          res.status(400).json({ ok: false, error: sendRes.error });
+        let sentAny = false;
+        let lastErr = '';
+
+        if (cfg.ntfyEnabled !== false && cfg.ntfyTopic) {
+          const ntfyRes = await sendNtfyNotification(
+            cfg.ntfyTopic,
+            'Vincent Osteopatía — Test de notification',
+            plainPing
+          );
+          if (ntfyRes.ok) sentAny = true;
+          else if (ntfyRes.error) lastErr = ntfyRes.error;
+        }
+
+        const botToken = getEffectiveBotToken(cfg);
+        const chatId = getEffectiveChatId(cfg);
+        if (botToken && chatId) {
+          const htmlPing =
+            lang === 'fr'
+              ? `✅ <b>Notifications activées !</b>\n\nVotre cabinet <b>Vincent Osteopatía</b> vous enverra chaque matin à <b>${escapeHtml(cfg.sendTime)}</b> le récapitulatif de vos patients (uniquement les jours avec rendez-vous).`
+              : `✅ <b>¡Notificaciones activadas!</b>\n\nSu clínica <b>Vincent Osteopatía</b> le enviará cada mañana a las <b>${escapeHtml(cfg.sendTime)}</b> el resumen de sus pacientes.`;
+          const tgRes = await sendTelegramMessage(botToken, chatId, htmlPing);
+          if (tgRes.ok) sentAny = true;
+          else if (tgRes.error) lastErr = tgRes.error;
+        }
+
+        if (!sentAny) {
+          res.status(400).json({ ok: false, error: lastErr || 'Impossible d’envoyer la notification test.' });
           return;
         }
-        res.json({ ok: true, mode: 'ping', message: 'Message de test envoyé sur Telegram !' });
+
+        res.json({ ok: true, mode: 'ping', message: 'Notification de test envoyée avec succès !' });
         return;
       }
 
@@ -901,7 +961,7 @@ async function startServer() {
     }
   });
 
-  // Cron trigger endpoint (for external schedulers like cron-job.org if container sleeps overnight)
+  // Cron trigger endpoint
   const handleCronTrigger = async (req: Request, res: Response) => {
     try {
       const cfg = await loadConfig();
@@ -949,11 +1009,11 @@ async function startServer() {
   // Morning scheduler: checks every 30 seconds
   setInterval(() => {
     checkAndSendMorningDigest({ enforceTimeWindow: true }).catch(err => {
-      console.error('[Telegram Scheduler] Unexpected error:', err);
+      console.error('[Notifications Scheduler] Unexpected error:', err);
     });
   }, 30 * 1000);
 
-  // Also run an initial check 8 seconds after boot (e.g. if container wakes up during the morning window)
+  // Initial check 8 seconds after boot
   setTimeout(() => {
     checkAndSendMorningDigest({ enforceTimeWindow: true }).catch(() => {});
   }, 8000);
