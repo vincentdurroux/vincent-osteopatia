@@ -2349,24 +2349,48 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
     };
   }, []);
 
-  // Load briefing config & Web Push subscription status on mount
+  const cleanVapidKey = (raw: string) =>
+    (raw || '').trim().replace(/^["']|["']$/g, '').replace(/\s+/g, '').replace(/=+$/g, '');
+
+  const parseApiJsonSafe = async (res: Response, stepLabel: string) => {
+    const rawText = await res.text();
+    if (!res.ok) {
+      throw new Error(`[${stepLabel}] Erreur serveur HTTP ${res.status}`);
+    }
+    try {
+      return JSON.parse(rawText);
+    } catch {
+      throw new Error(
+        `[${stepLabel}] Le serveur a renvoyé une page HTML au lieu de JSON (vérifiez la connexion/authentification sur cette URL).`
+      );
+    }
+  };
+
+  // Load briefing config & Web Push subscription status on mount and when modal opens
   useEffect(() => {
     let mounted = true;
     const loadBriefingSettings = async () => {
       try {
         const [serverRes, remoteSetting] = await Promise.all([
-          fetch('/api/morning-briefing/config').then(r => (r.ok ? r.json() : null)).catch(() => null),
+          fetch('/api/morning-briefing/config')
+            .then(async r => (r.ok ? JSON.parse(await r.text()) : null))
+            .catch(() => null),
           api.getAppSetting<MorningBriefingConfigState>('morning_briefing').catch(() => null),
         ]);
 
         if (!mounted) return;
 
-        if (serverRes?.capabilities) {
-          setPushCapabilities({
-            vapidPublicKey: serverRes.capabilities.vapidPublicKey || '',
-            subscriptionsCount: serverRes.capabilities.subscriptionsCount || 0,
-          });
+        const cachedKey =
+          typeof window !== 'undefined' ? localStorage.getItem('vincent_vapid_public_key') || '' : '';
+        const fetchedKey = cleanVapidKey(serverRes?.capabilities?.vapidPublicKey || cachedKey);
+        if (fetchedKey && typeof window !== 'undefined') {
+          localStorage.setItem('vincent_vapid_public_key', fetchedKey);
         }
+
+        setPushCapabilities(prev => ({
+          vapidPublicKey: fetchedKey || prev.vapidPublicKey,
+          subscriptionsCount: serverRes?.capabilities?.subscriptionsCount ?? prev.subscriptionsCount,
+        }));
 
         const source = {
           ...(serverRes?.config || {}),
@@ -2388,10 +2412,13 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
         setMorningBriefingConfig(merged);
         localStorage.setItem('vincent_morning_briefing_config', JSON.stringify(merged));
 
-        // Check if current browser/device already has an active Web Push subscription
+        // Pre-register / check Service Worker registration & current Push subscription
         if (typeof window !== 'undefined' && 'serviceWorker' in navigator && 'PushManager' in window) {
           try {
-            const reg = await navigator.serviceWorker.getRegistration('/sw.js');
+            let reg = await navigator.serviceWorker.getRegistration('/');
+            if (!reg) {
+              reg = await navigator.serviceWorker.register('/sw.js', { scope: '/' });
+            }
             if (reg) {
               const existingSub = await reg.pushManager.getSubscription();
               if (mounted) {
@@ -2411,7 +2438,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [isMorningBriefingOpen]);
 
   // Compute today's patient briefing preview directly from live events + clients
   const todayPatientBriefing = useMemo(() => {
@@ -2514,12 +2541,24 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
   }, [morningBriefingConfig.timezone, morningBriefingConfig.lang]);
 
   const urlBase64ToUint8Array = (base64String: string) => {
-    const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
-    const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
-    const rawData = window.atob(base64);
+    const cleaned = cleanVapidKey(base64String);
+    if (!cleaned) {
+      throw new Error('[Clé VAPID] Clé publique VAPID vide.');
+    }
+    const padding = '='.repeat((4 - (cleaned.length % 4)) % 4);
+    const base64 = (cleaned + padding).replace(/-/g, '+').replace(/_/g, '/');
+    let rawData = '';
+    try {
+      rawData = window.atob(base64);
+    } catch (e: any) {
+      throw new Error(`[Clé VAPID] Format base64 invalide (${e?.message || 'atob'})`);
+    }
     const outputArray = new Uint8Array(rawData.length);
     for (let i = 0; i < rawData.length; ++i) {
       outputArray[i] = rawData.charCodeAt(i);
+    }
+    if (outputArray.length !== 65 || outputArray[0] !== 0x04) {
+      throw new Error(`[Clé VAPID] Longueur ou en-tête EC invalide (${outputArray.length} octets).`);
     }
     return outputArray;
   };
@@ -2537,6 +2576,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
 
     setIsSubscribingPush(true);
     setBriefingFeedback(null);
+    let currentStep = 'Permission';
     try {
       const perm = await Notification.requestPermission();
       if (perm !== 'granted') {
@@ -2549,26 +2589,58 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
         return;
       }
 
-      let publicKey = pushCapabilities.vapidPublicKey;
+      currentStep = 'Config VAPID';
+      let publicKey = cleanVapidKey(
+        pushCapabilities.vapidPublicKey || localStorage.getItem('vincent_vapid_public_key') || ''
+      );
       if (!publicKey) {
-        const cfgRes = await fetch('/api/morning-briefing/config').then(r => r.json());
-        publicKey = cfgRes?.capabilities?.vapidPublicKey || '';
+        const cfgResponse = await fetch('/api/morning-briefing/config');
+        const cfgRes = await parseApiJsonSafe(cfgResponse, 'Config VAPID');
+        publicKey = cleanVapidKey(cfgRes?.capabilities?.vapidPublicKey || '');
       }
       if (!publicKey) {
-        throw new Error('Clé VAPID serveur indisponible.');
+        throw new Error('[Config VAPID] Clé publique VAPID serveur indisponible.');
       }
+      localStorage.setItem('vincent_vapid_public_key', publicKey);
 
-      const registration = await navigator.serviceWorker.register('/sw.js');
-      await navigator.serviceWorker.ready;
+      currentStep = 'Décodage clé VAPID';
+      const keyBytes = urlBase64ToUint8Array(publicKey);
 
-      let subscription = await registration.pushManager.getSubscription();
+      currentStep = 'Service Worker';
+      const existingReg = await navigator.serviceWorker.getRegistration('/');
+      if (!existingReg) {
+        await navigator.serviceWorker.register('/sw.js', { scope: '/' });
+      }
+      const activeRegistration = await navigator.serviceWorker.ready;
+
+      currentStep = 'Abonnement PushManager';
+      let subscription = await activeRegistration.pushManager.getSubscription();
       if (!subscription) {
-        subscription = await registration.pushManager.subscribe({
-          userVisibleOnly: true,
-          applicationServerKey: urlBase64ToUint8Array(publicKey),
-        });
+        try {
+          subscription = await activeRegistration.pushManager.subscribe({
+            userVisibleOnly: true,
+            applicationServerKey: keyBytes,
+          });
+        } catch (firstErr: any) {
+          try {
+            subscription = await activeRegistration.pushManager.subscribe({
+              userVisibleOnly: true,
+              applicationServerKey: keyBytes.buffer as ArrayBuffer,
+            });
+          } catch {
+            try {
+              subscription = await activeRegistration.pushManager.subscribe({
+                userVisibleOnly: true,
+                applicationServerKey: publicKey,
+              });
+            } catch {
+              throw firstErr;
+            }
+          }
+        }
       }
 
+      currentStep = 'Enregistrement serveur';
       const res = await fetch('/api/morning-briefing/subscribe', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -2577,7 +2649,8 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
           deviceLabel: navigator.userAgent.includes('Mobile') ? 'Mobile' : 'Ordinateur',
         }),
       });
-      const data = await res.json();
+      const data = await parseApiJsonSafe(res, 'Enregistrement serveur');
+
       setIsDeviceWebPushActive(true);
       setPushCapabilities(prev => ({
         ...prev,
@@ -2589,9 +2662,10 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
         text: 'Cet appareil est maintenant abonné aux notifications push VAPID !',
       });
     } catch (err: any) {
+      const msg = err?.message || "Impossible d'activer le Web Push VAPID sur cet appareil.";
       setBriefingFeedback({
         type: 'error',
-        text: err?.message || "Impossible d'activer le Web Push VAPID sur cet appareil.",
+        text: msg.startsWith('[') ? msg : `[${currentStep}] ${msg}`,
       });
     } finally {
       setIsSubscribingPush(false);
@@ -2602,7 +2676,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
     setIsSubscribingPush(true);
     setBriefingFeedback(null);
     try {
-      const reg = await navigator.serviceWorker.getRegistration('/sw.js');
+      const reg = await navigator.serviceWorker.getRegistration('/');
       const existingSub = reg ? await reg.pushManager.getSubscription() : null;
       const endpoint = existingSub?.endpoint;
       if (existingSub) {
@@ -2613,7 +2687,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ endpoint }),
       });
-      const data = await res.json();
+      const data = await parseApiJsonSafe(res, 'Désabonnement');
       setIsDeviceWebPushActive(false);
       setPushCapabilities(prev => ({
         ...prev,

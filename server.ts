@@ -108,8 +108,8 @@ function writeJsonFile(filePath: string, data: unknown) {
 async function getOrCreateVapidKeys(): Promise<{ publicKey: string; privateKey: string }> {
   if (process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY) {
     return {
-      publicKey: process.env.VAPID_PUBLIC_KEY,
-      privateKey: process.env.VAPID_PRIVATE_KEY,
+      publicKey: process.env.VAPID_PUBLIC_KEY.trim().replace(/^["']|["']$/g, '').replace(/\s+/g, '').replace(/=+$/g, ''),
+      privateKey: process.env.VAPID_PRIVATE_KEY.trim().replace(/^["']|["']$/g, '').replace(/\s+/g, '').replace(/=+$/g, ''),
     };
   }
 
