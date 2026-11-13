@@ -877,12 +877,20 @@ CREATE TABLE IF NOT EXISTS public.google_reviews (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- 5b. TABLE DES PARAMÈTRES APPLICATION (BRIEFING MATINAL, PRÉFÉRENCES)
+CREATE TABLE IF NOT EXISTS public.app_settings (
+    id TEXT PRIMARY KEY,
+    value JSONB NOT NULL DEFAULT '{}'::jsonb,
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
 -- 6. SÉCURITÉ ROW LEVEL SECURITY (RLS)
 ALTER TABLE public.clients ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.client_notes ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.invoices ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.calendar_events ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.google_reviews ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.app_settings ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS "Accès total clients" ON public.clients;
 CREATE POLICY "Accès total clients" ON public.clients FOR ALL USING (true) WITH CHECK (true);
@@ -899,12 +907,16 @@ CREATE POLICY "Accès total agenda" ON public.calendar_events FOR ALL USING (tru
 DROP POLICY IF EXISTS "Accès total avis" ON public.google_reviews;
 CREATE POLICY "Accès total avis" ON public.google_reviews FOR ALL USING (true) WITH CHECK (true);
 
+DROP POLICY IF EXISTS "Accès total settings" ON public.app_settings;
+CREATE POLICY "Accès total settings" ON public.app_settings FOR ALL USING (true) WITH CHECK (true);
+
 -- 7. ACCÈS ROLES ANON ET AUTHENTICATED
 GRANT ALL ON public.clients TO anon, authenticated;
 GRANT ALL ON public.client_notes TO anon, authenticated;
 GRANT ALL ON public.invoices TO anon, authenticated;
 GRANT ALL ON public.calendar_events TO anon, authenticated;
 GRANT ALL ON public.google_reviews TO anon, authenticated;
+GRANT ALL ON public.app_settings TO anon, authenticated;
 
 -- 8. ACTIVATION DU TEMPS RÉEL (SUPABASE REALTIME)
 ALTER PUBLICATION supabase_realtime ADD TABLE public.clients;
@@ -2447,5 +2459,49 @@ export const api = {
     const filtered = current.filter(r => r.id !== id);
     saveLocal('google_reviews', filtered);
     return true;
-  }
+  },
+
+  // ==========================================
+  // APP SETTINGS (MULTI-DEVICE PREFERENCES)
+  // ==========================================
+  async getAppSetting<T = any>(id: string): Promise<T | null> {
+    if (isSupabaseConfigured && supabase) {
+      try {
+        const { data, error } = await supabase.from('app_settings').select('value').eq('id', id).maybeSingle();
+        if (!error && data && data.value) {
+          return data.value as T;
+        }
+      } catch {
+        // Table may not exist yet; graceful fallback
+      }
+    }
+    if (typeof window !== 'undefined') {
+      try {
+        const raw = localStorage.getItem(`vincent_setting_${id}`);
+        if (raw) return JSON.parse(raw) as T;
+      } catch {}
+    }
+    return null;
+  },
+
+  async saveAppSetting<T = any>(id: string, value: T): Promise<boolean> {
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.setItem(`vincent_setting_${id}`, JSON.stringify(value));
+      } catch {}
+    }
+    if (isSupabaseConfigured && supabase) {
+      try {
+        const { error } = await supabase.from('app_settings').upsert({
+          id,
+          value,
+          updated_at: new Date().toISOString(),
+        });
+        if (!error) return true;
+      } catch {
+        // Graceful fallback when table doesn't exist
+      }
+    }
+    return false;
+  },
 };
