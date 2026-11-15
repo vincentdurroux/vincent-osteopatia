@@ -1738,7 +1738,12 @@ export const api = {
               const rawMotif = (row.motif || '').replace(/^\[BROUILLON\]\s*/i, '');
               const clientId = String(row.clientId || row.client_id || parsedMeta.clientId || '');
               const eventId = row.eventId || row.event_id || parsedMeta.eventId || '';
-              const key = parsedMeta.draftKey || (eventId ? `${clientId}::evt_${eventId}` : `${clientId}::general`);
+              const draftDate = (parsedMeta.date || (row.date ? row.date.split('T')[0] : new Date().toISOString().split('T')[0])).split('T')[0];
+              const key =
+                parsedMeta.draftKey ||
+                (eventId
+                  ? `${clientId}::evt_${eventId}::date_${draftDate}`
+                  : `${clientId}::date_${draftDate}`);
 
               if (clientId && (row.anamnese?.trim() || row.treatment?.trim() || rawMotif.trim())) {
                 drafts[key] = {
@@ -1747,7 +1752,7 @@ export const api = {
                   anamnese: row.anamnese || '',
                   treatment: row.treatment || '',
                   category: (parsedMeta.category || row.category || 'treatment') as ClientNote['category'],
-                  date: parsedMeta.date || (row.date ? row.date.split('T')[0] : new Date().toISOString().split('T')[0]),
+                  date: draftDate,
                   motif: rawMotif,
                   eventId: eventId || undefined,
                   updatedAt: parsedMeta.updatedAt || new Date(row.date || Date.now()).getTime(),
@@ -1769,14 +1774,21 @@ export const api = {
   async saveRemoteDraft(draft: ClinicalNoteDraftItem): Promise<boolean> {
     if (!isSupabaseConfigured || !supabase || !draft.clientId) return false;
     try {
-      const draftId = `draft_${draft.clientId}${draft.eventId ? `_${draft.eventId}` : ''}`;
+      const cleanDate = (draft.date || new Date().toISOString()).split('T')[0];
+      const draftId = draft.eventId
+        ? `draft_${draft.clientId}_${draft.eventId}`
+        : `draft_${draft.clientId}_date_${cleanDate}`;
+      const draftKey = draft.eventId
+        ? `${draft.clientId}::evt_${draft.eventId}::date_${cleanDate}`
+        : `${draft.clientId}::date_${cleanDate}`;
+
       const contentPayload = JSON.stringify({
         isDraft: true,
-        draftKey: `${draft.clientId}::${draft.eventId ? `evt_${draft.eventId}` : 'general'}`,
+        draftKey,
         clientId: draft.clientId,
         clientName: draft.clientName || '',
         eventId: draft.eventId || '',
-        date: draft.date,
+        date: cleanDate,
         category: draft.category || 'treatment',
         updatedAt: draft.updatedAt || Date.now(),
       });
@@ -1784,7 +1796,7 @@ export const api = {
       const res = await supabase.from('client_notes').upsert({
         id: draftId,
         clientId: draft.clientId,
-        date: new Date().toISOString(),
+        date: `${cleanDate}T12:00:00.000Z`,
         motif: draft.motif ? `[BROUILLON] ${draft.motif}` : '[BROUILLON]',
         anamnese: draft.anamnese || '',
         treatment: draft.treatment || '',
@@ -1798,16 +1810,53 @@ export const api = {
     }
   },
 
-  async deleteRemoteDraft(clientId: string, eventId?: string): Promise<boolean> {
+  async deleteRemoteDraft(clientId: string, eventId?: string, date?: string): Promise<boolean> {
     if (!isSupabaseConfigured || !supabase || !clientId) return false;
     try {
+      const cleanDate = (date || '').split('T')[0];
+      const candidateIds: string[] = [];
       if (eventId) {
-        await supabase.from('client_notes').delete().eq('id', `draft_${clientId}_${eventId}`);
+        candidateIds.push(`draft_${clientId}_${eventId}`);
       }
-      const { data } = await supabase.from('client_notes').select('id').eq('clientId', clientId).like('id', 'draft_%');
+      if (cleanDate) {
+        candidateIds.push(`draft_${clientId}_date_${cleanDate}`);
+      }
+      if (!eventId && !cleanDate) {
+        candidateIds.push(`draft_${clientId}`);
+      }
+
+      if (candidateIds.length > 0) {
+        await supabase.from('client_notes').delete().in('id', candidateIds);
+      }
+
+      // Also clean up any legacy draft row for this client that matches this eventId or date
+      const { data } = await supabase
+        .from('client_notes')
+        .select('id, content, date')
+        .eq('clientId', clientId)
+        .like('id', 'draft_%');
+
       if (data && data.length > 0) {
-        const ids = data.map((d: any) => d.id);
-        await supabase.from('client_notes').delete().in('id', ids);
+        const idsToDelete: string[] = [];
+        for (const row of data) {
+          let meta: any = {};
+          if (row.content && typeof row.content === 'string' && row.content.trim().startsWith('{')) {
+            try { meta = JSON.parse(row.content); } catch {}
+          }
+          const rowEventId = meta.eventId || '';
+          const rowDate = (meta.date || (row.date ? String(row.date).split('T')[0] : '')).split('T')[0];
+
+          if (eventId && rowEventId === eventId) {
+            idsToDelete.push(row.id);
+          } else if (cleanDate && rowDate === cleanDate && (!eventId || !rowEventId || rowEventId === eventId)) {
+            idsToDelete.push(row.id);
+          } else if (!eventId && !cleanDate) {
+            idsToDelete.push(row.id);
+          }
+        }
+        if (idsToDelete.length > 0) {
+          await supabase.from('client_notes').delete().in('id', idsToDelete);
+        }
       }
       return true;
     } catch (err) {

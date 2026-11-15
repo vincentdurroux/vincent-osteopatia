@@ -390,59 +390,73 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
 
   const [draftsMap, setDraftsMap] = useState<Record<string, ClinicalNoteDraftItem>>(getStoredDrafts);
 
-  // Robust draft retriever for a client with smart matching across general and appointment-specific drafts
-  const getClientDraft = (clientId: string, preferredEventId?: string): { key: string; draft: ClinicalNoteDraftItem } | null => {
+  // Robust draft retriever strictly matching (clientId + eventId/date) when specified
+  const getClientDraft = (
+    clientId: string,
+    preferredEventId?: string,
+    preferredDate?: string
+  ): { key: string; draft: ClinicalNoteDraftItem } | null => {
     if (!clientId) return null;
     const stored = getStoredDrafts();
+    const cleanDate = preferredDate ? preferredDate.split('T')[0] : undefined;
 
-    // 1. Exact match with preferredEventId
-    if (preferredEventId) {
-      const candidateKeys = [
-        `${clientId}::evt_${preferredEventId}`,
-        `${clientId}_evt_${preferredEventId}`,
-      ];
-      for (const k of candidateKeys) {
-        if (stored[k] && (stored[k].anamnese?.trim() || stored[k].treatment?.trim() || stored[k].motif?.trim())) {
-          return { key: k, draft: stored[k] };
-        }
-      }
-      for (const [k, d] of Object.entries(stored)) {
-        if ((d.clientId === clientId || k.startsWith(clientId)) && d.eventId === preferredEventId && (d.anamnese?.trim() || d.treatment?.trim() || d.motif?.trim())) {
-          return { key: k, draft: d };
-        }
-      }
-    }
-
-    // 2. Direct general draft keys
-    const generalKeys = [
-      `${clientId}::general`,
-      `${clientId}::draft`,
-      `${clientId}_date_${new Date().toISOString().split('T')[0]}`,
-    ];
-    for (const k of generalKeys) {
-      if (stored[k] && (stored[k].anamnese?.trim() || stored[k].treatment?.trim() || stored[k].motif?.trim())) {
-        return { key: k, draft: stored[k] };
-      }
-    }
-
-    // 3. Any non-empty draft belonging to this client (latest updatedAt first)
-    const clientCandidates = Object.entries(stored).filter(([k, d]) => {
-      const matchesClient = d.clientId === clientId || k.startsWith(`${clientId}::`) || k.startsWith(`${clientId}_`);
+    const clientEntries = Object.entries(stored).filter(([k, d]) => {
+      const matchesClient =
+        d.clientId === clientId || k.startsWith(`${clientId}::`) || k.startsWith(`${clientId}_`);
       const hasContent = Boolean(d.anamnese?.trim() || d.treatment?.trim() || d.motif?.trim());
       return matchesClient && hasContent;
     });
 
-    if (clientCandidates.length > 0) {
-      clientCandidates.sort((a, b) => (b[1].updatedAt || 0) - (a[1].updatedAt || 0));
-      return { key: clientCandidates[0][0], draft: clientCandidates[0][1] };
+    if (clientEntries.length === 0) return null;
+
+    // If a specific appointment or treatment date is requested, ONLY match that exact appointment or treatment date
+    if (preferredEventId || cleanDate) {
+      // 1. Exact match by appointment eventId
+      if (preferredEventId) {
+        const byEvent = clientEntries.find(
+          ([k, d]) =>
+            d.eventId === preferredEventId ||
+            k.includes(`evt_${preferredEventId}`)
+        );
+        if (byEvent) {
+          return { key: byEvent[0], draft: byEvent[1] };
+        }
+      }
+
+      // 2. Match by exact treatment date for this patient (when draft has no conflicting eventId)
+      if (cleanDate) {
+        const byDate = clientEntries.find(([k, d]) => {
+          const dDate = (d.date || '').split('T')[0];
+          const keyHasDate = k.includes(`date_${cleanDate}`);
+          const eventCompatible = !preferredEventId || !d.eventId || d.eventId === preferredEventId;
+          return (dDate === cleanDate || keyHasDate) && eventCompatible;
+        });
+        if (byDate) {
+          return { key: byDate[0], draft: byDate[1] };
+        }
+      }
+
+      // Strictly return null when querying a specific appointment/date that has no draft
+      return null;
     }
 
-    return null;
+    // General lookup for patient list badge / default client selection:
+    // Prefer today's draft if present, otherwise most recently updated draft of this client
+    const todayStr = new Date().toISOString().split('T')[0];
+    const todayMatch = clientEntries.find(
+      ([, d]) => (d.date || '').split('T')[0] === todayStr
+    );
+    if (todayMatch) {
+      return { key: todayMatch[0], draft: todayMatch[1] };
+    }
+
+    clientEntries.sort((a, b) => (b[1].updatedAt || 0) - (a[1].updatedAt || 0));
+    return { key: clientEntries[0][0], draft: clientEntries[0][1] };
   };
 
-  const hasClientDraft = (clientId?: string, eventId?: string): boolean => {
+  const hasClientDraft = (clientId?: string, eventId?: string, date?: string): boolean => {
     if (!clientId) return false;
-    return Boolean(getClientDraft(clientId, eventId));
+    return Boolean(getClientDraft(clientId, eventId, date));
   };
 
   const allActiveDrafts = useMemo(() => {
@@ -495,17 +509,21 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
           localStorage.setItem(NOTE_DRAFTS_STORAGE_KEY, JSON.stringify(local));
           setDraftsMap({ ...local });
 
-          // If current selected client has a draft, restore into form if empty
+          // If current selected client has a draft for the active treatment date/event, restore into form if empty
           if (selectedClient?.id) {
-            const currentClientDraft = getClientDraft(selectedClient.id, newNoteRef.current.eventId);
+            const currentClientDraft = getClientDraft(
+              selectedClient.id,
+              newNoteRef.current.eventId || undefined,
+              newNoteRef.current.date || undefined
+            );
             if (currentClientDraft && (!newNoteRef.current.anamnese.trim() && !newNoteRef.current.treatment.trim() && !newNoteRef.current.motif.trim())) {
               setNewNote({
                 anamnese: currentClientDraft.draft.anamnese || '',
                 treatment: currentClientDraft.draft.treatment || '',
                 category: currentClientDraft.draft.category || 'treatment',
-                date: currentClientDraft.draft.date || new Date().toISOString().split('T')[0],
+                date: currentClientDraft.draft.date || newNoteRef.current.date || new Date().toISOString().split('T')[0],
                 motif: currentClientDraft.draft.motif || '',
-                eventId: currentClientDraft.draft.eventId || '',
+                eventId: currentClientDraft.draft.eventId || newNoteRef.current.eventId || '',
               });
               setActiveDraftNotice(true);
             }
@@ -535,8 +553,8 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
 
     if (arguments.length === 2 && typeof arg2 === 'object') {
       draft = arg2 as Partial<typeof newNote> | null;
-      eventId = draft?.eventId || eventId;
-      date = draft?.date || date;
+      eventId = draft?.eventId !== undefined ? draft.eventId : eventId;
+      date = draft?.date !== undefined ? draft.date : date;
     } else if (arguments.length >= 4) {
       eventId = arg2 as string | undefined;
       date = arg3 as string | undefined;
@@ -544,21 +562,41 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
     } else if (typeof arg3 === 'object') {
       eventId = arg2 as string | undefined;
       draft = arg3 as Partial<typeof newNote> | null;
-      date = draft?.date || date;
+      date = draft?.date !== undefined ? draft.date : date;
     } else {
       draft = arg2 as Partial<typeof newNote> | null;
     }
 
+    const cleanDate = (date || newNoteRef.current.date || new Date().toISOString()).split('T')[0];
+    const effectiveEventId = (eventId || '').trim();
+
     try {
       const current = getStoredDrafts();
-      const primaryKey = `${clientId}::${eventId ? `evt_${eventId}` : 'general'}`;
+      const primaryKey = effectiveEventId
+        ? `${clientId}::evt_${effectiveEventId}::date_${cleanDate}`
+        : `${clientId}::date_${cleanDate}`;
       const hasContent = Boolean(draft && (draft.anamnese?.trim() || draft.treatment?.trim() || draft.motif?.trim()));
 
+      // Helper to check if a stored key/item belongs to this exact (clientId + eventId/date) session
+      const matchesTargetSession = (k: string, d: ClinicalNoteDraftItem) => {
+        const isClient =
+          d.clientId === clientId || k.startsWith(`${clientId}::`) || k.startsWith(`${clientId}_`);
+        if (!isClient) return false;
+        const dDate = (d.date || '').split('T')[0];
+        if (effectiveEventId && (d.eventId === effectiveEventId || k.includes(`evt_${effectiveEventId}`))) {
+          return true;
+        }
+        if (cleanDate && (dDate === cleanDate || k.includes(`date_${cleanDate}`)) && (!effectiveEventId || !d.eventId || d.eventId === effectiveEventId)) {
+          return true;
+        }
+        return false;
+      };
+
       if (!hasContent) {
-        // Clear all drafts for this client locally and remotely
+        // Clear ONLY the draft for this specific patient + treatment date/appointment
         let changed = false;
         Object.keys(current).forEach(k => {
-          if (k.startsWith(`${clientId}::`) || k.startsWith(`${clientId}_`) || current[k].clientId === clientId) {
+          if (k === primaryKey || matchesTargetSession(k, current[k])) {
             delete current[k];
             changed = true;
           }
@@ -567,8 +605,15 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
           localStorage.setItem(NOTE_DRAFTS_STORAGE_KEY, JSON.stringify(current));
           setDraftsMap({ ...current });
         }
-        api.deleteRemoteDraft(clientId, eventId);
+        api.deleteRemoteDraft(clientId, effectiveEventId || undefined, cleanDate);
       } else {
+        // Remove any legacy duplicate keys for this exact same (clientId, effectiveEventId, cleanDate)
+        Object.keys(current).forEach(k => {
+          if (k !== primaryKey && matchesTargetSession(k, current[k])) {
+            delete current[k];
+          }
+        });
+
         const client = clients.find(c => c.id === clientId);
         const draftItem: ClinicalNoteDraftItem = {
           clientId,
@@ -576,9 +621,9 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
           anamnese: draft?.anamnese || '',
           treatment: draft?.treatment || '',
           category: draft?.category || 'treatment',
-          date: draft?.date || date || new Date().toISOString().split('T')[0],
+          date: cleanDate,
           motif: draft?.motif || '',
-          eventId: draft?.eventId || eventId || '',
+          eventId: effectiveEventId || undefined,
           updatedAt: Date.now(),
         };
         current[primaryKey] = draftItem;
@@ -593,30 +638,91 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
 
   // Immediate field update + automatic draft saving
   const handleUpdateNoteField = (fields: Partial<typeof newNote>) => {
+    // Special handling when changing treatment date: load draft for that date (or start fresh for that date)
+    if (fields.date !== undefined && fields.date !== newNoteRef.current.date && selectedClient?.id) {
+      const nextDate = fields.date.split('T')[0];
+      const prevNote = newNoteRef.current;
+
+      // 1. Save current draft under its own previous treatment date if it had content
+      if (prevNote.anamnese.trim() || prevNote.treatment.trim() || prevNote.motif.trim()) {
+        saveDraftToStorage(selectedClient.id, prevNote.eventId, prevNote.date, prevNote);
+      }
+
+      // 2. Check if patient has an appointment on nextDate
+      const matchingAppt = events.find(ev => {
+        if (ev.eventType && ev.eventType !== 'appointment') return false;
+        const belongsToClient =
+          ev.clientId === selectedClient.id ||
+          (ev.clientName && ev.clientName.trim().toLowerCase() === selectedClient.name.trim().toLowerCase());
+        if (!belongsToClient) return false;
+        try {
+          const d = new Date(ev.start);
+          const evDateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+          return evDateStr === nextDate;
+        } catch {
+          return false;
+        }
+      });
+
+      const nextEventId = matchingAppt?.id || '';
+      const existingForDate = getClientDraft(selectedClient.id, nextEventId || undefined, nextDate);
+
+      if (existingForDate) {
+        const nextState = {
+          anamnese: existingForDate.draft.anamnese || '',
+          treatment: existingForDate.draft.treatment || '',
+          category: existingForDate.draft.category || 'treatment',
+          date: nextDate,
+          motif: existingForDate.draft.motif || matchingAppt?.summary || '',
+          eventId: existingForDate.draft.eventId || nextEventId,
+        };
+        newNoteRef.current = nextState;
+        setNewNote(nextState);
+        setActiveDraftNotice(true);
+      } else {
+        const nextState = {
+          anamnese: '',
+          treatment: '',
+          category: prevNote.category || 'treatment',
+          date: nextDate,
+          motif: matchingAppt?.summary || '',
+          eventId: nextEventId,
+        };
+        newNoteRef.current = nextState;
+        setNewNote(nextState);
+        setActiveDraftNotice(false);
+      }
+      return;
+    }
+
     setNewNote(prev => {
       const updated = { ...prev, ...fields };
       newNoteRef.current = updated;
       if (selectedClient?.id) {
-        saveDraftToStorage(selectedClient.id, updated);
+        saveDraftToStorage(selectedClient.id, updated.eventId, updated.date, updated);
         if (updated.anamnese.trim() || updated.treatment.trim() || updated.motif.trim()) {
           setActiveDraftNotice(true);
+        } else {
+          setActiveDraftNotice(false);
         }
       }
       return updated;
     });
   };
 
-  // Discard draft for current session
+  // Discard draft for current session (only for the active patient + active treatment date/appointment)
   const handleDiscardDraft = () => {
     if (!selectedClient?.id) return;
-    saveDraftToStorage(selectedClient.id, null);
+    const currentEventId = newNoteRef.current.eventId;
+    const currentDate = newNoteRef.current.date;
+    saveDraftToStorage(selectedClient.id, currentEventId, currentDate, null);
     setNewNote({
       anamnese: '',
       treatment: '',
       category: 'treatment',
-      date: new Date().toISOString().split('T')[0],
+      date: currentDate || new Date().toISOString().split('T')[0],
       motif: '',
-      eventId: '',
+      eventId: currentEventId || '',
     });
     setActiveDraftNotice(false);
   };
@@ -625,7 +731,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
   useEffect(() => {
     const handleBeforeUnload = () => {
       if (selectedClient?.id && (newNoteRef.current.anamnese.trim() || newNoteRef.current.treatment.trim() || newNoteRef.current.motif.trim())) {
-        saveDraftToStorage(selectedClient.id, newNoteRef.current);
+        saveDraftToStorage(selectedClient.id, newNoteRef.current.eventId, newNoteRef.current.date, newNoteRef.current);
       }
     };
     window.addEventListener('beforeunload', handleBeforeUnload);
@@ -634,7 +740,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
       window.removeEventListener('beforeunload', handleBeforeUnload);
       window.removeEventListener('pagehide', handleBeforeUnload);
       if (selectedClient?.id && (newNoteRef.current.anamnese.trim() || newNoteRef.current.treatment.trim() || newNoteRef.current.motif.trim())) {
-        saveDraftToStorage(selectedClient.id, newNoteRef.current);
+        saveDraftToStorage(selectedClient.id, newNoteRef.current.eventId, newNoteRef.current.date, newNoteRef.current);
       }
     };
   }, [selectedClient?.id]);
@@ -647,45 +753,52 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
     // 1. Save draft of previous client if it had uncommitted text
     if (prev.clientId && prev.clientId !== currClientId) {
       if (newNoteRef.current.anamnese.trim() || newNoteRef.current.treatment.trim() || newNoteRef.current.motif.trim()) {
-        saveDraftToStorage(prev.clientId, newNoteRef.current);
+        saveDraftToStorage(prev.clientId, prev.eventId, prev.date, newNoteRef.current);
       }
     }
 
-    // 2. Load draft of current client from localStorage
+    // 2. Load draft of current client from localStorage (if not already initialized by handleGoToNotes)
     if (currClientId) {
       if (prev.clientId !== currClientId) {
-        const found = getClientDraft(currClientId);
+        const todayStr = new Date().toISOString().split('T')[0];
+        const found = getClientDraft(currClientId, undefined, todayStr) || getClientDraft(currClientId);
         if (found) {
-          setNewNote({
+          const loadedNote = {
             anamnese: found.draft.anamnese || '',
             treatment: found.draft.treatment || '',
             category: found.draft.category || 'treatment',
-            date: found.draft.date || new Date().toISOString().split('T')[0],
+            date: found.draft.date || todayStr,
             motif: found.draft.motif || '',
             eventId: found.draft.eventId || '',
-          });
+          };
+          newNoteRef.current = loadedNote;
+          setNewNote(loadedNote);
           setActiveDraftNotice(true);
         } else {
-          setNewNote({
+          const cleanNote = {
             anamnese: '',
             treatment: '',
-            category: 'treatment',
-            date: new Date().toISOString().split('T')[0],
+            category: 'treatment' as ClientNote['category'],
+            date: todayStr,
             motif: '',
             eventId: '',
-          });
+          };
+          newNoteRef.current = cleanNote;
+          setNewNote(cleanNote);
           setActiveDraftNotice(false);
         }
       }
     } else {
-      setNewNote({
+      const resetNote = {
         anamnese: '',
         treatment: '',
-        category: 'treatment',
+        category: 'treatment' as ClientNote['category'],
         date: new Date().toISOString().split('T')[0],
         motif: '',
         eventId: '',
-      });
+      };
+      newNoteRef.current = resetNote;
+      setNewNote(resetNote);
       setActiveDraftNotice(false);
     }
 
@@ -1344,17 +1457,19 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
       setClientNotes(prev => [created, ...prev]);
       setAllNotes(prev => [created, ...prev]);
       if (selectedClient?.id) {
-        saveDraftToStorage(selectedClient.id, null);
+        saveDraftToStorage(selectedClient.id, newNote.eventId, newNote.date, null);
       }
       setActiveDraftNotice(false);
-      setNewNote({
+      const resetNote = {
         anamnese: '',
         treatment: '',
-        category: 'treatment',
+        category: 'treatment' as ClientNote['category'],
         date: new Date().toISOString().split('T')[0],
         motif: '',
         eventId: '',
-      });
+      };
+      newNoteRef.current = resetNote;
+      setNewNote(resetNote);
       
       // Update lastSessionAt locally
       setClients(prev => prev.map(c => c.id === selectedClient.id ? { ...c, lastSessionAt: created.date } : c));
@@ -2460,12 +2575,17 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
   };
 
   // Direct Redirection to Clinical Notes from an Appointment
-  const handleGoToNotes = (event: { id?: string; clientId?: string; clientName?: string; summary?: string; start?: string; description?: string; eventType?: EventType }) => {
+  const handleGoToNotes = (event: { id?: string; clientId?: string; clientName?: string; summary?: string; start?: string; date?: string; description?: string; eventType?: EventType }) => {
     setSelectedDayModalDate(null);
     setIsEditEventOpen(false);
     setEditingEvent(null);
     setIsAddEventOpen(false);
     setIsAddClientOpen(false);
+
+    // Save any active uncommitted draft of the currently open patient/date before switching
+    if (selectedClient?.id && (newNoteRef.current.anamnese.trim() || newNoteRef.current.treatment.trim() || newNoteRef.current.motif.trim())) {
+      saveDraftToStorage(selectedClient.id, newNoteRef.current.eventId, newNoteRef.current.date, newNoteRef.current);
+    }
 
     // 1. Try finding client by explicit clientId
     let targetClient = event.clientId ? clients.find(c => c.id === event.clientId) : undefined;
@@ -2491,33 +2611,53 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
     }
 
     if (targetClient) {
-      setSelectedClient(targetClient);
-      setActiveTab('clients');
-      const evDate = event.start ? new Date(event.start) : new Date();
-      const dateStr = evDate.toISOString().split('T')[0];
-      const existingDraft = getClientDraft(targetClient.id, event.id) || getClientDraft(targetClient.id);
+      let dateStr = new Date().toISOString().split('T')[0];
+      if (event.date) {
+        dateStr = event.date.split('T')[0];
+      } else if (event.start) {
+        const evDate = new Date(event.start);
+        if (!isNaN(evDate.getTime())) {
+          dateStr = `${evDate.getFullYear()}-${String(evDate.getMonth() + 1).padStart(2, '0')}-${String(evDate.getDate()).padStart(2, '0')}`;
+        }
+      }
+
+      // Strictly look up draft for THIS patient AND THIS appointment / treatment date
+      const existingDraft = getClientDraft(targetClient.id, event.id, dateStr);
 
       if (existingDraft) {
-        setNewNote({
+        const nextNote = {
           anamnese: existingDraft.draft.anamnese || '',
           treatment: existingDraft.draft.treatment || '',
           category: existingDraft.draft.category || 'treatment',
           date: existingDraft.draft.date || dateStr,
           motif: existingDraft.draft.motif || event.summary || '',
           eventId: event.id || existingDraft.draft.eventId || '',
-        });
+        };
+        newNoteRef.current = nextNote;
+        setNewNote(nextNote);
         setActiveDraftNotice(true);
       } else {
-        setNewNote({
+        const nextNote = {
           anamnese: '',
           treatment: '',
-          category: 'treatment',
+          category: 'treatment' as ClientNote['category'],
           date: dateStr,
           motif: event.summary || '',
           eventId: event.id || '',
-        });
+        };
+        newNoteRef.current = nextNote;
+        setNewNote(nextNote);
         setActiveDraftNotice(false);
       }
+
+      // Mark session ref before setSelectedClient so the client-change effect does not overwrite this appointment's note/draft
+      prevSessionRef.current = {
+        clientId: targetClient.id,
+        eventId: event.id || '',
+        date: dateStr,
+      };
+      setSelectedClient(targetClient);
+      setActiveTab('clients');
 
       setTimeout(() => {
         const noteFormElem = document.getElementById('new-note-form');
@@ -4526,31 +4666,47 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                             <span>{lang === 'fr' ? 'Voir la note au dossier' : lang === 'es' ? 'Ver nota en ficha' : 'View note in file'} ↓</span>
                                           </button>
                                         ) : (() => {
-                                          const apptDraft = getClientDraft(selectedClient.id, ev.id) || getClientDraft(selectedClient.id);
+                                          const isoDate = `${evDate.getFullYear()}-${String(evDate.getMonth() + 1).padStart(2, '0')}-${String(evDate.getDate()).padStart(2, '0')}`;
+                                          const apptDraft = getClientDraft(selectedClient.id, ev.id, isoDate);
                                           const isDraftPending = Boolean(apptDraft && (apptDraft.draft.anamnese?.trim() || apptDraft.draft.treatment?.trim() || apptDraft.draft.motif?.trim()));
 
                                           return (
                                             <button
                                               type="button"
                                               onClick={() => {
-                                                const isoDate = evDate.toISOString().split('T')[0];
+                                                // Save current draft under its own date/event if switching appointments
+                                                if (
+                                                  selectedClient?.id &&
+                                                  (newNoteRef.current.eventId !== ev.id || newNoteRef.current.date !== isoDate) &&
+                                                  (newNoteRef.current.anamnese.trim() || newNoteRef.current.treatment.trim() || newNoteRef.current.motif.trim())
+                                                ) {
+                                                  saveDraftToStorage(selectedClient.id, newNoteRef.current.eventId, newNoteRef.current.date, newNoteRef.current);
+                                                }
+
                                                 if (isDraftPending && apptDraft) {
-                                                  setNewNote({
+                                                  const loaded = {
                                                     anamnese: apptDraft.draft.anamnese || '',
                                                     treatment: apptDraft.draft.treatment || '',
                                                     category: apptDraft.draft.category || 'treatment',
                                                     date: apptDraft.draft.date || isoDate,
                                                     motif: apptDraft.draft.motif || ev.summary || '',
                                                     eventId: ev.id || apptDraft.draft.eventId || '',
-                                                  });
+                                                  };
+                                                  newNoteRef.current = loaded;
+                                                  setNewNote(loaded);
                                                   setActiveDraftNotice(true);
                                                 } else {
-                                                  setNewNote(prev => ({
-                                                    ...prev,
+                                                  const fresh = {
+                                                    anamnese: '',
+                                                    treatment: '',
+                                                    category: 'treatment' as ClientNote['category'],
                                                     date: isoDate,
-                                                    motif: ev.summary || prev.motif,
+                                                    motif: ev.summary || '',
                                                     eventId: ev.id,
-                                                  }));
+                                                  };
+                                                  newNoteRef.current = fresh;
+                                                  setNewNote(fresh);
+                                                  setActiveDraftNotice(false);
                                                 }
                                                 const noteFormElem = document.getElementById('new-note-form');
                                                 if (noteFormElem) {
@@ -4563,7 +4719,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                                 ? "text-amber-900 hover:text-amber-950 font-bold inline-flex items-center gap-1.5 bg-amber-100 hover:bg-amber-200 px-2.5 py-0.5 rounded-lg border border-amber-300 transition-all cursor-pointer text-[10px] shadow-2xs"
                                                 : "text-primary hover:underline font-bold inline-flex items-center gap-1 cursor-pointer"
                                               }
-                                              title={isDraftPending ? (lang === 'fr' ? 'Reprendre la rédaction du brouillon pour ce patient' : 'Continuar borrador') : undefined}
+                                              title={isDraftPending ? (lang === 'fr' ? 'Reprendre la rédaction du brouillon pour cette séance' : 'Continuar borrador') : undefined}
                                             >
                                               {isDraftPending ? (
                                                 <>
@@ -4585,7 +4741,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                             type="button"
                                             onClick={() => {
                                               if (!selectedClient) return;
-                                              const isoDate = evDate.toISOString().split('T')[0];
+                                              const isoDate = `${evDate.getFullYear()}-${String(evDate.getMonth() + 1).padStart(2, '0')}-${String(evDate.getDate()).padStart(2, '0')}`;
                                               setNewInvoice(prev => ({
                                                 ...prev,
                                                 clientId: selectedClient.id,
@@ -4658,14 +4814,16 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                             <div>
                               <p className="font-bold text-amber-950 flex items-center gap-1.5 flex-wrap">
                                 <span>{lang === 'fr' ? "Brouillon sauvegardé & synchronisé" : lang === 'es' ? "Borrador guardado y sincronizado" : "Draft saved & synced"}</span>
-                                <span className="text-[9px] font-extrabold px-1.5 py-0.2 rounded bg-amber-200/90 text-amber-900 uppercase tracking-wider">Multi-appareils</span>
+                                <span className="text-[9px] font-extrabold px-1.5 py-0.2 rounded bg-amber-200/90 text-amber-900 uppercase tracking-wider">
+                                  {selectedClient?.name} • {newNote.date ? new Date(`${newNote.date.split('T')[0]}T12:00:00`).toLocaleDateString(lang === 'fr' ? 'fr-FR' : lang === 'es' ? 'es-ES' : 'en-GB') : ''}
+                                </span>
                               </p>
                               <p className="text-[10px] text-amber-800">
                                 {lang === 'fr' 
-                                  ? "Ce brouillon est enregistré en ligne et immédiatement disponible sur tous vos appareils (PC, tablette, mobile)." 
+                                  ? "Ce brouillon est lié à ce patient et à cette date de traitement (synchronisé sur tous vos appareils)." 
                                   : lang === 'es'
-                                  ? "Este borrador está guardado en la nube y disponible en todos sus dispositivos."
-                                  : "Saved online and synced across all your devices."}
+                                  ? "Este borrador está vinculado a este paciente y a esta fecha de tratamiento."
+                                  : "This draft is linked to this patient and this treatment date."}
                               </p>
                             </div>
                           </div>
@@ -8331,7 +8489,11 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                       {/* Status badges row: Note clinique & Facture */}
                       <div className="grid grid-cols-2 gap-2 text-xs">
                         {(() => {
-                          const evDraft = clientId ? (getClientDraft(clientId, ev.id) || getClientDraft(clientId)) : null;
+                          const evDateObj = new Date(ev.start);
+                          const evDateStr = !isNaN(evDateObj.getTime())
+                            ? `${evDateObj.getFullYear()}-${String(evDateObj.getMonth() + 1).padStart(2, '0')}-${String(evDateObj.getDate()).padStart(2, '0')}`
+                            : undefined;
+                          const evDraft = clientId ? getClientDraft(clientId, ev.id, evDateStr) : null;
                           const hasDraft = Boolean(evDraft && (evDraft.draft.anamnese?.trim() || evDraft.draft.treatment?.trim() || evDraft.draft.motif?.trim()));
 
                           return (
@@ -8448,7 +8610,11 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
 
                     {/* Patient File & Notes button (for appointments) */}
                     {!isOther && (() => {
-                      const evDraft = clientId ? (getClientDraft(clientId, ev.id) || getClientDraft(clientId)) : null;
+                      const evDateObj = new Date(ev.start);
+                      const evDateStr = !isNaN(evDateObj.getTime())
+                        ? `${evDateObj.getFullYear()}-${String(evDateObj.getMonth() + 1).padStart(2, '0')}-${String(evDateObj.getDate()).padStart(2, '0')}`
+                        : undefined;
+                      const evDraft = clientId ? getClientDraft(clientId, ev.id, evDateStr) : null;
                       const hasDraft = Boolean(evDraft && (evDraft.draft.anamnese?.trim() || evDraft.draft.treatment?.trim() || evDraft.draft.motif?.trim()));
 
                       return (
@@ -8565,7 +8731,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                 const associatedNote = clientNotes.find(n => n.eventId && n.eventId === editingEvent.id);
                 const associatedInv = invoices.find(i => (i.eventId && i.eventId === editingEvent.id) || (i.noteId && i.noteId === editingEvent.id));
                 const editClient = editingEvent.clientId ? clients.find(c => c.id === editingEvent.clientId) : (editingEvent.clientName ? clients.find(c => c.name.toLowerCase() === editingEvent.clientName?.toLowerCase()) : undefined);
-                const editDraft = editClient ? (getClientDraft(editClient.id, editingEvent.id) || getClientDraft(editClient.id)) : null;
+                const editDraft = editClient ? getClientDraft(editClient.id, editingEvent.id, editingEvent.date) : null;
                 const isDraftPending = Boolean(!associatedNote && editDraft && (editDraft.draft.anamnese?.trim() || editDraft.draft.treatment?.trim() || editDraft.draft.motif?.trim()));
 
                 return (
