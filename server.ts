@@ -49,6 +49,7 @@ interface StoredNotificationConfig {
   includePhone: boolean;
   includeMotif: boolean;
   includeBono: boolean;
+  includeBlockedSlots: boolean;
   lastSentDate: string | null;
   lastSentAt: string | null;
   lastSentCount: number;
@@ -63,6 +64,7 @@ interface AppointmentItem {
   start: string;
   end: string;
   timeRange: string;
+  eventType?: 'appointment' | 'blocked';
   clientId?: string;
   clientName: string;
   phone?: string;
@@ -87,6 +89,7 @@ function defaultConfig(): StoredNotificationConfig {
     includePhone: true,
     includeMotif: true,
     includeBono: true,
+    includeBlockedSlots: true,
     lastSentDate: null,
     lastSentAt: null,
     lastSentCount: 0,
@@ -241,6 +244,7 @@ function toPublicConfig(cfg: StoredNotificationConfig) {
     includePhone: cfg.includePhone !== false,
     includeMotif: cfg.includeMotif !== false,
     includeBono: cfg.includeBono !== false,
+    includeBlockedSlots: cfg.includeBlockedSlots !== false,
     lastSentDate: cfg.lastSentDate || null,
     lastSentAt: cfg.lastSentAt || null,
     lastSentCount: Number(cfg.lastSentCount || 0),
@@ -409,12 +413,42 @@ async function getTodayAppointments(cfg: StoredNotificationConfig): Promise<{
         }
       }
 
-      if (eventType !== 'appointment') continue;
-
       const cleanDesc = rawDesc
         .replace(/\[eventType:[a-z]+\]/gi, '')
         .replace(/\[type:[a-z]+\]/gi, '')
         .trim();
+
+      const startFmt = formatTimeInZone(startRaw, timeZone);
+      const endFmt = endRaw ? formatTimeInZone(endRaw, timeZone) : '';
+      const timeRange = endFmt ? `${startFmt} - ${endFmt}` : startFmt;
+
+      if (eventType === 'blocked') {
+        if (cfg.includeBlockedSlots === false) continue;
+        const slotTitleReason =
+          summaryStr ||
+          cleanDesc ||
+          (cfg.language === 'es'
+            ? 'Horario bloqueado'
+            : cfg.language === 'en'
+            ? 'Blocked slot'
+            : 'Créneau bloqué');
+        const extraReason =
+          cleanDesc && summaryStr && cleanDesc.toLowerCase() !== summaryStr.toLowerCase()
+            ? cleanDesc
+            : undefined;
+        appointments.push({
+          id: String(row.id),
+          start: startRaw,
+          end: endRaw || startRaw,
+          timeRange,
+          eventType: 'blocked',
+          clientName: slotTitleReason,
+          motif: extraReason,
+        });
+        continue;
+      }
+
+      if (eventType !== 'appointment') continue;
 
       const matchedClient =
         (rawClientId && clientsById.get(String(rawClientId))) ||
@@ -441,15 +475,12 @@ async function getTodayAppointments(cfg: StoredNotificationConfig): Promise<{
         motif = summaryStr;
       }
 
-      const startFmt = formatTimeInZone(startRaw, timeZone);
-      const endFmt = endRaw ? formatTimeInZone(endRaw, timeZone) : '';
-      const timeRange = endFmt ? `${startFmt} - ${endFmt}` : startFmt;
-
       appointments.push({
         id: String(row.id),
         start: startRaw,
         end: endRaw || startRaw,
         timeRange,
+        eventType: 'appointment',
         clientId: matchedClient?.id ? String(matchedClient.id) : rawClientId || undefined,
         clientName,
         phone: matchedClient?.phone || undefined,
@@ -475,7 +506,8 @@ function formatDigestMessage(
   forHtml: boolean = true
 ): string {
   const lang = cfg.language || 'fr';
-  const count = appointments.length;
+  const patientCount = appointments.filter(a => a.eventType !== 'blocked').length;
+  const blockedCount = appointments.filter(a => a.eventType === 'blocked').length;
   const capitalizedDate = dateFormatted.charAt(0).toUpperCase() + dateFormatted.slice(1);
 
   const b = (s: string) => (forHtml ? `<b>${escapeHtml(s)}</b>` : s);
@@ -483,17 +515,41 @@ function formatDigestMessage(
 
   const header = `🦴 ${b('Vincent Osteopatía')} — ${b(capitalizedDate)}`;
 
+  const blockedSuffixFr =
+    blockedCount > 0 ? ` • 🔒 ${blockedCount} créneau${blockedCount > 1 ? 'x' : ''} bloqué${blockedCount > 1 ? 's' : ''}` : '';
+  const blockedSuffixEs =
+    blockedCount > 0 ? ` • 🔒 ${blockedCount} horario${blockedCount > 1 ? 's' : ''} bloqueado${blockedCount > 1 ? 's' : ''}` : '';
+  const blockedSuffixEn =
+    blockedCount > 0 ? ` • 🔒 ${blockedCount} blocked slot${blockedCount > 1 ? 's' : ''}` : '';
+
   const subheader =
     lang === 'fr'
-      ? `👥 ${b(`${count} patient${count > 1 ? 's' : ''} programmé${count > 1 ? 's' : ''} aujourd'hui`)}`
+      ? `👥 ${b(`${patientCount} patient${patientCount > 1 ? 's' : ''} programmé${patientCount > 1 ? 's' : ''} aujourd'hui`)}${esc(blockedSuffixFr)}`
       : lang === 'es'
-      ? `👥 ${b(`${count} paciente${count > 1 ? 's' : ''} programado${count > 1 ? 's' : ''} hoy`)}`
-      : `👥 ${b(`${count} patient${count > 1 ? 's' : ''} scheduled today`)}`;
+      ? `👥 ${b(`${patientCount} paciente${patientCount > 1 ? 's' : ''} programado${patientCount > 1 ? 's' : ''} hoy`)}${esc(blockedSuffixEs)}`
+      : `👥 ${b(`${patientCount} patient${patientCount > 1 ? 's' : ''} scheduled today`)}${esc(blockedSuffixEn)}`;
 
   const lines: string[] = [header, subheader, ''];
 
-  appointments.forEach((appt, index) => {
-    lines.push(`${index + 1}. 🕐 ${b(appt.timeRange)} • ${b(appt.clientName)}`);
+  let patientIndex = 0;
+  appointments.forEach((appt) => {
+    if (appt.eventType === 'blocked') {
+      const blockedLabel =
+        lang === 'fr'
+          ? 'Créneau bloqué'
+          : lang === 'es'
+          ? 'Horario bloqueado'
+          : 'Blocked slot';
+      lines.push(`🔒 ${b(appt.timeRange)} • ${esc(blockedLabel)} : ${b(appt.clientName)}`);
+      if (appt.motif) {
+        lines.push(`   📝 ${esc(appt.motif)}`);
+      }
+      lines.push('');
+      return;
+    }
+
+    patientIndex += 1;
+    lines.push(`${patientIndex}. 🕐 ${b(appt.timeRange)} • ${b(appt.clientName)}`);
     if (cfg.includePhone && appt.phone) {
       lines.push(`   📞 ${esc(appt.phone)}`);
     }
@@ -759,6 +815,10 @@ async function startServer() {
         includePhone: typeof body.includePhone === 'boolean' ? body.includePhone : current.includePhone,
         includeMotif: typeof body.includeMotif === 'boolean' ? body.includeMotif : current.includeMotif,
         includeBono: typeof body.includeBono === 'boolean' ? body.includeBono : current.includeBono,
+        includeBlockedSlots:
+          typeof body.includeBlockedSlots === 'boolean'
+            ? body.includeBlockedSlots
+            : current.includeBlockedSlots !== false,
       };
 
       const saved = await saveConfig(next);

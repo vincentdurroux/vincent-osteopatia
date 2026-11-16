@@ -19,6 +19,7 @@ export interface StoredNotificationConfig {
   includePhone: boolean;
   includeMotif: boolean;
   includeBono: boolean;
+  includeBlockedSlots: boolean;
   lastSentDate: string | null;
   lastSentAt: string | null;
   lastSentCount: number;
@@ -61,6 +62,7 @@ export function defaultNotificationConfig(): StoredNotificationConfig {
     includePhone: true,
     includeMotif: true,
     includeBono: true,
+    includeBlockedSlots: true,
     lastSentDate: null,
     lastSentAt: null,
     lastSentCount: 0,
@@ -96,6 +98,7 @@ export function toPublicNotificationConfig(cfg: StoredNotificationConfig): Teleg
     includePhone: cfg.includePhone !== false,
     includeMotif: cfg.includeMotif !== false,
     includeBono: cfg.includeBono !== false,
+    includeBlockedSlots: cfg.includeBlockedSlots !== false,
     lastSentDate: cfg.lastSentDate || null,
     lastSentAt: cfg.lastSentAt || null,
     lastSentCount: Number(cfg.lastSentCount || 0),
@@ -233,6 +236,7 @@ export async function saveNotificationConfig(payload: {
   includePhone?: boolean;
   includeMotif?: boolean;
   includeBono?: boolean;
+  includeBlockedSlots?: boolean;
 }): Promise<TelegramConfigResponse> {
   const current = await loadRawNotificationConfig();
 
@@ -272,6 +276,10 @@ export async function saveNotificationConfig(payload: {
       typeof payload.includeMotif === 'boolean' ? payload.includeMotif : current.includeMotif,
     includeBono:
       typeof payload.includeBono === 'boolean' ? payload.includeBono : current.includeBono,
+    includeBlockedSlots:
+      typeof payload.includeBlockedSlots === 'boolean'
+        ? payload.includeBlockedSlots
+        : current.includeBlockedSlots !== false,
   };
 
   // Validate token and auto-detect Chat ID directly against api.telegram.org (CORS enabled)
@@ -479,8 +487,10 @@ const GENERIC_APPOINTMENT_SUMMARIES = new Set([
 export async function getTodayAppointmentsFromSupabase(opts: {
   timezone: string;
   language: 'fr' | 'es' | 'en';
+  includeBlockedSlots?: boolean;
 }) {
   const timeZone = opts.timezone || 'Europe/Madrid';
+  const includeBlocked = opts.includeBlockedSlots !== false;
   const now = new Date();
   const todayStr = getZonedDateString(now, timeZone);
   const dateFormatted = formatLongDateInZone(now, timeZone, opts.language || 'fr');
@@ -557,12 +567,40 @@ export async function getTodayAppointmentsFromSupabase(opts: {
         }
       }
 
-      if (eventType !== 'appointment') continue;
-
       const cleanDesc = rawDesc
         .replace(/\[eventType:[a-z]+\]/gi, '')
         .replace(/\[type:[a-z]+\]/gi, '')
         .trim();
+
+      const startFmt = formatTimeInZone(startRaw, timeZone);
+      const endFmt = endRaw ? formatTimeInZone(endRaw, timeZone) : '';
+      const timeRange = endFmt ? `${startFmt} - ${endFmt}` : startFmt;
+
+      if (eventType !== 'appointment') {
+        if (!includeBlocked) continue;
+        const defaultBlockedTitle =
+          opts.language === 'es'
+            ? 'Horario bloqueado'
+            : opts.language === 'en'
+            ? 'Blocked slot'
+            : 'Créneau bloqué';
+        const slotTitle = summaryStr || cleanDesc || defaultBlockedTitle;
+        const extraRemark =
+          summaryStr && cleanDesc && cleanDesc.toLowerCase() !== summaryStr.toLowerCase()
+            ? cleanDesc
+            : undefined;
+
+        appointments.push({
+          id: String(row.id),
+          start: startRaw,
+          end: endRaw || startRaw,
+          timeRange,
+          eventType: 'blocked',
+          clientName: slotTitle,
+          motif: extraRemark,
+        });
+        continue;
+      }
 
       const matchedClient =
         (rawClientId && clientsById.get(String(rawClientId))) ||
@@ -589,15 +627,12 @@ export async function getTodayAppointmentsFromSupabase(opts: {
         motif = summaryStr;
       }
 
-      const startFmt = formatTimeInZone(startRaw, timeZone);
-      const endFmt = endRaw ? formatTimeInZone(endRaw, timeZone) : '';
-      const timeRange = endFmt ? `${startFmt} - ${endFmt}` : startFmt;
-
       appointments.push({
         id: String(row.id),
         start: startRaw,
         end: endRaw || startRaw,
         timeRange,
+        eventType: 'appointment',
         clientId: matchedClient?.id ? String(matchedClient.id) : rawClientId || undefined,
         clientName,
         phone: matchedClient?.phone || undefined,
@@ -622,13 +657,15 @@ export function formatDigestMessageText(
     includePhone: boolean;
     includeMotif: boolean;
     includeBono: boolean;
+    includeBlockedSlots?: boolean;
   },
   dateFormatted: string,
   appointments: TelegramPreviewResponse['appointments'],
   forHtml: boolean = true
 ): string {
   const lang = opts.language || 'fr';
-  const count = appointments.length;
+  const patientCount = appointments.filter((a) => a.eventType !== 'blocked').length;
+  const blockedCount = appointments.filter((a) => a.eventType === 'blocked').length;
   const capitalizedDate = dateFormatted.charAt(0).toUpperCase() + dateFormatted.slice(1);
 
   const b = (s: string) => (forHtml ? `<b>${escapeHtml(s)}</b>` : s);
@@ -636,17 +673,47 @@ export function formatDigestMessageText(
 
   const header = `🦴 ${b('Vincent Osteopatía')} — ${b(capitalizedDate)}`;
 
-  const subheader =
+  const patientPart =
     lang === 'fr'
-      ? `👥 ${b(`${count} patient${count > 1 ? 's' : ''} programmé${count > 1 ? 's' : ''} aujourd'hui`)}`
+      ? `👥 ${b(`${patientCount} patient${patientCount > 1 ? 's' : ''} programmé${patientCount > 1 ? 's' : ''} aujourd'hui`)}`
       : lang === 'es'
-      ? `👥 ${b(`${count} paciente${count > 1 ? 's' : ''} programado${count > 1 ? 's' : ''} hoy`)}`
-      : `👥 ${b(`${count} patient${count > 1 ? 's' : ''} scheduled today`)}`;
+      ? `👥 ${b(`${patientCount} paciente${patientCount > 1 ? 's' : ''} programado${patientCount > 1 ? 's' : ''} hoy`)}`
+      : `👥 ${b(`${patientCount} patient${patientCount > 1 ? 's' : ''} scheduled today`)}`;
+
+  const blockedPart =
+    blockedCount > 0
+      ? lang === 'fr'
+        ? `🔒 ${b(`${blockedCount} créneau${blockedCount > 1 ? 'x' : ''} bloqué${blockedCount > 1 ? 's' : ''}`)}`
+        : lang === 'es'
+        ? `🔒 ${b(`${blockedCount} horario${blockedCount > 1 ? 's' : ''} bloqueado${blockedCount > 1 ? 's' : ''}`)}`
+        : `🔒 ${b(`${blockedCount} blocked slot${blockedCount > 1 ? 's' : ''}`)}`
+      : '';
+
+  const subheader =
+    patientCount > 0 && blockedPart
+      ? `${patientPart} • ${blockedPart}`
+      : patientCount > 0
+      ? patientPart
+      : blockedPart || patientPart;
 
   const lines: string[] = [header, subheader, ''];
 
-  appointments.forEach((appt, index) => {
-    lines.push(`${index + 1}. 🕐 ${b(appt.timeRange)} • ${b(appt.clientName)}`);
+  let patientIndex = 0;
+  const blockedLabel =
+    lang === 'fr' ? 'Créneau bloqué' : lang === 'es' ? 'Bloqueado' : 'Blocked slot';
+
+  appointments.forEach((appt) => {
+    if (appt.eventType === 'blocked') {
+      lines.push(`🔒 ${b(appt.timeRange)} • ${b(`${blockedLabel} : ${appt.clientName}`)}`);
+      if (opts.includeMotif && appt.motif) {
+        lines.push(`   📝 ${esc(appt.motif)}`);
+      }
+      lines.push('');
+      return;
+    }
+
+    patientIndex += 1;
+    lines.push(`${patientIndex}. 🕐 ${b(appt.timeRange)} • ${b(appt.clientName)}`);
     if (opts.includePhone && appt.phone) {
       lines.push(`   📞 ${esc(appt.phone)}`);
     }
@@ -670,7 +737,7 @@ export function formatDigestMessageText(
     lang === 'fr'
       ? 'Bonne journée de consultations ! ✨'
       : lang === 'es'
-      ? '¡Buen día de consultas! ✨'
+      ? '¡Buen día de consultas ! ✨'
       : 'Have a great day of consultations! ✨';
 
   lines.push(footer);
@@ -682,11 +749,13 @@ export async function getNotificationPreview(opts: {
   includePhone: boolean;
   includeMotif: boolean;
   includeBono: boolean;
+  includeBlockedSlots?: boolean;
   timezone: string;
 }): Promise<TelegramPreviewResponse> {
   const { dateStr, dateFormatted, appointments } = await getTodayAppointmentsFromSupabase({
     timezone: opts.timezone,
     language: opts.language,
+    includeBlockedSlots: opts.includeBlockedSlots !== false,
   });
 
   const messageText =
@@ -789,9 +858,12 @@ export async function sendNotificationNow(
   const { dateStr, dateFormatted, appointments } = await getTodayAppointmentsFromSupabase({
     timezone: timeZone,
     language: cfg.language || 'fr',
+    includeBlockedSlots: cfg.includeBlockedSlots !== false,
   });
 
-  if (appointments.length === 0) {
+  const patientCount = appointments.filter((a) => a.eventType !== 'blocked').length;
+
+  if (appointments.length === 0 || (options?.enforceTimeWindow && patientCount === 0)) {
     if (options?.enforceTimeWindow) {
       await saveRawNotificationConfig({
         ...cfg,
@@ -821,10 +893,354 @@ export async function sendNotificationNow(
     ...cfg,
     lastSentDate: dateStr,
     lastSentAt: new Date().toISOString(),
-    lastSentCount: appointments.length,
+    lastSentCount: patientCount || appointments.length,
     lastStatus: 'sent',
     lastError: null,
   });
 
-  return { ok: true, action: 'sent', count: appointments.length };
+  return { ok: true, action: 'sent', count: patientCount || appointments.length };
 }
+
+export async function checkCloudCronStatus(): Promise<{ installed: boolean }> {
+  if (!supabase) return { installed: false };
+  try {
+    const { data, error } = await supabase.rpc('check_morning_cron_status');
+    if (!error && data && typeof data === 'object' && 'installed' in data) {
+      return { installed: Boolean((data as any).installed) };
+    }
+  } catch {
+    // RPC not installed yet
+  }
+  return { installed: false };
+}
+
+export const SUPABASE_CRON_SQL_SETUP = `-- ==============================================================================
+-- ACTIVATION DE L'ENVOI AUTOMATIQUE 24h/24 DANS LE CLOUD SUPABASE (APP FERMÉE)
+-- À coller dans Supabase : SQL Editor > New query > Run (une seule fois)
+-- ==============================================================================
+
+-- 1. Activer les extensions réseau et planificateur de Supabase
+CREATE EXTENSION IF NOT EXISTS pg_net;
+CREATE EXTENSION IF NOT EXISTS pg_cron;
+
+-- 2. Fonction d'échappement HTML pour le message
+CREATE OR REPLACE FUNCTION public.osteo_escape_html(p_text text)
+RETURNS text
+LANGUAGE sql
+IMMUTABLE
+AS $$
+  SELECT replace(replace(replace(COALESCE(p_text, ''), '&', '&amp;'), '<', '&lt;'), '>', '&gt;');
+$$;
+
+-- 3. Fonction autonome exécutée chaque minute par Supabase (même app et téléphone éteints)
+CREATE OR REPLACE FUNCTION public.send_morning_telegram_digest(p_force boolean DEFAULT false)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+  v_raw_desc text;
+  v_cfg jsonb;
+  v_enabled boolean;
+  v_bot_token text;
+  v_chat_id text;
+  v_send_time text;
+  v_tz text;
+  v_lang text;
+  v_inc_phone boolean;
+  v_inc_motif boolean;
+  v_inc_bono boolean;
+  v_inc_blocked boolean;
+  v_last_sent_date text;
+  v_now_local timestamp;
+  v_today_str text;
+  v_date_display text;
+  v_now_hm text;
+  v_diff_sec numeric;
+  v_ev record;
+  v_client_jb jsonb;
+  v_desc text;
+  v_clean_desc text;
+  v_summary text;
+  v_client_id text;
+  v_client_name text;
+  v_phone text;
+  v_has_bono boolean;
+  v_bono_rem int;
+  v_motif text;
+  v_time_range text;
+  v_is_appt boolean;
+  v_patient_count int := 0;
+  v_blocked_count int := 0;
+  v_lines text[] := ARRAY[]::text[];
+  v_msg text;
+  v_header text;
+  v_subheader text;
+  v_blocked_part text := '';
+  v_blocked_prefix text;
+  v_slot_title text;
+  v_footer text;
+  v_bono_label text;
+BEGIN
+  SELECT description INTO v_raw_desc
+  FROM public.calendar_events
+  WHERE id = '00000000-0000-4000-8000-743567000001'
+  LIMIT 1;
+
+  IF v_raw_desc IS NULL OR BTRIM(v_raw_desc) = '' THEN
+    RETURN jsonb_build_object('ok', false, 'action', 'no_config');
+  END IF;
+
+  v_cfg := v_raw_desc::jsonb;
+  v_enabled := COALESCE((v_cfg->>'enabled')::boolean, false);
+  v_bot_token := BTRIM(COALESCE(v_cfg->>'botToken', ''));
+  v_chat_id := BTRIM(COALESCE(v_cfg->>'chatId', ''));
+  v_send_time := COALESCE(NULLIF(BTRIM(v_cfg->>'sendTime'), ''), '08:00');
+  v_tz := COALESCE(NULLIF(BTRIM(v_cfg->>'timezone'), ''), 'Europe/Madrid');
+  v_lang := COALESCE(NULLIF(BTRIM(v_cfg->>'language'), ''), 'fr');
+  v_inc_phone := COALESCE((v_cfg->>'includePhone')::boolean, true);
+  v_inc_motif := COALESCE((v_cfg->>'includeMotif')::boolean, true);
+  v_inc_bono := COALESCE((v_cfg->>'includeBono')::boolean, true);
+  v_inc_blocked := COALESCE((v_cfg->>'includeBlockedSlots')::boolean, true);
+  v_last_sent_date := COALESCE(v_cfg->>'lastSentDate', '');
+
+  IF v_bot_token = '' OR v_chat_id = '' THEN
+    RETURN jsonb_build_object('ok', false, 'action', 'missing_credentials');
+  END IF;
+
+  IF NOT p_force AND NOT v_enabled THEN
+    RETURN jsonb_build_object('ok', true, 'action', 'skipped_disabled');
+  END IF;
+
+  v_now_local := NOW() AT TIME ZONE v_tz;
+  v_today_str := to_char(v_now_local, 'YYYY-MM-DD');
+  v_date_display := to_char(v_now_local, 'DD/MM/YYYY');
+  v_now_hm := to_char(v_now_local, 'HH24:MI');
+
+  IF NOT p_force THEN
+    IF v_last_sent_date = v_today_str THEN
+      RETURN jsonb_build_object('ok', true, 'action', 'skipped_already_sent');
+    END IF;
+
+    BEGIN
+      v_diff_sec := EXTRACT(EPOCH FROM (v_now_local::time - v_send_time::time));
+    EXCEPTION WHEN OTHERS THEN
+      v_diff_sec := -1;
+    END;
+
+    IF v_diff_sec < 0 OR v_diff_sec > 14400 THEN
+      RETURN jsonb_build_object('ok', true, 'action', 'skipped_window', 'now', v_now_hm, 'target', v_send_time);
+    END IF;
+  END IF;
+
+  IF v_lang = 'es' THEN
+    v_blocked_prefix := 'Bloqueado';
+  ELSIF v_lang = 'en' THEN
+    v_blocked_prefix := 'Blocked slot';
+  ELSE
+    v_blocked_prefix := 'Créneau bloqué';
+  END IF;
+
+  -- Parcourir les rendez-vous et créneaux bloqués du jour
+  FOR v_ev IN
+    SELECT to_jsonb(e) AS jb, e.start AS start_ts, e."end" AS end_ts
+    FROM public.calendar_events e
+    WHERE e.id <> '00000000-0000-4000-8000-743567000001'
+      AND COALESCE(e.summary, '') <> '__SYS_TELEGRAM_CONFIG__'
+      AND e.start IS NOT NULL
+      AND to_char(e.start AT TIME ZONE v_tz, 'YYYY-MM-DD') = v_today_str
+    ORDER BY e.start ASC
+  LOOP
+    v_desc := COALESCE(v_ev.jb->>'description', v_ev.jb->>'notes', '');
+    v_summary := BTRIM(COALESCE(v_ev.jb->>'summary', v_ev.jb->>'title', ''));
+    v_client_id := BTRIM(COALESCE(NULLIF(v_ev.jb->>'client_id', ''), NULLIF(v_ev.jb->>'clientId', ''), ''));
+
+    v_is_appt := false;
+    IF v_desc ~* '\\[eventType:blocked\\]' OR v_desc ~* '\\[type:blocked\\]' OR COALESCE(v_ev.jb->>'eventType', v_ev.jb->>'event_type', '') = 'blocked' THEN
+      v_is_appt := false;
+    ELSIF v_desc ~* '\\[eventType:appointment\\]' OR v_desc ~* '\\[type:appointment\\]' OR COALESCE(v_ev.jb->>'eventType', v_ev.jb->>'event_type', '') = 'appointment' THEN
+      v_is_appt := true;
+    ELSIF v_client_id <> '' OR v_summary = '' OR lower(v_summary) IN ('rdv patient', 'rendez-vous', 'cita', 'appointment', 'sesión de osteopatía', 'séance d''ostéopathie', 'osteopathy session') THEN
+      v_is_appt := true;
+    END IF;
+
+    v_clean_desc := BTRIM(regexp_replace(regexp_replace(v_desc, '\\[eventType:[a-zA-Z]+\\]', '', 'gi'), '\\[type:[a-zA-Z]+\\]', '', 'gi'));
+
+    v_time_range := to_char(v_ev.start_ts AT TIME ZONE v_tz, 'HH24:MI');
+    IF v_ev.end_ts IS NOT NULL THEN
+      v_time_range := v_time_range || ' - ' || to_char(v_ev.end_ts AT TIME ZONE v_tz, 'HH24:MI');
+    END IF;
+
+    IF NOT v_is_appt THEN
+      IF NOT v_inc_blocked THEN
+        CONTINUE;
+      END IF;
+      v_blocked_count := v_blocked_count + 1;
+      v_slot_title := COALESCE(NULLIF(v_summary, ''), NULLIF(v_clean_desc, ''), v_blocked_prefix);
+      v_lines := array_append(v_lines, '🔒 <b>' || public.osteo_escape_html(v_time_range) || '</b> • <b>' || public.osteo_escape_html(v_blocked_prefix || ' : ' || v_slot_title) || '</b>');
+      IF v_inc_motif AND v_summary <> '' AND v_clean_desc <> '' AND lower(v_clean_desc) <> lower(v_summary) THEN
+        v_lines := array_append(v_lines, '   📝 ' || public.osteo_escape_html(v_clean_desc));
+      END IF;
+      v_lines := array_append(v_lines, '');
+      CONTINUE;
+    END IF;
+
+    v_client_jb := NULL;
+    IF v_client_id <> '' THEN
+      SELECT to_jsonb(c) INTO v_client_jb
+      FROM public.clients c
+      WHERE c.id = v_client_id
+      LIMIT 1;
+    END IF;
+
+    IF v_client_jb IS NULL THEN
+      SELECT to_jsonb(c) INTO v_client_jb
+      FROM public.clients c
+      WHERE lower(BTRIM(COALESCE(c.name, ''))) = lower(BTRIM(COALESCE(NULLIF(v_ev.jb->>'client_name', ''), NULLIF(v_ev.jb->>'clientName', ''), v_summary)))
+      LIMIT 1;
+    END IF;
+
+    v_client_name := BTRIM(COALESCE(
+      NULLIF(v_client_jb->>'name', ''),
+      NULLIF(v_ev.jb->>'client_name', ''),
+      NULLIF(v_ev.jb->>'clientName', ''),
+      NULLIF(v_summary, ''),
+      'Patient'
+    ));
+
+    v_phone := BTRIM(COALESCE(v_client_jb->>'phone', ''));
+    v_has_bono := COALESCE((v_client_jb->>'hasBono')::boolean, (v_client_jb->>'has_bono')::boolean, false);
+    v_bono_rem := COALESCE((v_client_jb->>'bonoSessionsRemaining')::int, (v_client_jb->>'bono_sessions_remaining')::int, 0);
+
+    v_motif := v_clean_desc;
+    IF v_motif = '' AND v_summary <> '' AND lower(v_summary) <> lower(v_client_name)
+       AND lower(v_summary) NOT IN ('rdv patient', 'rendez-vous', 'cita', 'appointment', 'sesión de osteopatía', 'séance d''ostéopathie', 'osteopathy session') THEN
+      v_motif := v_summary;
+    END IF;
+
+    v_patient_count := v_patient_count + 1;
+    v_lines := array_append(v_lines, v_patient_count::text || '. 🕐 <b>' || public.osteo_escape_html(v_time_range) || '</b> • <b>' || public.osteo_escape_html(v_client_name) || '</b>');
+
+    IF v_inc_phone AND v_phone <> '' THEN
+      v_lines := array_append(v_lines, '   📞 ' || public.osteo_escape_html(v_phone));
+    END IF;
+
+    IF v_inc_motif AND v_motif <> '' THEN
+      v_lines := array_append(v_lines, '   📝 ' || public.osteo_escape_html(v_motif));
+    END IF;
+
+    IF v_inc_bono AND v_has_bono AND v_bono_rem > 0 THEN
+      IF v_lang = 'es' THEN
+        v_bono_label := '🎟️ Bono: ' || v_bono_rem::text || CASE WHEN v_bono_rem > 1 THEN ' sesiones restantes' ELSE ' sesión restante' END;
+      ELSIF v_lang = 'en' THEN
+        v_bono_label := '🎟️ Bono: ' || v_bono_rem::text || CASE WHEN v_bono_rem > 1 THEN ' sessions left' ELSE ' session left' END;
+      ELSE
+        v_bono_label := '🎟️ Bono : ' || v_bono_rem::text || CASE WHEN v_bono_rem > 1 THEN ' séances restantes' ELSE ' séance restante' END;
+      END IF;
+      v_lines := array_append(v_lines, '   ' || public.osteo_escape_html(v_bono_label));
+    END IF;
+
+    v_lines := array_append(v_lines, '');
+  END LOOP;
+
+  IF v_patient_count = 0 THEN
+    v_cfg := v_cfg || jsonb_build_object(
+      'lastSentDate', v_today_str,
+      'lastSentAt', to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'),
+      'lastSentCount', 0,
+      'lastStatus', 'skipped_no_patients',
+      'lastError', NULL
+    );
+    UPDATE public.calendar_events
+    SET description = v_cfg::text
+    WHERE id = '00000000-0000-4000-8000-743567000001';
+
+    RETURN jsonb_build_object('ok', true, 'action', 'skipped_no_patients', 'count', 0);
+  END IF;
+
+  v_header := '🦴 <b>Vincent Osteopatía</b> — <b>' || v_date_display || '</b>';
+  IF v_lang = 'es' THEN
+    v_subheader := '👥 <b>' || v_patient_count::text || CASE WHEN v_patient_count > 1 THEN ' pacientes programados hoy' ELSE ' paciente programado hoy' END || '</b>';
+    IF v_blocked_count > 0 THEN
+      v_blocked_part := ' • 🔒 <b>' || v_blocked_count::text || CASE WHEN v_blocked_count > 1 THEN ' horarios bloqueados' ELSE ' horario bloqueado' END || '</b>';
+    END IF;
+    v_footer := '¡Buen día de consultas! ✨';
+  ELSIF v_lang = 'en' THEN
+    v_subheader := '👥 <b>' || v_patient_count::text || CASE WHEN v_patient_count > 1 THEN ' patients scheduled today' ELSE ' patient scheduled today' END || '</b>';
+    IF v_blocked_count > 0 THEN
+      v_blocked_part := ' • 🔒 <b>' || v_blocked_count::text || CASE WHEN v_blocked_count > 1 THEN ' blocked slots' ELSE ' blocked slot' END || '</b>';
+    END IF;
+    v_footer := 'Have a great day of consultations! ✨';
+  ELSE
+    v_subheader := '👥 <b>' || v_patient_count::text || CASE WHEN v_patient_count > 1 THEN ' patients programmés aujourd''hui' ELSE ' patient programmé aujourd''hui' END || '</b>';
+    IF v_blocked_count > 0 THEN
+      v_blocked_part := ' • 🔒 <b>' || v_blocked_count::text || CASE WHEN v_blocked_count > 1 THEN ' créneaux bloqués' ELSE ' créneau bloqué' END || '</b>';
+    END IF;
+    v_footer := 'Bonne journée de consultations ! ✨';
+  END IF;
+
+  v_msg := v_header || E'\\n' || v_subheader || v_blocked_part || E'\\n\\n' || array_to_string(v_lines, E'\\n') || E'\\n' || v_footer;
+
+  PERFORM net.http_post(
+    url := 'https://api.telegram.org/bot' || v_bot_token || '/sendMessage',
+    headers := '{"Content-Type": "application/json"}'::jsonb,
+    body := jsonb_build_object(
+      'chat_id', v_chat_id,
+      'text', v_msg,
+      'parse_mode', 'HTML',
+      'disable_web_page_preview', true
+    )
+  );
+
+  v_cfg := v_cfg || jsonb_build_object(
+    'lastSentDate', v_today_str,
+    'lastSentAt', to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'),
+    'lastSentCount', v_patient_count,
+    'lastStatus', 'sent',
+    'lastError', NULL
+  );
+
+  UPDATE public.calendar_events
+  SET description = v_cfg::text
+  WHERE id = '00000000-0000-4000-8000-743567000001';
+
+  RETURN jsonb_build_object('ok', true, 'action', 'sent', 'count', v_patient_count);
+END;
+$$;
+
+-- 4. Planifier l'exécution automatique chaque minute 24h/24 dans Supabase
+DO $$
+BEGIN
+  PERFORM cron.unschedule('vincent-osteo-morning-digest');
+EXCEPTION WHEN OTHERS THEN
+  NULL;
+END $$;
+
+SELECT cron.schedule(
+  'vincent-osteo-morning-digest',
+  '* * * * *',
+  $cron$SELECT public.send_morning_telegram_digest(false);$cron$
+);
+
+-- 5. Fonction de vérification d'état pour l'interface d'administration
+CREATE OR REPLACE FUNCTION public.check_morning_cron_status()
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+  v_exists boolean := false;
+BEGIN
+  SELECT EXISTS (
+    SELECT 1 FROM cron.job WHERE jobname = 'vincent-osteo-morning-digest' AND active = true
+  ) INTO v_exists;
+  RETURN jsonb_build_object('installed', v_exists);
+EXCEPTION WHEN OTHERS THEN
+  RETURN jsonb_build_object('installed', false);
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.send_morning_telegram_digest(boolean) TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.check_morning_cron_status() TO anon, authenticated;
+`;
+

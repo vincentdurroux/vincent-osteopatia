@@ -95,6 +95,7 @@ export interface TelegramAppointmentItem {
   start: string;
   end: string;
   timeRange: string;
+  eventType?: 'appointment' | 'blocked';
   clientId?: string;
   clientName: string;
   phone?: string;
@@ -118,6 +119,7 @@ export interface TelegramConfigResponse {
   includePhone: boolean;
   includeMotif: boolean;
   includeBono: boolean;
+  includeBlockedSlots?: boolean;
   lastSentDate: string | null;
   lastSentAt: string | null;
   lastSentCount: number;

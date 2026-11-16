@@ -505,26 +505,42 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
           }
         });
 
+        // Push any local drafts that are missing or newer than remote to Supabase
+        Object.entries(local).forEach(([key, localDraft]) => {
+          const remoteDraft = remote[key];
+          if (
+            localDraft &&
+            localDraft.clientId &&
+            (localDraft.anamnese?.trim() || localDraft.treatment?.trim() || localDraft.motif?.trim()) &&
+            (!remoteDraft || (localDraft.updatedAt || 0) > (remoteDraft.updatedAt || 0))
+          ) {
+            api.saveRemoteDraft(localDraft);
+          }
+        });
+
         if (updated) {
           localStorage.setItem(NOTE_DRAFTS_STORAGE_KEY, JSON.stringify(local));
           setDraftsMap({ ...local });
 
           // If current selected client has a draft for the active treatment date/event, restore into form if empty
           if (selectedClient?.id) {
-            const currentClientDraft = getClientDraft(
-              selectedClient.id,
-              newNoteRef.current.eventId || undefined,
-              newNoteRef.current.date || undefined
-            );
+            const currentClientDraft =
+              getClientDraft(
+                selectedClient.id,
+                newNoteRef.current.eventId || undefined,
+                newNoteRef.current.date || undefined
+              ) || getClientDraft(selectedClient.id);
             if (currentClientDraft && (!newNoteRef.current.anamnese.trim() && !newNoteRef.current.treatment.trim() && !newNoteRef.current.motif.trim())) {
-              setNewNote({
+              const restored = {
                 anamnese: currentClientDraft.draft.anamnese || '',
                 treatment: currentClientDraft.draft.treatment || '',
                 category: currentClientDraft.draft.category || 'treatment',
                 date: currentClientDraft.draft.date || newNoteRef.current.date || new Date().toISOString().split('T')[0],
                 motif: currentClientDraft.draft.motif || '',
                 eventId: currentClientDraft.draft.eventId || newNoteRef.current.eventId || '',
-              });
+              };
+              newNoteRef.current = restored;
+              setNewNote(restored);
               setActiveDraftNotice(true);
             }
           }
@@ -542,33 +558,15 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
 
   const saveDraftToStorage = (
     clientId: string,
-    arg2?: string | Partial<typeof newNote> | null,
-    arg3?: string | Partial<typeof newNote> | null,
-    arg4?: Partial<typeof newNote> | null
+    eventId: string | undefined,
+    date: string | undefined,
+    draft: Partial<typeof newNote> | null
   ) => {
     if (typeof window === 'undefined' || !clientId) return;
-    let eventId: string | undefined = newNoteRef.current.eventId;
-    let date: string | undefined = newNoteRef.current.date;
-    let draft: Partial<typeof newNote> | null = null;
-
-    if (arguments.length === 2 && typeof arg2 === 'object') {
-      draft = arg2 as Partial<typeof newNote> | null;
-      eventId = draft?.eventId !== undefined ? draft.eventId : eventId;
-      date = draft?.date !== undefined ? draft.date : date;
-    } else if (arguments.length >= 4) {
-      eventId = arg2 as string | undefined;
-      date = arg3 as string | undefined;
-      draft = arg4 as Partial<typeof newNote> | null;
-    } else if (typeof arg3 === 'object') {
-      eventId = arg2 as string | undefined;
-      draft = arg3 as Partial<typeof newNote> | null;
-      date = draft?.date !== undefined ? draft.date : date;
-    } else {
-      draft = arg2 as Partial<typeof newNote> | null;
-    }
-
-    const cleanDate = (date || newNoteRef.current.date || new Date().toISOString()).split('T')[0];
-    const effectiveEventId = (eventId || '').trim();
+    const effectiveDate = date !== undefined ? date : draft?.date !== undefined ? draft.date : newNoteRef.current.date;
+    const effectiveEvt = eventId !== undefined ? eventId : draft?.eventId !== undefined ? draft.eventId : newNoteRef.current.eventId;
+    const cleanDate = (effectiveDate || new Date().toISOString()).split('T')[0];
+    const effectiveEventId = (effectiveEvt || '').trim();
 
     try {
       const current = getStoredDrafts();
@@ -3826,18 +3824,44 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                         <button
                           type="button"
                           onClick={() => {
+                            if (
+                              selectedClient?.id &&
+                              (selectedClient.id !== d.clientId ||
+                                newNoteRef.current.date !== d.date ||
+                                (newNoteRef.current.eventId || '') !== (d.eventId || '')) &&
+                              (newNoteRef.current.anamnese.trim() ||
+                                newNoteRef.current.treatment.trim() ||
+                                newNoteRef.current.motif.trim())
+                            ) {
+                              saveDraftToStorage(
+                                selectedClient.id,
+                                newNoteRef.current.eventId,
+                                newNoteRef.current.date,
+                                newNoteRef.current
+                              );
+                            }
+
+                            const targetDate = d.date || new Date().toISOString().split('T')[0];
+                            const nextNote = {
+                              anamnese: d.anamnese || '',
+                              treatment: d.treatment || '',
+                              category: d.category || 'treatment',
+                              date: targetDate,
+                              motif: d.motif || '',
+                              eventId: d.eventId || '',
+                            };
+                            newNoteRef.current = nextNote;
+                            prevSessionRef.current = {
+                              clientId: d.clientId,
+                              eventId: d.eventId || '',
+                              date: targetDate,
+                            };
+
                             const targetCl = d.client || clients.find(c => c.id === d.clientId);
                             if (targetCl) {
                               setSelectedClient(targetCl);
                             }
-                            setNewNote({
-                              anamnese: d.anamnese || '',
-                              treatment: d.treatment || '',
-                              category: d.category || 'treatment',
-                              date: d.date || new Date().toISOString().split('T')[0],
-                              motif: d.motif || '',
-                              eventId: d.eventId || '',
-                            });
+                            setNewNote(nextNote);
                             setActiveDraftNotice(true);
                             setTimeout(() => {
                               const noteFormElem = document.getElementById('new-note-form');
@@ -3852,6 +3876,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                         >
                           <p className="font-bold text-amber-950 truncate">{d.client?.name || d.clientName || 'Patient'}</p>
                           <p className="text-[10px] text-amber-800/80 truncate">
+                            {d.date ? `${new Date(`${d.date.split('T')[0]}T12:00:00`).toLocaleDateString(lang === 'fr' ? 'fr-FR' : lang === 'es' ? 'es-ES' : 'en-GB')} • ` : ''}
                             {d.motif || d.anamnese.substring(0, 40) || (lang === 'fr' ? 'Brouillon de consultation' : 'Draft note')}
                           </p>
                         </button>
@@ -3862,7 +3887,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                             delete current[d.key];
                             localStorage.setItem(NOTE_DRAFTS_STORAGE_KEY, JSON.stringify(current));
                             setDraftsMap({ ...current });
-                            api.deleteRemoteDraft(d.clientId, d.eventId);
+                            api.deleteRemoteDraft(d.clientId, d.eventId, d.date);
                           }}
                           className="p-1 text-amber-700/60 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer shrink-0"
                           title={lang === 'fr' ? "Supprimer ce brouillon" : "Discard draft"}
@@ -3921,19 +3946,8 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                         <button
                           type="button"
                           onClick={() => {
+                            if (selectedClient?.id === c.id) return;
                             setSelectedClient(c);
-                            const found = getClientDraft(c.id);
-                            if (found) {
-                              setNewNote({
-                                anamnese: found.draft.anamnese || '',
-                                treatment: found.draft.treatment || '',
-                                category: found.draft.category || 'treatment',
-                                date: found.draft.date || new Date().toISOString().split('T')[0],
-                                motif: found.draft.motif || '',
-                                eventId: found.draft.eventId || '',
-                              });
-                              setActiveDraftNotice(true);
-                            }
                           }}
                           className="flex-1 flex items-center gap-3 overflow-hidden text-left cursor-pointer"
                         >

@@ -67,6 +67,22 @@ function formatLongDateInZone(date, timeZone, lang) {
   }
 }
 
+function getZonedMinutesOfDay(date, timeZone) {
+  try {
+    const parts = new Intl.DateTimeFormat('en-GB', {
+      timeZone,
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    }).formatToParts(date);
+    const h = Number(parts.find((p) => p.type === 'hour')?.value || '0');
+    const m = Number(parts.find((p) => p.type === 'minute')?.value || '0');
+    return (h === 24 ? 0 : h) * 60 + m;
+  } catch {
+    return date.getUTCHours() * 60 + date.getUTCMinutes();
+  }
+}
+
 export default async function handler(req, res) {
   try {
     const supabaseUrl =
@@ -99,6 +115,7 @@ export default async function handler(req, res) {
     }
 
     const force = req.query?.force === '1' || req.query?.force === 'true';
+    const isVercelDailyCron = Boolean(req.headers?.['x-vercel-cron']);
     if (!force && !cfg.enabled) {
       return res.status(200).json({ ok: true, action: 'skipped_disabled', count: 0 });
     }
@@ -109,6 +126,23 @@ export default async function handler(req, res) {
 
     if (!force && cfg.lastSentDate === todayStr) {
       return res.status(200).json({ ok: true, action: 'skipped_already_sent', count: 0 });
+    }
+
+    if (!force && !isVercelDailyCron) {
+      const [hh, mm] = String(cfg.sendTime || '08:00')
+        .split(':')
+        .map((n) => parseInt(n, 10));
+      const targetMinutes = (isNaN(hh) ? 8 : hh) * 60 + (isNaN(mm) ? 0 : mm);
+      const currentMinutes = getZonedMinutesOfDay(now, timeZone);
+      if (currentMinutes < targetMinutes || currentMinutes > targetMinutes + 240) {
+        return res.status(200).json({
+          ok: true,
+          action: 'skipped_window',
+          currentMinutes,
+          targetMinutes,
+          sendTime: cfg.sendTime || '08:00',
+        });
+      }
     }
 
     const lang = cfg.language || 'fr';
@@ -163,12 +197,33 @@ export default async function handler(req, res) {
           eventType = 'blocked';
         }
       }
-      if (eventType !== 'appointment') continue;
-
       const cleanDesc = rawDesc
         .replace(/\[eventType:[a-z]+\]/gi, '')
         .replace(/\[type:[a-z]+\]/gi, '')
         .trim();
+
+      const startFmt = formatTimeInZone(startRaw, timeZone);
+      const endFmt = endRaw ? formatTimeInZone(endRaw, timeZone) : '';
+      const timeRange = endFmt ? `${startFmt} - ${endFmt}` : startFmt;
+
+      if (eventType !== 'appointment') {
+        if (cfg.includeBlockedSlots === false) continue;
+        const defaultBlockedTitle =
+          lang === 'es' ? 'Horario bloqueado' : lang === 'en' ? 'Blocked slot' : 'Créneau bloqué';
+        const slotTitle = summaryStr || cleanDesc || defaultBlockedTitle;
+        const extraRemark =
+          summaryStr && cleanDesc && cleanDesc.toLowerCase() !== summaryStr.toLowerCase()
+            ? cleanDesc
+            : undefined;
+        appointments.push({
+          start: startRaw,
+          timeRange,
+          eventType: 'blocked',
+          clientName: slotTitle,
+          motif: extraRemark,
+        });
+        continue;
+      }
 
       const matchedClient =
         (rawClientId && clientsById.get(String(rawClientId))) ||
@@ -195,13 +250,10 @@ export default async function handler(req, res) {
         motif = summaryStr;
       }
 
-      const startFmt = formatTimeInZone(startRaw, timeZone);
-      const endFmt = endRaw ? formatTimeInZone(endRaw, timeZone) : '';
-      const timeRange = endFmt ? `${startFmt} - ${endFmt}` : startFmt;
-
       appointments.push({
         start: startRaw,
         timeRange,
+        eventType: 'appointment',
         clientName,
         phone: matchedClient?.phone || undefined,
         motif: motif || undefined,
@@ -212,7 +264,10 @@ export default async function handler(req, res) {
 
     appointments.sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
 
-    if (appointments.length === 0) {
+    const patientCount = appointments.filter((a) => a.eventType !== 'blocked').length;
+    const blockedCount = appointments.filter((a) => a.eventType === 'blocked').length;
+
+    if (patientCount === 0 && (!force || appointments.length === 0)) {
       const nextCfg = {
         ...cfg,
         lastSentDate: todayStr,
@@ -232,19 +287,50 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true, action: 'skipped_no_patients', count: 0 });
     }
 
-    const count = appointments.length;
     const capitalizedDate = dateFormatted.charAt(0).toUpperCase() + dateFormatted.slice(1);
     const header = `🦴 <b>Vincent Osteopatía</b> — <b>${escapeHtml(capitalizedDate)}</b>`;
-    const subheader =
+    const patientPart =
       lang === 'fr'
-        ? `👥 <b>${count} patient${count > 1 ? 's' : ''} programmé${count > 1 ? 's' : ''} aujourd'hui</b>`
+        ? `👥 <b>${patientCount} patient${patientCount > 1 ? 's' : ''} programmé${patientCount > 1 ? 's' : ''} aujourd'hui</b>`
         : lang === 'es'
-        ? `👥 <b>${count} paciente${count > 1 ? 's' : ''} programado${count > 1 ? 's' : ''} hoy</b>`
-        : `👥 <b>${count} patient${count > 1 ? 's' : ''} scheduled today</b>`;
+        ? `👥 <b>${patientCount} paciente${patientCount > 1 ? 's' : ''} programado${patientCount > 1 ? 's' : ''} hoy</b>`
+        : `👥 <b>${patientCount} patient${patientCount > 1 ? 's' : ''} scheduled today</b>`;
+
+    const blockedPart =
+      blockedCount > 0
+        ? lang === 'fr'
+          ? `🔒 <b>${blockedCount} créneau${blockedCount > 1 ? 'x' : ''} bloqué${blockedCount > 1 ? 's' : ''}</b>`
+          : lang === 'es'
+          ? `🔒 <b>${blockedCount} horario${blockedCount > 1 ? 's' : ''} bloqueado${blockedCount > 1 ? 's' : ''}</b>`
+          : `🔒 <b>${blockedCount} blocked slot${blockedCount > 1 ? 's' : ''}</b>`
+        : '';
+
+    const subheader =
+      patientCount > 0 && blockedPart
+        ? `${patientPart} • ${blockedPart}`
+        : patientCount > 0
+        ? patientPart
+        : blockedPart || patientPart;
 
     const lines = [header, subheader, ''];
-    appointments.forEach((appt, index) => {
-      lines.push(`${index + 1}. 🕐 <b>${escapeHtml(appt.timeRange)}</b> • <b>${escapeHtml(appt.clientName)}</b>`);
+    let patientIndex = 0;
+    const blockedLabel =
+      lang === 'fr' ? 'Créneau bloqué' : lang === 'es' ? 'Bloqueado' : 'Blocked slot';
+
+    appointments.forEach((appt) => {
+      if (appt.eventType === 'blocked') {
+        lines.push(
+          `🔒 <b>${escapeHtml(appt.timeRange)}</b> • <b>${escapeHtml(`${blockedLabel} : ${appt.clientName}`)}</b>`
+        );
+        if (cfg.includeMotif !== false && appt.motif) {
+          lines.push(`   📝 ${escapeHtml(appt.motif)}`);
+        }
+        lines.push('');
+        return;
+      }
+
+      patientIndex += 1;
+      lines.push(`${patientIndex}. 🕐 <b>${escapeHtml(appt.timeRange)}</b> • <b>${escapeHtml(appt.clientName)}</b>`);
       if (cfg.includePhone !== false && appt.phone) {
         lines.push(`   📞 ${escapeHtml(appt.phone)}`);
       }
@@ -272,6 +358,7 @@ export default async function handler(req, res) {
         : 'Have a great day of consultations! ✨'
     );
 
+    const count = patientCount || appointments.length;
     const htmlText = lines.join('\n').trim();
     const tgRes = await fetch(`https://api.telegram.org/bot${cfg.botToken}/sendMessage`, {
       method: 'POST',

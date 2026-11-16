@@ -19,6 +19,9 @@ import {
   Settings2,
   KeyRound,
   UserCheck,
+  Cloud,
+  ExternalLink,
+  Lock,
 } from 'lucide-react';
 import { TelegramConfigResponse, TelegramPreviewResponse } from '../../types';
 import { Language } from '../../translations';
@@ -29,6 +32,8 @@ import {
   detectNotificationChats,
   getNotificationPreview,
   sendNotificationNow,
+  checkCloudCronStatus,
+  SUPABASE_CRON_SQL_SETUP,
 } from '../../lib/notificationsService';
 
 interface TelegramSettingsPanelProps {
@@ -36,24 +41,27 @@ interface TelegramSettingsPanelProps {
   onStatusChange?: (enabled: boolean, configured: boolean) => void;
 }
 
+const SUPABASE_SQL_EDITOR_URL = 'https://supabase.com/dashboard/project/lnlemynayesjduntoran/sql/new';
+
 const UI_TEXT = {
   fr: {
     title: 'Notifications',
     subtitle:
-      'Recevez chaque matin le récapitulatif de vos patients du jour (uniquement lorsque des patients sont programmés).',
+      'Recevez chaque matin le récapitulatif de vos patients du jour et de vos créneaux bloqués.',
     activeBadge: 'Envoi matinal actif',
     pausedBadge: 'En pause',
     scheduleTitle: 'Horaire matinal & Contenu du récapitulatif',
     scheduleSubtitle: 'Silence automatique les jours sans patient programmé.',
     activeRule:
-      "Règle active : la notification n'est envoyée que si au moins 1 rendez-vous patient est programmé dans la journée (les créneaux bloqués sont ignorés).",
+      "Règle active : la notification est envoyée si au moins 1 rendez-vous patient est programmé dans la journée (et inclut vos créneaux bloqués avec leur titre / motif).",
     sendTimeLabel: "Heure d'envoi",
     timezoneLabel: 'Fuseau horaire',
     messageLangLabel: 'Langue du message',
-    includedInfoLabel: 'Informations incluses par patient',
+    includedInfoLabel: 'Informations incluses dans le récapitulatif',
     phoneLabel: 'Téléphone',
     motifLabel: 'Motif / Remarque',
     bonoLabel: 'Statut Bono',
+    blockedSlotsLabel: 'Créneaux bloqués (Titre / Motif)',
     saveBtn: 'Enregistrer les paramètres',
     connectedChannelTitle: 'Canal de réception connecté',
     activeRecipient: 'Destinataire actif',
@@ -70,9 +78,25 @@ const UI_TEXT = {
     statusError: (err: string) => `Erreur : ${err}`,
     statusReady: 'Prêt pour le prochain envoi',
     lastSentLabel: 'Dernier envoi',
-    cronLabel: 'URL Webhook Cron (pour réveil matinal externe type cron-job.org) :',
-    copiedBtn: 'Copié',
+    cronLabel: 'URL Webhook Cron (alternative via cron-job.org) :',
+    copiedBtn: 'Copié !',
     copyBtn: 'Copier',
+    cloudCardTitle: 'Envoi Automatique 24h/24 (Application fermée)',
+    cloudActiveBadge: '✓ Actif 24h/24',
+    cloudPendingBadge: 'À activer (1 clic)',
+    cloudActiveDesc:
+      "Le planificateur Cloud Supabase (pg_cron) est actif 24h/24 : vous recevrez votre récapitulatif chaque matin à l'heure programmée même lorsque votre application, navigateur et ordinateur sont complètement fermés.",
+    cloudSetupIntro:
+      "Pour recevoir votre notification matinale à l'heure exacte même quand l'application est fermée, activez une seule fois le planificateur autonome dans votre base Supabase :",
+    cloudStep1Btn: '1. Copier le script Cloud 24h/24',
+    cloudStep1Copied: '✓ Script copié dans le presse-papiers !',
+    cloudStep2Btn: '2. Ouvrir Supabase SQL Editor',
+    cloudStep2Hint: 'Collez le script dans SQL Editor puis cliquez sur "Run".',
+    cloudVerifyBtn: "3. Vérifier l'activation",
+    cloudVerifiedSuccess:
+      "Planificateur Cloud 24h/24 détecté et actif ! Vous recevrez vos notifications même l'application fermée.",
+    cloudVerifiedNotYet:
+      "Le planificateur n'est pas encore détecté. Assurez-vous d'avoir collé le script dans Supabase > SQL Editor et cliqué sur Run.",
     previewTitle: "Aperçu de la notification d'aujourd'hui",
     patientCount: (count: number) => `${count} patient${count > 1 ? 's' : ''}`,
     noPatientsTitle: "Aucun patient programmé aujourd'hui",
@@ -99,14 +123,15 @@ const UI_TEXT = {
     scheduleTitle: 'Horario matinal y Contenido del resumen',
     scheduleSubtitle: 'Silencio automático los días sin pacientes programados.',
     activeRule:
-      'Regla activa: la notificación solo se envía si hay al menos 1 cita de paciente programada en el día (los horarios bloqueados se ignoran).',
+      'Regla activa: la notificación se envía si hay al menos 1 cita de paciente programada en el día (e incluye los horarios bloqueados con su título / motivo).',
     sendTimeLabel: 'Hora de envío',
     timezoneLabel: 'Zona horaria',
     messageLangLabel: 'Idioma del mensaje',
-    includedInfoLabel: 'Información incluida por paciente',
+    includedInfoLabel: 'Información incluida en el resumen',
     phoneLabel: 'Teléfono',
     motifLabel: 'Motivo / Nota',
     bonoLabel: 'Estado Bono',
+    blockedSlotsLabel: 'Horarios bloqueados (Título / Motivo)',
     saveBtn: 'Guardar configuración',
     connectedChannelTitle: 'Canal de recepción conectado',
     activeRecipient: 'Destinatario activo',
@@ -123,9 +148,25 @@ const UI_TEXT = {
     statusError: (err: string) => `Error: ${err}`,
     statusReady: 'Listo para el próximo envío',
     lastSentLabel: 'Último envío',
-    cronLabel: 'URL Webhook Cron (para activación matinal externa tipo cron-job.org):',
-    copiedBtn: 'Copiado',
+    cronLabel: 'URL Webhook Cron (alternativa vía cron-job.org):',
+    copiedBtn: '¡Copiado!',
     copyBtn: 'Copiar',
+    cloudCardTitle: 'Envío Automático 24h/24 (Aplicación cerrada)',
+    cloudActiveBadge: '✓ Activo 24h/24',
+    cloudPendingBadge: 'Por activar (1 clic)',
+    cloudActiveDesc:
+      'El planificador Cloud de Supabase (pg_cron) está activo 24h/24: recibirá su resumen cada mañana a la hora programada incluso cuando la aplicación, el navegador y el ordenador estén cerrados.',
+    cloudSetupIntro:
+      'Para recibir su notificación matinal a la hora exacta incluso con la aplicación cerrada, active una sola vez el planificador autónomo en su base de datos Supabase:',
+    cloudStep1Btn: '1. Copiar script Cloud 24h/24',
+    cloudStep1Copied: '✓ ¡Script copiado al portapapeles!',
+    cloudStep2Btn: '2. Abrir Supabase SQL Editor',
+    cloudStep2Hint: 'Pegue el script en SQL Editor y haga clic en "Run".',
+    cloudVerifyBtn: '3. Verificar activación',
+    cloudVerifiedSuccess:
+      '¡Planificador Cloud 24h/24 detectado y activo! Recibirá sus notificaciones incluso con la app cerrada.',
+    cloudVerifiedNotYet:
+      'El planificador aún no se detecta. Asegúrese de haber pegado el script en Supabase > SQL Editor y pulsado Run.',
     previewTitle: 'Vista previa de la notificación de hoy',
     patientCount: (count: number) => `${count} paciente${count > 1 ? 's' : ''}`,
     noPatientsTitle: 'No hay pacientes programados hoy',
@@ -146,20 +187,21 @@ const UI_TEXT = {
   en: {
     title: 'Notifications',
     subtitle:
-      'Receive a daily morning summary of your scheduled patients (only on days with appointments).',
+      'Receive a daily morning summary of your scheduled patients and blocked slots.',
     activeBadge: 'Morning digest active',
     pausedBadge: 'Paused',
     scheduleTitle: 'Morning Schedule & Summary Content',
     scheduleSubtitle: 'Automatic silence on days with no scheduled patients.',
     activeRule:
-      'Active rule: the notification is only sent if at least 1 patient appointment is scheduled for the day (blocked slots are ignored).',
+      'Active rule: the notification is sent if at least 1 patient appointment is scheduled for the day (and includes your blocked slots with their title / reason).',
     sendTimeLabel: 'Send time',
     timezoneLabel: 'Timezone',
     messageLangLabel: 'Message language',
-    includedInfoLabel: 'Information included per patient',
+    includedInfoLabel: 'Information included in summary',
     phoneLabel: 'Phone number',
     motifLabel: 'Reason / Note',
     bonoLabel: 'Bono status',
+    blockedSlotsLabel: 'Blocked slots (Title / Reason)',
     saveBtn: 'Save settings',
     connectedChannelTitle: 'Connected Receiving Channel',
     activeRecipient: 'Active recipient',
@@ -176,9 +218,25 @@ const UI_TEXT = {
     statusError: (err: string) => `Error: ${err}`,
     statusReady: 'Ready for next scheduled send',
     lastSentLabel: 'Last sent',
-    cronLabel: 'Cron Webhook URL (for external morning trigger like cron-job.org):',
-    copiedBtn: 'Copied',
+    cronLabel: 'Cron Webhook URL (alternative via cron-job.org):',
+    copiedBtn: 'Copied!',
     copyBtn: 'Copy',
+    cloudCardTitle: '24/7 Automatic Delivery (When App is Closed)',
+    cloudActiveBadge: '✓ Active 24/7',
+    cloudPendingBadge: 'Activate (1-time setup)',
+    cloudActiveDesc:
+      'The Supabase Cloud Scheduler (pg_cron) is active 24/7: you will receive your morning summary at the scheduled time even when your app, browser, and computer are completely closed.',
+    cloudSetupIntro:
+      'To receive your morning notification at the exact time even when the app is closed, enable the autonomous scheduler once in your Supabase database:',
+    cloudStep1Btn: '1. Copy 24/7 Cloud Script',
+    cloudStep1Copied: '✓ Script copied to clipboard!',
+    cloudStep2Btn: '2. Open Supabase SQL Editor',
+    cloudStep2Hint: 'Paste the script in SQL Editor and click "Run".',
+    cloudVerifyBtn: '3. Verify activation',
+    cloudVerifiedSuccess:
+      '24/7 Cloud Scheduler detected and active! You will receive notifications even when the app is closed.',
+    cloudVerifiedNotYet:
+      'Scheduler not detected yet. Make sure you pasted the script in Supabase > SQL Editor and clicked Run.',
     previewTitle: "Today's Notification Preview",
     patientCount: (count: number) => `${count} patient${count > 1 ? 's' : ''}`,
     noPatientsTitle: 'No patients scheduled today',
@@ -219,6 +277,9 @@ export default function TelegramSettingsPanel({ lang, onStatusChange }: Telegram
   const [isTestingDigest, setIsTestingDigest] = useState(false);
   const [showConnectionFields, setShowConnectionFields] = useState(false);
   const [copiedCron, setCopiedCron] = useState(false);
+  const [cloudCronInstalled, setCloudCronInstalled] = useState(false);
+  const [copiedCloudSql, setCopiedCloudSql] = useState(false);
+  const [isCheckingCloudCron, setIsCheckingCloudCron] = useState(false);
 
   // Form states
   const [enabled, setEnabled] = useState(false);
@@ -231,6 +292,7 @@ export default function TelegramSettingsPanel({ lang, onStatusChange }: Telegram
   const [includePhone, setIncludePhone] = useState(true);
   const [includeMotif, setIncludeMotif] = useState(true);
   const [includeBono, setIncludeBono] = useState(true);
+  const [includeBlockedSlots, setIncludeBlockedSlots] = useState(true);
 
   const [detectedChats, setDetectedChats] = useState<DetectedChat[]>([]);
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
@@ -246,6 +308,7 @@ export default function TelegramSettingsPanel({ lang, onStatusChange }: Telegram
       includePhone: boolean;
       includeMotif: boolean;
       includeBono: boolean;
+      includeBlockedSlots: boolean;
       timezone: string;
     }) => {
       try {
@@ -275,6 +338,7 @@ export default function TelegramSettingsPanel({ lang, onStatusChange }: Telegram
         setIncludePhone(data.includePhone);
         setIncludeMotif(data.includeMotif);
         setIncludeBono(data.includeBono);
+        setIncludeBlockedSlots(data.includeBlockedSlots !== false);
 
         const alreadyConnected = Boolean(data.hasBotToken && data.chatId);
         if (!silent) {
@@ -282,13 +346,17 @@ export default function TelegramSettingsPanel({ lang, onStatusChange }: Telegram
         }
         onStatusChangeRef.current?.(data.enabled, alreadyConnected);
 
-        await fetchPreview({
-          language: initialLang,
-          includePhone: data.includePhone,
-          includeMotif: data.includeMotif,
-          includeBono: data.includeBono,
-          timezone: data.timezone || 'Europe/Madrid',
-        });
+        await Promise.all([
+          fetchPreview({
+            language: initialLang,
+            includePhone: data.includePhone,
+            includeMotif: data.includeMotif,
+            includeBono: data.includeBono,
+            includeBlockedSlots: data.includeBlockedSlots !== false,
+            timezone: data.timezone || 'Europe/Madrid',
+          }),
+          checkCloudCronStatus().then((res) => setCloudCronInstalled(res.installed)),
+        ]);
       } catch (err) {
         console.error('Failed to load Notifications config:', err);
         const currentTxt = UI_TEXT[langRef.current] || UI_TEXT.fr;
@@ -314,10 +382,11 @@ export default function TelegramSettingsPanel({ lang, onStatusChange }: Telegram
         includePhone,
         includeMotif,
         includeBono,
+        includeBlockedSlots,
         timezone,
       });
     }
-  }, [messageLang, includePhone, includeMotif, includeBono, timezone, isLoading, fetchPreview]);
+  }, [messageLang, includePhone, includeMotif, includeBono, includeBlockedSlots, timezone, isLoading, fetchPreview]);
 
   const handleSave = async (overrideEnabled?: boolean) => {
     try {
@@ -336,6 +405,7 @@ export default function TelegramSettingsPanel({ lang, onStatusChange }: Telegram
         includePhone: boolean;
         includeMotif: boolean;
         includeBono: boolean;
+        includeBlockedSlots: boolean;
       } = {
         enabled: nextEnabled,
         chatId: chatIdInput.trim(),
@@ -346,6 +416,7 @@ export default function TelegramSettingsPanel({ lang, onStatusChange }: Telegram
         includePhone,
         includeMotif,
         includeBono,
+        includeBlockedSlots,
       };
 
       if (botTokenInput.trim() === '') {
@@ -467,6 +538,27 @@ export default function TelegramSettingsPanel({ lang, onStatusChange }: Telegram
     navigator.clipboard.writeText(cronWebhookUrl);
     setCopiedCron(true);
     setTimeout(() => setCopiedCron(false), 2500);
+  };
+
+  const handleCopyCloudSql = () => {
+    navigator.clipboard.writeText(SUPABASE_CRON_SQL_SETUP);
+    setCopiedCloudSql(true);
+    setTimeout(() => setCopiedCloudSql(false), 3000);
+  };
+
+  const handleVerifyCloudCron = async () => {
+    setIsCheckingCloudCron(true);
+    setFeedback(null);
+    try {
+      const res = await checkCloudCronStatus();
+      setCloudCronInstalled(res.installed);
+      setFeedback({
+        type: res.installed ? 'success' : 'info',
+        text: res.installed ? txt.cloudVerifiedSuccess : txt.cloudVerifiedNotYet,
+      });
+    } finally {
+      setIsCheckingCloudCron(false);
+    }
   };
 
   const isConfigured = Boolean(
@@ -626,7 +718,7 @@ export default function TelegramSettingsPanel({ lang, onStatusChange }: Telegram
               <p className="text-[11px] font-bold uppercase tracking-wider text-gray-500">
                 {txt.includedInfoLabel}
               </p>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                 <label className="flex items-center gap-2 p-2.5 rounded-xl bg-secondary/70 border border-black/5 cursor-pointer hover:bg-secondary transition-colors text-xs font-semibold text-gray-700">
                   <input
                     type="checkbox"
@@ -658,6 +750,17 @@ export default function TelegramSettingsPanel({ lang, onStatusChange }: Telegram
                   />
                   <Ticket size={13} className="text-primary/70 shrink-0" />
                   <span>{txt.bonoLabel}</span>
+                </label>
+
+                <label className="flex items-center gap-2 p-2.5 rounded-xl bg-secondary/70 border border-black/5 cursor-pointer hover:bg-secondary transition-colors text-xs font-semibold text-gray-700">
+                  <input
+                    type="checkbox"
+                    checked={includeBlockedSlots}
+                    onChange={(e) => setIncludeBlockedSlots(e.target.checked)}
+                    className="rounded text-primary focus:ring-primary"
+                  />
+                  <Lock size={13} className="text-amber-700 shrink-0" />
+                  <span>{txt.blockedSlotsLabel}</span>
                 </label>
               </div>
             </div>
@@ -826,6 +929,82 @@ export default function TelegramSettingsPanel({ lang, onStatusChange }: Telegram
                     <span>{copiedCron ? txt.copiedBtn : txt.copyBtn}</span>
                   </button>
                 </div>
+              </div>
+            )}
+          </div>
+
+          {/* Card 3: 24/7 Cloud Autonomous Delivery (When App & Browser are Closed) */}
+          <div className="bg-white p-5 sm:p-6 rounded-3xl border border-black/5 shadow-xs space-y-4">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2.5">
+                <div
+                  className={`w-9 h-9 rounded-xl flex items-center justify-center ${
+                    cloudCronInstalled
+                      ? 'bg-emerald-50 text-emerald-700'
+                      : 'bg-amber-50 text-amber-700'
+                  }`}
+                >
+                  <Cloud size={18} />
+                </div>
+                <div>
+                  <h3 className="text-base font-serif font-bold text-primary">
+                    {txt.cloudCardTitle}
+                  </h3>
+                </div>
+              </div>
+
+              <span
+                className={`px-3 py-1 rounded-full text-[11px] font-bold border ${
+                  cloudCronInstalled
+                    ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                    : 'bg-amber-50 text-amber-800 border-amber-200'
+                }`}
+              >
+                {cloudCronInstalled ? txt.cloudActiveBadge : txt.cloudPendingBadge}
+              </span>
+            </div>
+
+            {cloudCronInstalled ? (
+              <div className="p-3.5 rounded-2xl bg-emerald-50/70 border border-emerald-200/70 flex items-start gap-2.5 text-xs text-emerald-900">
+                <CheckCircle2 size={16} className="text-emerald-600 shrink-0 mt-0.5" />
+                <span className="leading-relaxed">{txt.cloudActiveDesc}</span>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <p className="text-xs text-gray-600 leading-relaxed">{txt.cloudSetupIntro}</p>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                  <button
+                    type="button"
+                    onClick={handleCopyCloudSql}
+                    className="px-3.5 py-2.5 bg-primary hover:bg-primary/95 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer shadow-2xs transition-all"
+                  >
+                    {copiedCloudSql ? <Check size={14} /> : <Copy size={14} />}
+                    <span>{copiedCloudSql ? txt.cloudStep1Copied : txt.cloudStep1Btn}</span>
+                  </button>
+
+                  <a
+                    href={SUPABASE_SQL_EDITOR_URL}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-3.5 py-2.5 bg-secondary hover:bg-black/5 text-primary border border-black/10 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all"
+                  >
+                    <ExternalLink size={14} />
+                    <span>{txt.cloudStep2Btn}</span>
+                  </a>
+
+                  <button
+                    type="button"
+                    onClick={handleVerifyCloudCron}
+                    disabled={isCheckingCloudCron}
+                    className="px-3.5 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer shadow-2xs transition-all"
+                  >
+                    <RefreshCw size={14} className={isCheckingCloudCron ? 'animate-spin' : ''} />
+                    <span>{txt.cloudVerifyBtn}</span>
+                  </button>
+                </div>
+
+                <p className="text-[11px] text-gray-500">{txt.cloudStep2Hint}</p>
               </div>
             )}
           </div>

@@ -1793,17 +1793,31 @@ export const api = {
         updatedAt: draft.updatedAt || Date.now(),
       });
 
-      const res = await supabase.from('client_notes').upsert({
+      const basePayload = {
         id: draftId,
-        clientId: draft.clientId,
         date: `${cleanDate}T12:00:00.000Z`,
         motif: draft.motif ? `[BROUILLON] ${draft.motif}` : '[BROUILLON]',
         anamnese: draft.anamnese || '',
         treatment: draft.treatment || '',
         content: contentPayload,
         category: draft.category || 'treatment',
+      };
+
+      // Try snake_case client_id first (standard Supabase schema), then camelCase clientId, then minimal
+      const r1 = await supabase.from('client_notes').upsert({
+        ...basePayload,
+        client_id: draft.clientId,
       });
-      return !res.error;
+      if (!r1.error) return true;
+
+      const r2 = await supabase.from('client_notes').upsert({
+        ...basePayload,
+        clientId: draft.clientId,
+      });
+      if (!r2.error) return true;
+
+      const r3 = await supabase.from('client_notes').upsert(basePayload);
+      return !r3.error;
     } catch (err) {
       console.warn('Supabase saveRemoteDraft exception:', err);
       return false;
@@ -1829,11 +1843,10 @@ export const api = {
         await supabase.from('client_notes').delete().in('id', candidateIds);
       }
 
-      // Also clean up any legacy draft row for this client that matches this eventId or date
+      // Also clean up any draft rows matching this clientId + eventId/date without assuming clientId vs client_id column name
       const { data } = await supabase
         .from('client_notes')
-        .select('id, content, date')
-        .eq('clientId', clientId)
+        .select('*')
         .like('id', 'draft_%');
 
       if (data && data.length > 0) {
@@ -1843,7 +1856,10 @@ export const api = {
           if (row.content && typeof row.content === 'string' && row.content.trim().startsWith('{')) {
             try { meta = JSON.parse(row.content); } catch {}
           }
-          const rowEventId = meta.eventId || '';
+          const rowClientId = String(row.client_id || row.clientId || meta.clientId || '');
+          if (rowClientId !== clientId && !String(row.id).startsWith(`draft_${clientId}`)) continue;
+
+          const rowEventId = meta.eventId || row.event_id || row.eventId || '';
           const rowDate = (meta.date || (row.date ? String(row.date).split('T')[0] : '')).split('T')[0];
 
           if (eventId && rowEventId === eventId) {
