@@ -26,6 +26,7 @@ export interface StoredNotificationConfig {
   lastStatus: 'sent' | 'skipped_no_patients' | 'error' | null;
   lastError: string | null;
   cronSecret: string;
+  gcalIcsUrl?: string;
   updatedAt: number;
 }
 
@@ -106,6 +107,7 @@ export function toPublicNotificationConfig(cfg: StoredNotificationConfig): Teleg
     lastError: cfg.lastError || null,
     cronSecret: cfg.cronSecret || '',
     botUsername: cfg.botUsername || '',
+    gcalIcsUrl: cfg.gcalIcsUrl || '',
   };
 }
 
@@ -237,6 +239,7 @@ export async function saveNotificationConfig(payload: {
   includeMotif?: boolean;
   includeBono?: boolean;
   includeBlockedSlots?: boolean;
+  gcalIcsUrl?: string;
 }): Promise<TelegramConfigResponse> {
   const current = await loadRawNotificationConfig();
 
@@ -280,6 +283,10 @@ export async function saveNotificationConfig(payload: {
       typeof payload.includeBlockedSlots === 'boolean'
         ? payload.includeBlockedSlots
         : current.includeBlockedSlots !== false,
+    gcalIcsUrl:
+      typeof payload.gcalIcsUrl === 'string'
+        ? payload.gcalIcsUrl.trim()
+        : current.gcalIcsUrl || '',
   };
 
   // Validate token and auto-detect Chat ID directly against api.telegram.org (CORS enabled)
@@ -570,6 +577,7 @@ export async function getTodayAppointmentsFromSupabase(opts: {
       const cleanDesc = rawDesc
         .replace(/\[eventType:[a-z]+\]/gi, '')
         .replace(/\[type:[a-z]+\]/gi, '')
+        .replace(/\[gcalId:[^\]]+\]/gi, '')
         .trim();
 
       const startFmt = formatTimeInZone(startRaw, timeZone);

@@ -293,10 +293,21 @@ export function sortInvoicesByDate(invoicesList: Invoice[], ascending: boolean =
   });
 }
 
-function prepareDescriptionWithMeta(description?: string, eventType?: EventType): string {
-  const clean = (description || '').replace(/\[eventType:[a-z]+\]/gi, '').replace(/\[type:[a-z]+\]/gi, '').trim();
+function prepareDescriptionWithMeta(description?: string, eventType?: EventType, googleEventId?: string): string {
+  const clean = (description || '')
+    .replace(/\[eventType:[a-z]+\]/gi, '')
+    .replace(/\[type:[a-z]+\]/gi, '')
+    .replace(/\[gcalId:[^\]]+\]/gi, '')
+    .trim();
+  const tags: string[] = [];
   if (eventType && eventType !== 'appointment') {
-    return clean ? `${clean}\n[eventType:blocked]` : `[eventType:blocked]`;
+    tags.push('[eventType:blocked]');
+  }
+  if (googleEventId) {
+    tags.push(`[gcalId:${googleEventId}]`);
+  }
+  if (tags.length > 0) {
+    return clean ? `${clean}\n${tags.join(' ')}` : tags.join(' ');
   }
   return clean;
 }
@@ -304,16 +315,29 @@ function prepareDescriptionWithMeta(description?: string, eventType?: EventType)
 export function mapEventFromDB(e: any): CalendarEvent {
   const rawDesc = e.description || e.notes || e.note || '';
   let eventType: EventType | undefined = e.eventType || e.event_type || e.type;
+  let googleEventId: string | undefined = e.googleEventId || e.google_event_id || undefined;
 
-  if (!eventType && rawDesc) {
-    const match = rawDesc.match(/\[eventType:([a-z]+)\]/i) || rawDesc.match(/\[type:([a-z]+)\]/i);
-    if (match && match[1]) {
-      const parsed = match[1].toLowerCase();
-      eventType = (parsed === 'appointment') ? 'appointment' : 'blocked';
+  if (rawDesc) {
+    if (!eventType) {
+      const match = rawDesc.match(/\[eventType:([a-z]+)\]/i) || rawDesc.match(/\[type:([a-z]+)\]/i);
+      if (match && match[1]) {
+        const parsed = match[1].toLowerCase();
+        eventType = (parsed === 'appointment') ? 'appointment' : 'blocked';
+      }
+    }
+    if (!googleEventId) {
+      const gcalMatch = rawDesc.match(/\[gcalId:([^\]]+)\]/i);
+      if (gcalMatch && gcalMatch[1]) {
+        googleEventId = gcalMatch[1].trim();
+      }
     }
   }
 
-  const cleanDesc = rawDesc.replace(/\[eventType:[a-z]+\]/gi, '').replace(/\[type:[a-z]+\]/gi, '').trim();
+  const cleanDesc = rawDesc
+    .replace(/\[eventType:[a-z]+\]/gi, '')
+    .replace(/\[type:[a-z]+\]/gi, '')
+    .replace(/\[gcalId:[^\]]+\]/gi, '')
+    .trim();
   const summaryStr = e.summary || e.title || e.intitule || '';
 
   if (!eventType) {
@@ -342,6 +366,8 @@ export function mapEventFromDB(e: any): CalendarEvent {
     clientId: hasClient ? (e.clientId || e.client_id || e.clientid || e.patient_id || e.patientId) : undefined,
     clientName: hasClient ? (e.clientName || e.client_name || e.clientname || e.patient_name || e.patientName) : undefined,
     eventType: eventType || 'appointment',
+    googleEventId,
+    isGoogleEvent: Boolean(googleEventId || e.isGoogleEvent),
   };
 }
 
@@ -2285,7 +2311,7 @@ export const api = {
 
     if (isSupabaseConfigured && supabase) {
       try {
-        const descWithMeta = prepareDescriptionWithMeta(newEvent.description, newEvent.eventType);
+        const descWithMeta = prepareDescriptionWithMeta(newEvent.description, newEvent.eventType, newEvent.googleEventId);
         const snakePayload: Record<string, any> = {
           id: newEvent.id,
           summary: newEvent.summary,
@@ -2344,6 +2370,8 @@ export const api = {
             clientName: mapped.clientName || newEvent.clientName,
             summary: mapped.summary || newEvent.summary,
             eventType: mapped.eventType || newEvent.eventType,
+            googleEventId: mapped.googleEventId || newEvent.googleEventId,
+            isGoogleEvent: Boolean(mapped.googleEventId || newEvent.googleEventId || newEvent.isGoogleEvent),
           };
           return finalEvent;
         } else {
@@ -2365,7 +2393,7 @@ export const api = {
   async updateLocalEvent(event: CalendarEvent): Promise<CalendarEvent> {
     if (isSupabaseConfigured && supabase) {
       try {
-        const descWithMeta = prepareDescriptionWithMeta(event.description, event.eventType);
+        const descWithMeta = prepareDescriptionWithMeta(event.description, event.eventType, event.googleEventId);
         const snakePayload: Record<string, any> = {
           summary: event.summary,
           description: descWithMeta,
@@ -2410,6 +2438,8 @@ export const api = {
             clientName: mapped.clientName || event.clientName,
             summary: mapped.summary || event.summary,
             eventType: mapped.eventType || event.eventType,
+            googleEventId: mapped.googleEventId || event.googleEventId,
+            isGoogleEvent: Boolean(mapped.googleEventId || event.googleEventId || event.isGoogleEvent),
           };
           return finalEvent;
         } else {

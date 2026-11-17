@@ -13,7 +13,15 @@ import { Client, ClientNote, Invoice, CalendarEvent, EventType, GoogleReview, Cl
 import { api, supabase, isSupabaseConfigured, SUPABASE_SQL_SETUP, capitalizeFirstName, sortInvoicesByDate, normalizeInvoiceDescription } from '../../lib/supabase';
 import SpineLogo from '../SpineLogo';
 import TelegramSettingsPanel from './TelegramSettingsPanel';
-import { loadNotificationConfig, sendNotificationNow } from '../../lib/notificationsService';
+import { loadNotificationConfig, saveNotificationConfig, sendNotificationNow } from '../../lib/notificationsService';
+import {
+  initAuth as initGoogleAuth,
+  googleSignIn,
+  getAccessToken as getGoogleAccessToken,
+  logout as googleLogout,
+  getFirebaseProjectId,
+  calendarApi,
+} from '../../lib/googleCalendar';
 import { useTranslation } from '../../App';
 import { Language, translations } from '../../translations';
 
@@ -198,6 +206,41 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
     configured: true,
   });
 
+  // Google Calendar integration state
+  const [needsGoogleAuth, setNeedsGoogleAuth] = useState<boolean>(true);
+  const [gcalToken, setGcalToken] = useState<string | null>(null);
+  const [gcalUser, setGcalUser] = useState<{ email?: string | null; displayName?: string | null; photoURL?: string | null } | null>(null);
+  const [isGoogleLoggingIn, setIsGoogleLoggingIn] = useState<boolean>(false);
+  const [isGoogleSyncing, setIsGoogleSyncing] = useState<boolean>(false);
+  const [gcalStatusMsg, setGcalStatusMsg] = useState<{ type: 'success' | 'error' | 'info'; text: string; jumpDate?: string } | null>(null);
+  const [lastGoogleSyncAt, setLastGoogleSyncAt] = useState<string | null>(null);
+  const [gcalIcsUrl, setGcalIcsUrl] = useState<string>('');
+  const [gcalIcsInput, setGcalIcsInput] = useState<string>('');
+  const [isGcalSettingsOpen, setIsGcalSettingsOpen] = useState<boolean>(false);
+  const [isSavingIcsUrl, setIsSavingIcsUrl] = useState<boolean>(false);
+  const [gcalAuthDomainError, setGcalAuthDomainError] = useState<string | null>(null);
+  const isGoogleImportingRef = useRef<boolean>(false);
+
+  useEffect(() => {
+    const unsubscribe = initGoogleAuth(
+      (user, token) => {
+        setGcalUser({
+          email: user.email,
+          displayName: user.displayName,
+          photoURL: user.photoURL,
+        });
+        setGcalToken(token);
+        setNeedsGoogleAuth(false);
+      },
+      () => {
+        setGcalUser(null);
+        setGcalToken(null);
+        setNeedsGoogleAuth(true);
+      }
+    );
+    return () => unsubscribe();
+  }, []);
+
   useEffect(() => {
     loadNotificationConfig()
       .then(data => {
@@ -207,6 +250,10 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
             configured: Boolean(data.ntfyTopic || (data.hasBotToken && data.chatId)),
             sendTime: data.sendTime,
           });
+          if (data.gcalIcsUrl) {
+            setGcalIcsUrl(data.gcalIcsUrl);
+            setGcalIcsInput(data.gcalIcsUrl);
+          }
         }
       })
       .catch(() => {});
@@ -1150,6 +1197,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
     console.log('Setting up Realtime subscription...');
     const channel = supabase.channel('calendar-sync')
       .on('postgres_changes', { event: '*', schema: 'public' }, (payload) => {
+        if (isGoogleImportingRef.current) return;
         console.log('Realtime update received:', payload);
         loadData();
       })
@@ -2845,6 +2893,59 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
           setClients(refreshed);
         }
       }).catch(() => {});
+
+      // If connected to Google Calendar, offer to also create it on Google Calendar
+      const activeToken = (await getGoogleAccessToken()) || gcalToken;
+      if (activeToken && !needsGoogleAuth) {
+        const displayTitle = created.clientName || created.summary;
+        setConfirmDialog({
+          isOpen: true,
+          title: lang === 'fr' ? 'Ajouter à Google Calendar ?' : lang === 'es' ? '¿Añadir a Google Calendar?' : 'Add to Google Calendar?',
+          message:
+            lang === 'fr'
+              ? `Souhaitez-vous également ajouter "${displayTitle}" (${new Date(created.start).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' })}) dans votre Google Calendar ?`
+              : lang === 'es'
+              ? `¿Desea añadir también "${displayTitle}" a su Google Calendar?`
+              : `Would you also like to add "${displayTitle}" to your Google Calendar?`,
+          confirmText: lang === 'fr' ? 'Ajouter à Google Calendar' : lang === 'es' ? 'Añadir a Google Calendar' : 'Add to Google Calendar',
+          cancelText: lang === 'fr' ? 'Garder uniquement dans le cabinet' : lang === 'es' ? 'Solo en la clínica' : 'Clinic only',
+          isDangerous: false,
+          onConfirm: async () => {
+            try {
+              const gcalCreated = await calendarApi.createEvent(activeToken, created);
+              const linked = await api.updateLocalEvent({
+                ...created,
+                googleEventId: gcalCreated.googleEventId,
+                isGoogleEvent: true,
+              });
+              setEvents(prev =>
+                prev.map(ev => (ev.id === linked.id ? linked : ev)).sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime())
+              );
+              setGcalStatusMsg({
+                type: 'success',
+                text:
+                  lang === 'fr'
+                    ? `"${displayTitle}" ajouté à Google Calendar.`
+                    : lang === 'es'
+                    ? `"${displayTitle}" añadido a Google Calendar.`
+                    : `"${displayTitle}" added to Google Calendar.`,
+              });
+            } catch (err: any) {
+              if (err?.message === 'TOKEN_EXPIRED') {
+                setNeedsGoogleAuth(true);
+                setGcalToken(null);
+              }
+              setGcalStatusMsg({
+                type: 'error',
+                text:
+                  lang === 'fr'
+                    ? 'Impossible d’ajouter l’événement sur Google Calendar. Veuillez vous reconnecter.'
+                    : 'Failed to add event to Google Calendar.',
+              });
+            }
+          },
+        });
+      }
     } catch (err: any) {
       console.error('Failed to create event:', err);
       alert(lang === 'fr' ? "Erreur lors de l'enregistrement de l'événement." : "Error creating event.");
@@ -2879,11 +2980,59 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
         clientId: isOtherType ? undefined : (editingEvent.clientId || existing?.clientId),
         clientName: isOtherType ? undefined : (clientName || existing?.clientName),
         eventType: editingEvent.eventType || 'appointment',
+        googleEventId: existing?.googleEventId,
+        isGoogleEvent: existing?.isGoogleEvent,
       });
 
       setEvents(prev => prev.map(ev => ev.id === updated.id ? updated : ev).sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime()));
       setIsEditEventOpen(false);
       setEditingEvent(null);
+
+      // If connected to Google Calendar, ask user confirmation before mutating Google Calendar
+      const activeToken = (await getGoogleAccessToken()) || gcalToken;
+      if (activeToken && !needsGoogleAuth) {
+        const displayTitle = updated.clientName || updated.summary;
+        setConfirmDialog({
+          isOpen: true,
+          title: lang === 'fr' ? 'Mettre à jour Google Calendar ?' : lang === 'es' ? '¿Actualizar Google Calendar?' : 'Update Google Calendar?',
+          message:
+            lang === 'fr'
+              ? `Souhaitez-vous également mettre à jour "${displayTitle}" dans votre Google Calendar ?`
+              : lang === 'es'
+              ? `¿Desea actualizar también "${displayTitle}" en su Google Calendar?`
+              : `Would you also like to update "${displayTitle}" in your Google Calendar?`,
+          confirmText: lang === 'fr' ? 'Mettre à jour Google Calendar' : lang === 'es' ? 'Actualizar Google Calendar' : 'Update Google Calendar',
+          cancelText: lang === 'fr' ? 'Ignorer' : lang === 'es' ? 'Omitir' : 'Skip',
+          isDangerous: false,
+          onConfirm: async () => {
+            try {
+              const gcalUpdated = updated.googleEventId
+                ? await calendarApi.updateEvent(activeToken, updated.googleEventId, updated)
+                : await calendarApi.createEvent(activeToken, updated);
+              const linked = await api.updateLocalEvent({
+                ...updated,
+                googleEventId: gcalUpdated.googleEventId,
+                isGoogleEvent: true,
+              });
+              setEvents(prev =>
+                prev.map(ev => (ev.id === linked.id ? linked : ev)).sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime())
+              );
+              setGcalStatusMsg({
+                type: 'success',
+                text:
+                  lang === 'fr'
+                    ? `"${displayTitle}" mis à jour sur Google Calendar.`
+                    : `"${displayTitle}" updated on Google Calendar.`,
+              });
+            } catch (err: any) {
+              if (err?.message === 'TOKEN_EXPIRED') {
+                setNeedsGoogleAuth(true);
+                setGcalToken(null);
+              }
+            }
+          },
+        });
+      }
     } catch (err: any) {
       console.error('Failed to update event:', err);
       alert(lang === 'fr' ? "Erreur lors de la modification de l'événement." : "Error updating event.");
@@ -2893,21 +3042,33 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
   // Delete Calendar event
   const handleDeleteEvent = (eventId: string) => {
     const eventToDelete = events.find(ev => ev.id === eventId);
-    const eventTitle = eventToDelete ? eventToDelete.summary : '';
+    const eventTitle = eventToDelete ? (eventToDelete.clientName || eventToDelete.summary) : '';
+    const hasGoogleLink = Boolean(eventToDelete?.googleEventId && !needsGoogleAuth && gcalToken);
 
     setConfirmDialog({
       isOpen: true,
       title: lang === 'fr' ? 'Supprimer le rendez-vous' : lang === 'es' ? 'Eliminar cita' : 'Delete appointment',
       message: lang === 'fr' 
-        ? `Êtes-vous certain de vouloir supprimer définitivement le rendez-vous "${eventTitle}" ?`
+        ? `Êtes-vous certain de vouloir supprimer définitivement "${eventTitle}"${hasGoogleLink ? ' de l’agenda du cabinet ainsi que de votre Google Calendar' : ''} ?`
         : lang === 'es'
-        ? `¿Está seguro de que desea eliminar definitivamente la cita "${eventTitle}"?`
-        : `Are you sure you want to permanently delete appointment "${eventTitle}"?`,
-      confirmText: lang === 'fr' ? 'Supprimer le RDV' : lang === 'es' ? 'Eliminar' : 'Delete appointment',
+        ? `¿Está seguro de que desea eliminar definitivamente "${eventTitle}"${hasGoogleLink ? ' de la agenda de la clínica y de Google Calendar' : ''}?`
+        : `Are you sure you want to permanently delete "${eventTitle}"${hasGoogleLink ? ' from both the clinic schedule and Google Calendar' : ''}?`,
+      confirmText: lang === 'fr' ? 'Supprimer définitivement' : lang === 'es' ? 'Eliminar' : 'Delete appointment',
       cancelText: lang === 'fr' ? 'Annuler' : lang === 'es' ? 'Cancelar' : 'Cancel',
       isDangerous: true,
       onConfirm: async () => {
         try {
+          const activeToken = (await getGoogleAccessToken()) || gcalToken;
+          if (activeToken && eventToDelete?.googleEventId) {
+            try {
+              await calendarApi.deleteEvent(activeToken, eventToDelete.googleEventId);
+            } catch (gErr: any) {
+              if (gErr?.message === 'TOKEN_EXPIRED') {
+                setNeedsGoogleAuth(true);
+                setGcalToken(null);
+              }
+            }
+          }
           await api.deleteLocalEvent(eventId);
           setEvents(prev => prev.filter(ev => ev.id !== eventId));
           if (isEditEventOpen) {
@@ -2916,6 +3077,431 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
           }
         } catch (err: any) {
           console.error('Failed to delete event:', err);
+        }
+      },
+    });
+  };
+
+  // Import events from Google Calendar (via OAuth token and/or 24/7 Vercel iCal feed)
+  const importEventsFromGoogleCalendar = useCallback(
+    async (accessToken?: string | null, silent = false, customIcsUrl?: string) => {
+      if (isGoogleImportingRef.current) return;
+      const activeToken = accessToken ?? (await getGoogleAccessToken()) ?? gcalToken;
+      const activeIcsUrl = (customIcsUrl ?? gcalIcsUrl)?.trim();
+
+      if (!activeToken && !activeIcsUrl) return;
+
+      isGoogleImportingRef.current = true;
+      if (!silent) {
+        setIsGoogleSyncing(true);
+        setGcalStatusMsg(null);
+      }
+
+      try {
+        const timeMinDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+        const timeMaxDate = new Date(Date.now() + 180 * 24 * 60 * 60 * 1000);
+        const timeMin = timeMinDate.toISOString();
+        const timeMax = timeMaxDate.toISOString();
+
+        let gcalEvents: CalendarEvent[] = [];
+        let fetchedFromOAuth = false;
+
+        if (activeToken) {
+          try {
+            gcalEvents = await calendarApi.fetchEvents(activeToken, timeMin, timeMax);
+            fetchedFromOAuth = true;
+          } catch (oauthErr: any) {
+            if (oauthErr?.message === 'TOKEN_EXPIRED') {
+              setNeedsGoogleAuth(true);
+              setGcalToken(null);
+            }
+            if (!activeIcsUrl) throw oauthErr;
+          }
+        }
+
+        if (!fetchedFromOAuth && activeIcsUrl) {
+          gcalEvents = await calendarApi.fetchIcsFeedEvents(activeIcsUrl);
+        }
+
+        // Read fresh events and clients directly from Supabase/local storage to avoid stale closure state
+        const [freshLocalEvents, freshClients] = await Promise.all([
+          api.getLocalEvents(),
+          api.getClients(),
+        ]);
+
+        const clientList = freshClients.length > 0 ? freshClients : clients;
+        const currentEvents = [...freshLocalEvents];
+
+        let importedCount = 0;
+        let updatedFromGcalCount = 0;
+        let deletedFromGcalCount = 0;
+        let lastImportedDateStr: string | undefined;
+        let lastImportedLabel: string | undefined;
+
+        const seenGoogleIds = new Set<string>();
+
+        for (const gEv of gcalEvents) {
+          if (gEv.googleEventId) {
+            seenGoogleIds.add(gEv.googleEventId);
+          }
+
+          const existingIdx = currentEvents.findIndex(
+            loc =>
+              (gEv.googleEventId && loc.googleEventId === gEv.googleEventId) ||
+              loc.id === gEv.id ||
+              (Math.abs(new Date(loc.start).getTime() - new Date(gEv.start).getTime()) < 60000 &&
+                (loc.summary?.trim().toLowerCase() === gEv.summary?.trim().toLowerCase() ||
+                  loc.clientName?.trim().toLowerCase() === gEv.summary?.trim().toLowerCase() ||
+                  loc.summary?.trim().toLowerCase() === gEv.clientName?.trim().toLowerCase()))
+          );
+
+          const matchingClient = clientList.find(
+            c =>
+              c.name.trim().toLowerCase() === (gEv.clientName || gEv.summary).trim().toLowerCase() ||
+              `${c.firstName} ${c.lastName}`.trim().toLowerCase() === (gEv.clientName || gEv.summary).trim().toLowerCase()
+          );
+
+          if (existingIdx !== -1) {
+            const existingMatch = currentEvents[existingIdx];
+            const startChanged =
+              Math.abs(new Date(existingMatch.start).getTime() - new Date(gEv.start).getTime()) > 1000;
+            const endChanged =
+              Math.abs(new Date(existingMatch.end).getTime() - new Date(gEv.end).getTime()) > 1000;
+            const summaryChanged =
+              existingMatch.summary?.trim() !== gEv.summary?.trim() &&
+              `${existingMatch.clientName || ''} — ${existingMatch.summary || ''}`.trim() !== gEv.summary?.trim();
+            const needsGoogleIdLink = !existingMatch.googleEventId && Boolean(gEv.googleEventId);
+
+            if (startChanged || endChanged || summaryChanged || needsGoogleIdLink) {
+              const updatedLoc = await api.updateLocalEvent({
+                ...existingMatch,
+                summary: gEv.summary || existingMatch.summary,
+                description: gEv.description || existingMatch.description,
+                start: gEv.start,
+                end: gEv.end,
+                clientId: existingMatch.clientId || matchingClient?.id || gEv.clientId,
+                clientName:
+                  existingMatch.clientName ||
+                  matchingClient?.name ||
+                  (gEv.eventType !== 'blocked' ? gEv.clientName || gEv.summary : undefined),
+                eventType: existingMatch.eventType || (matchingClient ? 'appointment' : gEv.eventType || 'appointment'),
+                googleEventId: gEv.googleEventId || existingMatch.googleEventId,
+                isGoogleEvent: true,
+              });
+              currentEvents[existingIdx] = updatedLoc;
+              if (startChanged || endChanged || summaryChanged) {
+                updatedFromGcalCount += 1;
+              }
+            }
+          } else {
+            // New event added in Google Calendar -> create in clinic schedule (Supabase + local)
+            const resolvedType: EventType = matchingClient
+              ? 'appointment'
+              : gEv.eventType || 'appointment';
+            const resolvedClientName =
+              resolvedType === 'blocked'
+                ? undefined
+                : matchingClient?.name || gEv.clientName || gEv.summary;
+
+            const createdLoc = await api.createLocalEvent({
+              summary: gEv.summary,
+              description: gEv.description || '',
+              start: gEv.start,
+              end: gEv.end,
+              clientId: matchingClient?.id || gEv.clientId,
+              clientName: resolvedClientName,
+              eventType: resolvedType,
+              googleEventId: gEv.googleEventId,
+              isGoogleEvent: true,
+            });
+            currentEvents.push(createdLoc);
+            importedCount += 1;
+            const dt = new Date(createdLoc.start);
+            if (!isNaN(dt.getTime())) {
+              const y = dt.getFullYear();
+              const m = String(dt.getMonth() + 1).padStart(2, '0');
+              const d = String(dt.getDate()).padStart(2, '0');
+              lastImportedDateStr = `${y}-${m}-${d}`;
+              lastImportedLabel = `${createdLoc.clientName || createdLoc.summary} (${dt.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' })} à ${dt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})`;
+            }
+          }
+        }
+
+        // Remove events that had a googleEventId in the fetched time window but were deleted in Google Calendar
+        const minWindowMs = timeMinDate.getTime();
+        const maxWindowMs = timeMaxDate.getTime();
+        const remainingEvents: CalendarEvent[] = [];
+
+        for (const loc of currentEvents) {
+          const evMs = new Date(loc.start).getTime();
+          const inWindow = !isNaN(evMs) && evMs >= minWindowMs && evMs <= maxWindowMs;
+          if (inWindow && loc.googleEventId && !seenGoogleIds.has(loc.googleEventId)) {
+            await api.deleteLocalEvent(loc.id);
+            deletedFromGcalCount += 1;
+          } else {
+            remainingEvents.push(loc);
+          }
+        }
+
+        remainingEvents.sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
+        setEvents(remainingEvents);
+        setLastGoogleSyncAt(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+
+        if (!silent || importedCount > 0 || updatedFromGcalCount > 0 || deletedFromGcalCount > 0) {
+          const partsFr: string[] = [];
+          if (importedCount > 0) {
+            partsFr.push(
+              `${importedCount} nouvel(aux) événement(s) importé(s)${lastImportedLabel ? ` : ${lastImportedLabel}` : ''}`
+            );
+          }
+          if (updatedFromGcalCount > 0) partsFr.push(`${updatedFromGcalCount} mis à jour`);
+          if (deletedFromGcalCount > 0) partsFr.push(`${deletedFromGcalCount} supprimé(s)`);
+
+          setGcalStatusMsg({
+            type: 'success',
+            jumpDate: lastImportedDateStr,
+            text:
+              partsFr.length > 0
+                ? `Google Calendar : ${partsFr.join(' · ')}.`
+                : lang === 'fr'
+                ? `Agenda synchronisé avec Google Calendar (${gcalEvents.length} événement(s) actif(s)).`
+                : lang === 'es'
+                ? `Agenda sincronizada con Google Calendar (${gcalEvents.length} evento(s)).`
+                : `Schedule synced with Google Calendar (${gcalEvents.length} event(s)).`,
+          });
+        }
+      } catch (err: any) {
+        if (!silent) {
+          setGcalStatusMsg({
+            type: 'error',
+            text:
+              lang === 'fr'
+                ? `Erreur de lecture Google Calendar : ${err?.message || 'Veuillez vous reconnecter.'}`
+                : `Google Calendar error: ${err?.message || 'Please sign in again.'}`,
+          });
+        }
+      } finally {
+        isGoogleImportingRef.current = false;
+        if (!silent) {
+          setIsGoogleSyncing(false);
+        }
+      }
+    },
+    [gcalToken, gcalIcsUrl, clients, lang]
+  );
+
+  // Automatic real-time sync with Google Calendar:
+  // 1) Whenever user switches back from Google Calendar tab to the app (window focus / visibilitychange)
+  // 2) Every 20 seconds in the background while connected or when iCal URL is saved
+  useEffect(() => {
+    if ((!gcalToken || needsGoogleAuth) && !gcalIcsUrl) return;
+
+    // Immediate sync when connection or iCal URL becomes active
+    importEventsFromGoogleCalendar(gcalToken, true, gcalIcsUrl);
+
+    const handleFocusOrVisible = () => {
+      if (document.visibilityState === 'visible') {
+        importEventsFromGoogleCalendar(gcalToken, true, gcalIcsUrl);
+      }
+    };
+
+    window.addEventListener('focus', handleFocusOrVisible);
+    document.addEventListener('visibilitychange', handleFocusOrVisible);
+
+    const interval = setInterval(() => {
+      importEventsFromGoogleCalendar(gcalToken, true, gcalIcsUrl);
+    }, 20000);
+
+    return () => {
+      window.removeEventListener('focus', handleFocusOrVisible);
+      document.removeEventListener('visibilitychange', handleFocusOrVisible);
+      clearInterval(interval);
+    };
+  }, [gcalToken, needsGoogleAuth, gcalIcsUrl, importEventsFromGoogleCalendar]);
+
+  // Save 24/7 Google Calendar iCal (.ics) URL to Supabase (works on Vercel without OAuth popup)
+  const handleSaveGcalIcsUrl = async () => {
+    setIsSavingIcsUrl(true);
+    setGcalStatusMsg(null);
+    try {
+      const cleaned = gcalIcsInput.trim();
+      await saveNotificationConfig({ gcalIcsUrl: cleaned });
+      setGcalIcsUrl(cleaned);
+      if (cleaned) {
+        await importEventsFromGoogleCalendar(gcalToken, false, cleaned);
+      } else {
+        setGcalStatusMsg({
+          type: 'info',
+          text:
+            lang === 'fr'
+              ? 'Lien iCal automatique retiré.'
+              : 'Automatic iCal link removed.',
+        });
+      }
+    } catch (err: any) {
+      setGcalStatusMsg({
+        type: 'error',
+        text: err?.message || 'Erreur lors de la sauvegarde du lien iCal.',
+      });
+    } finally {
+      setIsSavingIcsUrl(false);
+    }
+  };
+
+  // Sign in with Google button handler
+  const handleGoogleLogin = async () => {
+    setIsGoogleLoggingIn(true);
+    setGcalStatusMsg(null);
+    setGcalAuthDomainError(null);
+    try {
+      const result = await googleSignIn();
+      if (result) {
+        setGcalToken(result.accessToken);
+        setGcalUser({
+          email: result.user.email,
+          displayName: result.user.displayName,
+          photoURL: result.user.photoURL,
+        });
+        setNeedsGoogleAuth(false);
+        await importEventsFromGoogleCalendar(result.accessToken, false);
+      }
+    } catch (err: any) {
+      console.error('Google Calendar login failed:', err);
+      const code = String(err?.code || err?.message || '');
+      if (code.includes('unauthorized-domain')) {
+        const host = typeof window !== 'undefined' ? window.location.hostname : 'www.osteovalencia.com';
+        setGcalAuthDomainError(host);
+        setIsGcalSettingsOpen(true);
+        setGcalStatusMsg({
+          type: 'error',
+          text:
+            lang === 'fr'
+              ? `Domaine "${host}" à autoriser dans Firebase Console (voir les instructions ci-dessous), ou utilisez le lien iCal 24h/24.`
+              : `Domain "${host}" needs to be added in Firebase Authorized Domains, or use the 24/7 iCal link below.`,
+        });
+      } else {
+        setGcalStatusMsg({
+          type: 'error',
+          text:
+            lang === 'fr'
+              ? 'Connexion Google annulée ou bloquée par le navigateur.'
+              : 'Google sign-in cancelled or blocked by browser.',
+        });
+      }
+    } finally {
+      setIsGoogleLoggingIn(false);
+    }
+  };
+
+  const handleGoogleLogout = async () => {
+    await googleLogout();
+    setGcalToken(null);
+    setGcalUser(null);
+    setNeedsGoogleAuth(true);
+    setGcalStatusMsg({
+      type: 'info',
+      text:
+        lang === 'fr'
+          ? 'Compte Google Calendar déconnecté.'
+          : lang === 'es'
+          ? 'Cuenta de Google Calendar desconectada.'
+          : 'Google Calendar account disconnected.',
+    });
+  };
+
+  // Two-way sync with explicit user confirmation before writing to Google Calendar
+  const handleSyncClinicToGoogleCalendar = async () => {
+    const activeToken = (await getGoogleAccessToken()) || gcalToken;
+    if (!activeToken) {
+      setNeedsGoogleAuth(true);
+      return;
+    }
+
+    const minTime = Date.now() - 7 * 24 * 60 * 60 * 1000;
+    const maxTime = Date.now() + 90 * 24 * 60 * 60 * 1000;
+    const candidates = events.filter(ev => {
+      const t = new Date(ev.start).getTime();
+      return !isNaN(t) && t >= minTime && t <= maxTime;
+    });
+    const toExportCount = candidates.filter(ev => !ev.googleEventId).length;
+    const toUpdateCount = candidates.filter(ev => Boolean(ev.googleEventId)).length;
+
+    setConfirmDialog({
+      isOpen: true,
+      title:
+        lang === 'fr'
+          ? 'Synchroniser avec Google Calendar'
+          : lang === 'es'
+          ? 'Sincronizar con Google Calendar'
+          : 'Sync with Google Calendar',
+      message:
+        lang === 'fr'
+          ? `Confirmez-vous la synchronisation bidirectionnelle avec Google Calendar (${gcalUser?.email || 'votre compte'}) ?\n• ${toExportCount} nouveau(x) RDV / créneau(x) du cabinet seront ajoutés à Google Calendar\n• ${toUpdateCount} événement(s) déjà liés seront mis à jour\n• Les nouveaux événements de Google Calendar seront importés dans votre agenda.`
+          : lang === 'es'
+          ? `¿Confirma la sincronización bidireccional con Google Calendar (${gcalUser?.email || 'su cuenta'})? (${toExportCount} nuevos eventos por exportar, ${toUpdateCount} por actualizar)`
+          : `Confirm two-way sync with Google Calendar (${gcalUser?.email || 'your account'})? (${toExportCount} new clinic events will be added and ${toUpdateCount} updated on Google Calendar)`,
+      confirmText:
+        lang === 'fr'
+          ? 'Confirmer la synchronisation'
+          : lang === 'es'
+          ? 'Confirmar sincronización'
+          : 'Confirm sync',
+      cancelText: lang === 'fr' ? 'Annuler' : lang === 'es' ? 'Cancelar' : 'Cancel',
+      isDangerous: false,
+      onConfirm: async () => {
+        setIsGoogleSyncing(true);
+        setGcalStatusMsg(null);
+        try {
+          let exported = 0;
+          let updatedCount = 0;
+          const nextEvents = [...events];
+
+          for (let i = 0; i < nextEvents.length; i++) {
+            const ev = nextEvents[i];
+            const t = new Date(ev.start).getTime();
+            if (isNaN(t) || t < minTime || t > maxTime) continue;
+
+            if (!ev.googleEventId) {
+              const createdGcal = await calendarApi.createEvent(activeToken, ev);
+              const savedLoc = await api.updateLocalEvent({
+                ...ev,
+                googleEventId: createdGcal.googleEventId,
+                isGoogleEvent: true,
+              });
+              nextEvents[i] = savedLoc;
+              exported += 1;
+            } else {
+              await calendarApi.updateEvent(activeToken, ev.googleEventId, ev);
+              updatedCount += 1;
+            }
+          }
+
+          setEvents(nextEvents);
+          await importEventsFromGoogleCalendar(activeToken);
+          setLastGoogleSyncAt(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+          setGcalStatusMsg({
+            type: 'success',
+            text:
+              lang === 'fr'
+                ? `Synchronisation terminée : ${exported} ajouté(s), ${updatedCount} mis à jour sur Google Calendar.`
+                : lang === 'es'
+                ? `Sincronización completada: ${exported} añadido(s), ${updatedCount} actualizado(s).`
+                : `Sync complete: ${exported} added, ${updatedCount} updated on Google Calendar.`,
+          });
+        } catch (err: any) {
+          if (err?.message === 'TOKEN_EXPIRED') {
+            setNeedsGoogleAuth(true);
+            setGcalToken(null);
+          }
+          setGcalStatusMsg({
+            type: 'error',
+            text:
+              lang === 'fr'
+                ? 'Erreur lors de la synchronisation avec Google Calendar. Veuillez vous reconnecter.'
+                : 'Error syncing with Google Calendar. Please sign in again.',
+          });
+        } finally {
+          setIsGoogleSyncing(false);
         }
       },
     });
@@ -5795,12 +6381,17 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                 </div>
 
                 <button 
-                  onClick={loadData}
-                  disabled={isSyncing}
+                  onClick={async () => {
+                    await loadData();
+                    if ((gcalToken && !needsGoogleAuth) || gcalIcsUrl) {
+                      await importEventsFromGoogleCalendar(gcalToken, false, gcalIcsUrl);
+                    }
+                  }}
+                  disabled={isSyncing || isGoogleSyncing}
                   className="flex items-center gap-1.5 px-3 py-2 bg-white border border-slate-200 hover:bg-slate-50 rounded-2xl transition-all text-xs font-bold text-slate-700 disabled:opacity-50 shadow-2xs cursor-pointer whitespace-nowrap shrink-0"
-                  title={lang === 'fr' ? "Actualiser l'agenda" : "Refresh"}
+                  title={lang === 'fr' ? "Actualiser l'agenda et Google Calendar" : "Refresh"}
                 >
-                  <RefreshCw size={14} className={`shrink-0 ${isSyncing ? "animate-spin text-[#0e9f8e]" : ""}`} />
+                  <RefreshCw size={14} className={`shrink-0 ${(isSyncing || isGoogleSyncing) ? "animate-spin text-[#0e9f8e]" : ""}`} />
                   <span className="whitespace-nowrap">{lang === 'fr' ? "Actualiser" : "Refresh"}</span>
                 </button>
 
@@ -5812,6 +6403,263 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                   <span className="whitespace-nowrap">{lang === 'fr' ? "Nouveau RDV" : lang === 'es' ? "Nueva Cita" : "New Appointment"}</span>
                 </button>
               </div>
+            </div>
+
+            {/* GOOGLE CALENDAR SYNCHRONIZATION BAR */}
+            <div className="bg-white p-4 sm:p-5 rounded-3xl border border-slate-200/90 shadow-xs space-y-4">
+              <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+                <div className="flex items-start sm:items-center gap-3.5">
+                  <div className="w-10 h-10 rounded-2xl bg-slate-50 border border-slate-200/80 flex items-center justify-center shrink-0 shadow-2xs">
+                    <svg className="w-5 h-5" viewBox="0 0 48 48">
+                      <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z" />
+                      <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z" />
+                      <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z" />
+                      <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z" />
+                    </svg>
+                  </div>
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h4 className="text-sm font-bold text-slate-900">
+                        Google Calendar
+                      </h4>
+                      {!needsGoogleAuth && gcalToken ? (
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md text-[11px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                          {lang === 'fr' ? 'Connecté (2 sens)' : lang === 'es' ? 'Conectado (2 vías)' : 'Connected (2-way)'}
+                          {gcalUser?.email ? ` · ${gcalUser.email}` : ''}
+                        </span>
+                      ) : gcalIcsUrl ? (
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md text-[11px] font-semibold bg-cyan-50 text-cyan-800 border border-cyan-200">
+                          <span className="w-1.5 h-1.5 rounded-full bg-cyan-500 animate-pulse" />
+                          {lang === 'fr' ? 'Synchro auto iCal 24h/24 active' : '24/7 Auto iCal Sync active'}
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md text-[11px] font-medium bg-slate-100 text-slate-600">
+                          {lang === 'fr' ? 'Non connecté' : lang === 'es' ? 'No conectado' : 'Not connected'}
+                        </span>
+                      )}
+                      {lastGoogleSyncAt && ((!needsGoogleAuth && gcalToken) || gcalIcsUrl) && (
+                        <span className="text-[11px] text-slate-400">
+                          {lang === 'fr' ? `Synchro auto : ${lastGoogleSyncAt}` : `Auto sync: ${lastGoogleSyncAt}`}
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      {lang === 'fr'
+                        ? 'Synchronisation automatique toutes les 20s et dès que vous revenez sur l’application après un ajout dans Google Calendar.'
+                        : lang === 'es'
+                        ? 'Sincronización automática cada 20s y al volver a la aplicación tras añadir un evento en Google Calendar.'
+                        : 'Automatic sync every 20s and whenever you switch back to the app after adding an event in Google Calendar.'}
+                    </p>
+                    {gcalStatusMsg && (
+                      <div className="flex flex-wrap items-center gap-2 mt-1.5">
+                        <p
+                          className={`text-xs font-medium ${
+                            gcalStatusMsg.type === 'success'
+                              ? 'text-emerald-600'
+                              : gcalStatusMsg.type === 'error'
+                              ? 'text-rose-600'
+                              : 'text-slate-600'
+                          }`}
+                        >
+                          {gcalStatusMsg.text}
+                        </p>
+                        {gcalStatusMsg.jumpDate && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const [y, m, d] = gcalStatusMsg.jumpDate!.split('-').map(Number);
+                              if (y && m && d) {
+                                setCurrentCalendarDate(new Date(y, m - 1, d));
+                              }
+                            }}
+                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 text-[11px] font-semibold cursor-pointer"
+                          >
+                            <CalendarIcon size={11} />
+                            <span>{lang === 'fr' ? 'Aller à cette date' : 'Go to date'}</span>
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2 w-full md:w-auto justify-end">
+                  {needsGoogleAuth || !gcalToken ? (
+                    <button
+                      type="button"
+                      onClick={handleGoogleLogin}
+                      disabled={isGoogleLoggingIn}
+                      className="gsi-material-button inline-flex items-center gap-3 px-4 py-2.5 bg-white hover:bg-slate-50 text-slate-800 border border-slate-300 rounded-xl text-xs font-semibold shadow-2xs transition-all cursor-pointer disabled:opacity-60"
+                    >
+                      <div className="gsi-material-button-state" />
+                      <div className="gsi-material-button-content-wrapper flex items-center gap-2.5">
+                        <div className="gsi-material-button-icon w-4 h-4 shrink-0">
+                          <svg version="1.1" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" className="w-4 h-4 block">
+                            <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z" />
+                            <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z" />
+                            <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z" />
+                            <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z" />
+                            <path fill="none" d="M0 0h48v48H0z" />
+                          </svg>
+                        </div>
+                        <span className="gsi-material-button-contents">
+                          {isGoogleLoggingIn
+                            ? lang === 'fr'
+                              ? 'Connexion...'
+                              : 'Signing in...'
+                            : lang === 'fr'
+                            ? 'Sign in with Google · Relier Google Calendar'
+                            : lang === 'es'
+                            ? 'Sign in with Google · Conectar Google Calendar'
+                            : 'Sign in with Google'}
+                        </span>
+                      </div>
+                    </button>
+                  ) : (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => importEventsFromGoogleCalendar(gcalToken, false)}
+                        disabled={isGoogleSyncing}
+                        className="flex items-center gap-1.5 px-3.5 py-2 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 transition-all cursor-pointer disabled:opacity-50"
+                      >
+                        <RefreshCw size={13} className={isGoogleSyncing ? 'animate-spin text-[#0e9f8e]' : ''} />
+                        <span>
+                          {lang === 'fr' ? 'Importer de Google' : lang === 'es' ? 'Importar de Google' : 'Import from Google'}
+                        </span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={handleSyncClinicToGoogleCalendar}
+                        disabled={isGoogleSyncing}
+                        className="flex items-center gap-1.5 px-3.5 py-2 bg-[#009cb2] hover:bg-[#008699] text-white rounded-xl text-xs font-semibold shadow-2xs transition-all cursor-pointer disabled:opacity-50"
+                      >
+                        <RefreshCw size={13} className={isGoogleSyncing ? 'animate-spin' : ''} />
+                        <span>
+                          {lang === 'fr'
+                            ? 'Synchroniser (2 sens)'
+                            : lang === 'es'
+                            ? 'Sincronizar (2 vías)'
+                            : 'Two-Way Sync'}
+                        </span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={handleGoogleLogout}
+                        className="flex items-center gap-1.5 px-3 py-2 bg-white hover:bg-rose-50 border border-slate-200 hover:border-rose-200 rounded-xl text-xs font-medium text-slate-600 hover:text-rose-600 transition-all cursor-pointer"
+                      >
+                        <LogOut size={13} />
+                        <span>{lang === 'fr' ? 'Déconnecter' : lang === 'es' ? 'Desconectar' : 'Disconnect'}</span>
+                      </button>
+                    </>
+                  )}
+
+                  {gcalIcsUrl && (needsGoogleAuth || !gcalToken) && (
+                    <button
+                      type="button"
+                      onClick={() => importEventsFromGoogleCalendar(null, false, gcalIcsUrl)}
+                      disabled={isGoogleSyncing}
+                      className="flex items-center gap-1.5 px-3.5 py-2 bg-cyan-50 hover:bg-cyan-100 border border-cyan-200 rounded-xl text-xs font-semibold text-cyan-900 transition-all cursor-pointer disabled:opacity-50"
+                    >
+                      <RefreshCw size={13} className={isGoogleSyncing ? 'animate-spin text-[#009cb2]' : ''} />
+                      <span>{lang === 'fr' ? 'Forcer synchro iCal' : 'Sync iCal now'}</span>
+                    </button>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={() => setIsGcalSettingsOpen(prev => !prev)}
+                    className={`flex items-center gap-1.5 px-3 py-2 rounded-xl border text-xs font-semibold transition-all cursor-pointer ${
+                      isGcalSettingsOpen || gcalAuthDomainError
+                        ? 'bg-slate-900 text-white border-slate-900'
+                        : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-200'
+                    }`}
+                  >
+                    <Cloud size={13} />
+                    <span>{lang === 'fr' ? 'Config Vercel / 24h/24' : 'Vercel / 24-7 Setup'}</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* COLLAPSIBLE VERCEL & 24/7 ICAL CONFIGURATION PANEL */}
+              {(isGcalSettingsOpen || gcalAuthDomainError) && (
+                <div className="pt-3 border-t border-slate-200/80 grid grid-cols-1 lg:grid-cols-2 gap-4">
+                  {/* Left: 24/7 iCal Secret URL (Works on Vercel without any popup or domain setup) */}
+                  <div className="p-4 rounded-2xl bg-slate-50/90 border border-slate-200/80 space-y-2.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <h5 className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
+                        <Sparkles size={14} className="text-[#0e9f8e]" />
+                        {lang === 'fr'
+                          ? '1. Synchronisation automatique 24h/24 sur Vercel (Lien secret iCal .ics)'
+                          : '1. 24/7 Automatic Sync on Vercel (Secret iCal .ics URL)'}
+                      </h5>
+                    </div>
+                    <p className="text-[11px] text-slate-600 leading-relaxed">
+                      {lang === 'fr'
+                        ? 'Pour que les événements ajoutés dans Google Calendar apparaissent automatiquement sur Vercel (www.osteovalencia.com) 24h/24 sans même avoir à vous reconnecter : ouvrez Google Calendar sur ordinateur → Paramètres de votre agenda → "Adresse secrète au format iCal" et collez le lien .ics ci-dessous :'
+                        : 'To automatically import events added in Google Calendar on Vercel 24/7 without needing to re-authenticate: open Google Calendar Settings → "Secret address in iCal format" and paste the .ics link below:'}
+                    </p>
+                    <div className="flex flex-col sm:flex-row gap-2">
+                      <input
+                        type="url"
+                        value={gcalIcsInput}
+                        onChange={(e) => setGcalIcsInput(e.target.value)}
+                        placeholder="https://calendar.google.com/calendar/ical/.../basic.ics"
+                        className="flex-1 px-3 py-2 bg-white rounded-xl border border-slate-300 text-xs font-mono text-slate-800 focus:outline-none focus:border-[#009cb2]"
+                      />
+                      <button
+                        type="button"
+                        onClick={handleSaveGcalIcsUrl}
+                        disabled={isSavingIcsUrl}
+                        className="px-4 py-2 bg-[#0e9f8e] hover:bg-[#0c8a7b] text-white rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap disabled:opacity-50"
+                      >
+                        {isSavingIcsUrl
+                          ? lang === 'fr'
+                            ? 'Enregistrement...'
+                            : 'Saving...'
+                          : lang === 'fr'
+                          ? 'Enregistrer & Synchroniser'
+                          : 'Save & Sync'}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Right: Authorizing custom domain on Vercel for the "Sign in with Google" 2-way popup */}
+                  <div className="p-4 rounded-2xl bg-slate-50/90 border border-slate-200/80 space-y-2.5">
+                    <h5 className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
+                      <Shield size={14} className="text-[#009cb2]" />
+                      {lang === 'fr'
+                        ? '2. Autoriser le bouton "Sign in with Google" sur www.osteovalencia.com (Vercel)'
+                        : '2. Authorize "Sign in with Google" button on www.osteovalencia.com (Vercel)'}
+                    </h5>
+                    <p className="text-[11px] text-slate-600 leading-relaxed">
+                      {lang === 'fr'
+                        ? 'Pour utiliser aussi le bouton "Sign in with Google" (écriture vers Google Calendar) sur votre domaine Vercel, ajoutez une seule fois vos domaines dans Firebase Authentication → Settings → Authorized domains :'
+                        : 'To also use the "Sign in with Google" popup on your custom Vercel domain, add your domains once in Firebase Authentication → Settings → Authorized domains:'}
+                    </p>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <code className="px-2.5 py-1 bg-white border border-slate-200 rounded-lg text-[11px] font-mono text-slate-800">
+                        www.osteovalencia.com
+                      </code>
+                      <code className="px-2.5 py-1 bg-white border border-slate-200 rounded-lg text-[11px] font-mono text-slate-800">
+                        osteovalencia.com
+                      </code>
+                      <a
+                        href={`https://console.firebase.google.com/project/${getFirebaseProjectId()}/authentication/settings`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-slate-100 border border-slate-300 rounded-xl text-[11px] font-semibold text-slate-800 transition-all"
+                      >
+                        <span>{lang === 'fr' ? 'Ouvrir Firebase Authorized Domains' : 'Open Firebase Authorized Domains'}</span>
+                        <ExternalLink size={12} />
+                      </a>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* SHARED JANE.APP CALENDAR LOGIC & RENDER */}
@@ -6235,7 +7083,9 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                     const slotEvents = dayEvents.filter(ev => {
                                       try {
                                         const evDate = new Date(ev.start);
-                                        return evDate.getHours() === hourNum;
+                                        const h = evDate.getHours();
+                                        const clampedHour = h < 8 ? 8 : h > 20 ? 20 : h;
+                                        return clampedHour === hourNum;
                                       } catch {
                                         return false;
                                       }
@@ -6362,7 +7212,9 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                   const slotEvents = dayEvents.filter(ev => {
                                     try {
                                       const evDate = new Date(ev.start);
-                                      return evDate.getHours() === hourNum;
+                                      const h = evDate.getHours();
+                                      const clampedHour = h < 8 ? 8 : h > 20 ? 20 : h;
+                                      return clampedHour === hourNum;
                                     } catch (e) {
                                       return false;
                                     }

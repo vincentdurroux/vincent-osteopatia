@@ -77,6 +77,7 @@ export interface CalendarEvent {
   clientId?: string;
   clientName?: string;
   isGoogleEvent?: boolean;
+  googleEventId?: string;
   eventType?: EventType;
 }
 
@@ -129,6 +130,7 @@ export interface TelegramConfigResponse {
   botUsername?: string;
   ntfyTopic?: string;
   ntfyEnabled?: boolean;
+  gcalIcsUrl?: string;
 }
 
 export interface TelegramPreviewResponse {

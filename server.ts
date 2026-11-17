@@ -416,6 +416,7 @@ async function getTodayAppointments(cfg: StoredNotificationConfig): Promise<{
       const cleanDesc = rawDesc
         .replace(/\[eventType:[a-z]+\]/gi, '')
         .replace(/\[type:[a-z]+\]/gi, '')
+        .replace(/\[gcalId:[^\]]+\]/gi, '')
         .trim();
 
       const startFmt = formatTimeInZone(startRaw, timeZone);
@@ -1045,6 +1046,142 @@ async function startServer() {
 
   app.get('/api/telegram/cron', handleCronTrigger);
   app.post('/api/telegram/cron', handleCronTrigger);
+
+  // Google Calendar iCal (.ics) feed parser proxy (works identically to /api/telegram/gcal-ics.js on Vercel)
+  app.post('/api/telegram/gcal-ics', async (req: Request, res: Response) => {
+    try {
+      const icsUrl = String(req.body?.icsUrl || '').trim();
+      if (!icsUrl || !/^https?:\/\//i.test(icsUrl)) {
+        res.status(400).json({ ok: false, error: 'URL iCal (.ics) invalide.' });
+        return;
+      }
+
+      const response = await fetch(icsUrl, {
+        headers: {
+          'User-Agent': 'VincentOsteo-CalendarSync/1.0',
+          Accept: 'text/calendar, text/plain, */*',
+        },
+      });
+
+      if (!response.ok) {
+        res.status(400).json({
+          ok: false,
+          error: `Impossible de lire le flux Google Calendar (HTTP ${response.status}).`,
+        });
+        return;
+      }
+
+      const text = await response.text();
+      if (!text.includes('BEGIN:VCALENDAR')) {
+        res.status(400).json({
+          ok: false,
+          error: 'Le lien fourni ne correspond pas à un calendrier iCal (.ics) valide.',
+        });
+        return;
+      }
+
+      const unfolded = text.replace(/\r?\n[ \t]/g, '');
+      const lines = unfolded.split(/\r?\n/);
+      const blockedRegex =
+        /(?:^🔒|\b(?:bloqu[eé]|bloqueado|blocked|pause|d[eé]jeuner|almuerzo|lunch|perso|personnel|vacances|vacaciones|ferm[eé]|cerrado|indisponible|cong[eé])\b)/i;
+
+      const parseDate = (rawVal: string, isEnd = false) => {
+        const val = String(rawVal || '').trim();
+        if (/^\d{8}$/.test(val)) {
+          const y = Number(val.slice(0, 4));
+          const m = Number(val.slice(4, 6));
+          const d = Number(val.slice(6, 8));
+          return (isEnd ? new Date(y, m - 1, d, 9, 55, 0) : new Date(y, m - 1, d, 9, 0, 0)).toISOString();
+        }
+        const m = val.match(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})(Z)?$/);
+        if (m) {
+          const [, yr, mo, da, hh, mm, ss, z] = m;
+          if (z === 'Z') return new Date(`${yr}-${mo}-${da}T${hh}:${mm}:${ss}Z`).toISOString();
+          return new Date(Number(yr), Number(mo) - 1, Number(da), Number(hh), Number(mm), Number(ss)).toISOString();
+        }
+        const parsed = new Date(val);
+        return isNaN(parsed.getTime()) ? '' : parsed.toISOString();
+      };
+
+      const unescapeIcs = (s: string) =>
+        String(s || '')
+          .replace(/\\n/gi, '\n')
+          .replace(/\\,/g, ',')
+          .replace(/\\;/g, ';')
+          .replace(/\\\\/g, '\\')
+          .trim();
+
+      const parsedEvents: any[] = [];
+      let cur: any = null;
+      for (const line of lines) {
+        if (line === 'BEGIN:VEVENT') {
+          cur = {};
+          continue;
+        }
+        if (line === 'END:VEVENT') {
+          if (cur && cur.uid && cur.dtstart && cur.status !== 'CANCELLED') {
+            const isAllDay = /^\d{8}$/.test(cur.dtstart);
+            const startIso = parseDate(cur.dtstart, false);
+            const endIso = isAllDay
+              ? parseDate(cur.dtstart, true)
+              : parseDate(cur.dtend || cur.dtstart, true) || startIso;
+            if (startIso) {
+              const rawSummary = unescapeIcs(cur.summary || 'Rendez-vous Google');
+              const cleanSummary = rawSummary.replace(/^🔒\s*/, '').trim();
+              const rawDesc = unescapeIcs(cur.description || '');
+              const isBlocked =
+                rawSummary.startsWith('🔒') ||
+                blockedRegex.test(cleanSummary) ||
+                /\[eventType:blocked\]/i.test(rawDesc) ||
+                cur.transp === 'TRANSPARENT';
+
+              let clientName = cleanSummary;
+              if (cleanSummary.includes(' — ')) clientName = cleanSummary.split(' — ')[0].trim();
+              else if (cleanSummary.includes(' - ')) clientName = cleanSummary.split(' - ')[0].trim();
+
+              const cleanUid = String(cur.uid).replace(/@google\.com$/i, '');
+              parsedEvents.push({
+                id: `gcal_${cleanUid}`,
+                googleEventId: cleanUid,
+                summary: cleanSummary,
+                description: rawDesc,
+                start: startIso,
+                end: endIso,
+                clientName: isBlocked ? undefined : clientName,
+                eventType: isBlocked ? 'blocked' : 'appointment',
+                isGoogleEvent: true,
+              });
+            }
+          }
+          cur = null;
+          continue;
+        }
+        if (!cur) continue;
+        const idx = line.indexOf(':');
+        if (idx === -1) continue;
+        const prop = line.slice(0, idx).split(';')[0].toUpperCase();
+        const val = line.slice(idx + 1);
+        if (prop === 'UID') cur.uid = val.trim();
+        else if (prop === 'SUMMARY') cur.summary = val;
+        else if (prop === 'DESCRIPTION') cur.description = val;
+        else if (prop === 'DTSTART') cur.dtstart = val.trim();
+        else if (prop === 'DTEND') cur.dtend = val.trim();
+        else if (prop === 'STATUS') cur.status = val.trim().toUpperCase();
+        else if (prop === 'TRANSP') cur.transp = val.trim().toUpperCase();
+      }
+
+      const minT = Date.now() - 35 * 24 * 60 * 60 * 1000;
+      const maxT = Date.now() + 180 * 24 * 60 * 60 * 1000;
+      const filtered = parsedEvents.filter(ev => {
+        const t = new Date(ev.start).getTime();
+        return !isNaN(t) && t >= minT && t <= maxT;
+      });
+
+      res.json({ ok: true, count: filtered.length, events: filtered });
+    } catch (err: any) {
+      res.status(500).json({ ok: false, error: err?.message || 'Erreur lecture iCal' });
+    }
+  });
 
   // Vite dev middleware OR production static dist
   if (!IS_PROD) {
