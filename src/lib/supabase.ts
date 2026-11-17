@@ -189,9 +189,27 @@ export function mapClientFromDB(c: any): Client {
     lastSessionAt: c.lastSessionAt || c.last_session_at,
     defaultDiscount: c.defaultDiscount !== undefined ? Number(c.defaultDiscount) : (c.default_discount !== undefined ? Number(c.default_discount) : undefined),
     profileNote: c.profileNote || c.profile_note || c.remarque || c.note || '',
-    hasBono: Boolean(c.hasBono || c.has_bono || false),
+    hasBono: Boolean(
+      (c.hasBono || c.has_bono || false) &&
+        Number(
+          c.bonoSessionsRemaining !== undefined
+            ? c.bonoSessionsRemaining
+            : c.bono_sessions_remaining !== undefined
+            ? c.bono_sessions_remaining
+            : 0
+        ) > 0
+    ),
     bonoType: c.bonoType || c.bono_type || '',
-    bonoSessionsRemaining: c.bonoSessionsRemaining !== undefined ? Number(c.bonoSessionsRemaining) : (c.bono_sessions_remaining !== undefined ? Number(c.bono_sessions_remaining) : 0),
+    bonoSessionsRemaining: Math.max(
+      0,
+      Number(
+        c.bonoSessionsRemaining !== undefined
+          ? c.bonoSessionsRemaining
+          : c.bono_sessions_remaining !== undefined
+          ? c.bono_sessions_remaining
+          : 0
+      )
+    ),
     bonoRedeemedDates: c.bonoRedeemedDates || c.bono_redeemed_dates || [],
   };
 }

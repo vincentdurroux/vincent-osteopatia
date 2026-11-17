@@ -1572,13 +1572,15 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
   const getClientActiveBonoInfo = (client: Client | null) => {
     if (!client) return { hasBono: false, remaining: 0, bonoType: '' };
     
-    // 1. Primary Source of Truth: if client.hasBono is true and bonoSessionsRemaining is defined on the client model (synced 1:1 with Supabase column bono_sessions_remaining)
-    if (client.hasBono && client.bonoSessionsRemaining !== undefined && client.bonoSessionsRemaining !== null && !isNaN(Number(client.bonoSessionsRemaining))) {
-      const remaining = Math.max(0, Number(client.bonoSessionsRemaining));
+    // 1. Primary Source of Truth: if bonoSessionsRemaining is defined on the client model (synced 1:1 with Supabase column bono_sessions_remaining)
+    if (client.bonoSessionsRemaining !== undefined && client.bonoSessionsRemaining !== null && !isNaN(Number(client.bonoSessionsRemaining))) {
+      const remaining = client.hasBono ? Math.max(0, Number(client.bonoSessionsRemaining)) : 0;
       return {
-        hasBono: remaining > 0,
+        hasBono: Boolean(client.hasBono && remaining > 0),
         remaining,
-        bonoType: client.bonoType || (lang === 'fr' ? 'Bono 3 séances' : lang === 'es' ? 'Bono 3 sesiones' : 'Bono 3 sessions'),
+        bonoType: remaining > 0
+          ? (client.bonoType || (lang === 'fr' ? 'Bono 3 séances' : lang === 'es' ? 'Bono 3 sesiones' : 'Bono 3 sessions'))
+          : '',
       };
     }
 
@@ -1932,6 +1934,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
 
             const updatedClient: Client = {
               ...client,
+              hasBono: newRemaining > 0,
               bonoSessionsRemaining: newRemaining,
               bonoRedeemedDates: newDates,
             };
@@ -2115,6 +2118,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
 
           const updatedClient = await api.updateClient({
             ...selectedClient,
+            hasBono: newRem > 0,
             bonoSessionsRemaining: newRem,
             bonoRedeemedDates: newDates,
           });
@@ -2176,11 +2180,16 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
       const fullName = `${formattedLastName} ${formattedFirstName}`;
       const oldClientName = editingClient.name;
 
+      const normalizedRemaining = Math.max(0, Number(editingClient.bonoSessionsRemaining ?? 0));
+      const normalizedHasBono = Boolean(editingClient.hasBono && normalizedRemaining > 0);
+
       const updated = await api.updateClient({
         ...editingClient,
         firstName: formattedFirstName,
         lastName: formattedLastName,
         name: fullName,
+        hasBono: normalizedHasBono,
+        bonoSessionsRemaining: normalizedHasBono ? normalizedRemaining : 0,
       });
 
       setClients(prev => prev.map(c => c.id === updated.id ? updated : c).sort((a, b) => a.name.localeCompare(b.name)));
@@ -4793,17 +4802,15 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                             )}
                           </div>
                           
-                          {/* Bono / Discount status */}
-                          {selectedClient.hasBono && (
+                          {/* Bono / Discount status (hidden automatically when remaining sessions === 0, reappears when purchasing a new 3 or 5 session Bono) */}
+                          {selectedClient.hasBono && (selectedClient.bonoSessionsRemaining ?? 0) > 0 && (
                             <div className="flex flex-wrap items-center gap-2 mt-2">
                               <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-emerald-50 text-emerald-800 border border-emerald-200/70">
                                 <BadgePercent size={13} className="text-emerald-600" />
                                 <span>{formatLocalizedBonoText(selectedClient.bonoType, lang) || 'Bono'}</span>
-                                {typeof selectedClient.bonoSessionsRemaining === 'number' && (
-                                  <span className="text-emerald-800 font-bold bg-white px-2 py-0.5 rounded-full text-[10px] shadow-xs border border-emerald-200">
-                                    {selectedClient.bonoSessionsRemaining} {lang === 'fr' ? 'séance(s) restante(s)' : lang === 'es' ? 'sesión(es) restante(s)' : 'remaining session(s)'}
-                                  </span>
-                                )}
+                                <span className="text-emerald-800 font-bold bg-white px-2 py-0.5 rounded-full text-[10px] shadow-xs border border-emerald-200">
+                                  {selectedClient.bonoSessionsRemaining} {lang === 'fr' ? 'séance(s) restante(s)' : lang === 'es' ? 'sesión(es) restante(s)' : 'remaining session(s)'}
+                                </span>
                               </span>
                               <button
                                 type="button"
@@ -5198,7 +5205,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                   bonoInvoice ||
                                   associatedNotes.some(n => n.isBonoRedeemed) || 
                                   (selectedClient?.bonoRedeemedDates && selectedClient.bonoRedeemedDates.includes(evDateStr)) ||
-                                  Boolean(bonoPurchaseInvoice && selectedClient?.hasBono)
+                                  Boolean(bonoPurchaseInvoice)
                                 );
 
                                 const standardPaidInvoice = associatedInvoices.find(inv => inv.status === 'paid' && inv.amount > 0 && !inv.isBonoRedemption && inv.discountType !== 'bono');
@@ -5986,7 +5993,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                 note.isBonoRedeemed || 
                                 isZeroBonoInvoice ||
                                 (selectedClient?.bonoRedeemedDates && selectedClient.bonoRedeemedDates.includes(noteDateOnly)) ||
-                                (isBonoPurchaseInvoice && Boolean(selectedClient?.hasBono))
+                                Boolean(isBonoPurchaseInvoice)
                               );
 
                               return isNoteBonoRedeemed ? (
@@ -6535,263 +6542,6 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                   <span className="whitespace-nowrap">{lang === 'fr' ? "Nouveau RDV" : lang === 'es' ? "Nueva Cita" : "New Appointment"}</span>
                 </button>
               </div>
-            </div>
-
-            {/* GOOGLE CALENDAR SYNCHRONIZATION BAR */}
-            <div className="bg-white p-4 sm:p-5 rounded-3xl border border-slate-200/90 shadow-xs space-y-4">
-              <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-                <div className="flex items-start sm:items-center gap-3.5">
-                  <div className="w-10 h-10 rounded-2xl bg-slate-50 border border-slate-200/80 flex items-center justify-center shrink-0 shadow-2xs">
-                    <svg className="w-5 h-5" viewBox="0 0 48 48">
-                      <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z" />
-                      <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z" />
-                      <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z" />
-                      <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z" />
-                    </svg>
-                  </div>
-                  <div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <h4 className="text-sm font-bold text-slate-900">
-                        Google Calendar
-                      </h4>
-                      {!needsGoogleAuth && gcalToken ? (
-                        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md text-[11px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                          {lang === 'fr' ? 'Connecté (2 sens)' : lang === 'es' ? 'Conectado (2 vías)' : 'Connected (2-way)'}
-                          {gcalUser?.email ? ` · ${gcalUser.email}` : ''}
-                        </span>
-                      ) : gcalIcsUrl ? (
-                        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md text-[11px] font-semibold bg-cyan-50 text-cyan-800 border border-cyan-200">
-                          <span className="w-1.5 h-1.5 rounded-full bg-cyan-500 animate-pulse" />
-                          {lang === 'fr' ? 'Synchro auto iCal 24h/24 active' : '24/7 Auto iCal Sync active'}
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md text-[11px] font-medium bg-slate-100 text-slate-600">
-                          {lang === 'fr' ? 'Non connecté' : lang === 'es' ? 'No conectado' : 'Not connected'}
-                        </span>
-                      )}
-                      {lastGoogleSyncAt && ((!needsGoogleAuth && gcalToken) || gcalIcsUrl) && (
-                        <span className="text-[11px] text-slate-400">
-                          {lang === 'fr' ? `Synchro auto : ${lastGoogleSyncAt}` : `Auto sync: ${lastGoogleSyncAt}`}
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-xs text-slate-500 mt-0.5">
-                      {lang === 'fr'
-                        ? 'Synchronisation automatique toutes les 20s et dès que vous revenez sur l’application après un ajout dans Google Calendar.'
-                        : lang === 'es'
-                        ? 'Sincronización automática cada 20s y al volver a la aplicación tras añadir un evento en Google Calendar.'
-                        : 'Automatic sync every 20s and whenever you switch back to the app after adding an event in Google Calendar.'}
-                    </p>
-                    {gcalStatusMsg && (
-                      <div className="flex flex-wrap items-center gap-2 mt-1.5">
-                        <p
-                          className={`text-xs font-medium ${
-                            gcalStatusMsg.type === 'success'
-                              ? 'text-emerald-600'
-                              : gcalStatusMsg.type === 'error'
-                              ? 'text-rose-600'
-                              : 'text-slate-600'
-                          }`}
-                        >
-                          {gcalStatusMsg.text}
-                        </p>
-                        {gcalStatusMsg.jumpDate && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const [y, m, d] = gcalStatusMsg.jumpDate!.split('-').map(Number);
-                              if (y && m && d) {
-                                setCurrentCalendarDate(new Date(y, m - 1, d));
-                              }
-                            }}
-                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 text-[11px] font-semibold cursor-pointer"
-                          >
-                            <CalendarIcon size={11} />
-                            <span>{lang === 'fr' ? 'Aller à cette date' : 'Go to date'}</span>
-                          </button>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                <div className="flex flex-wrap items-center gap-2 w-full md:w-auto justify-end">
-                  {needsGoogleAuth || !gcalToken ? (
-                    <button
-                      type="button"
-                      onClick={handleGoogleLogin}
-                      disabled={isGoogleLoggingIn}
-                      className="gsi-material-button inline-flex items-center gap-3 px-4 py-2.5 bg-white hover:bg-slate-50 text-slate-800 border border-slate-300 rounded-xl text-xs font-semibold shadow-2xs transition-all cursor-pointer disabled:opacity-60"
-                    >
-                      <div className="gsi-material-button-state" />
-                      <div className="gsi-material-button-content-wrapper flex items-center gap-2.5">
-                        <div className="gsi-material-button-icon w-4 h-4 shrink-0">
-                          <svg version="1.1" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" className="w-4 h-4 block">
-                            <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z" />
-                            <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z" />
-                            <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z" />
-                            <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z" />
-                            <path fill="none" d="M0 0h48v48H0z" />
-                          </svg>
-                        </div>
-                        <span className="gsi-material-button-contents">
-                          {isGoogleLoggingIn
-                            ? lang === 'fr'
-                              ? 'Connexion...'
-                              : 'Signing in...'
-                            : lang === 'fr'
-                            ? 'Sign in with Google · Relier Google Calendar'
-                            : lang === 'es'
-                            ? 'Sign in with Google · Conectar Google Calendar'
-                            : 'Sign in with Google'}
-                        </span>
-                      </div>
-                    </button>
-                  ) : (
-                    <>
-                      <button
-                        type="button"
-                        onClick={() => importEventsFromGoogleCalendar(gcalToken, false)}
-                        disabled={isGoogleSyncing}
-                        className="flex items-center gap-1.5 px-3.5 py-2 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 transition-all cursor-pointer disabled:opacity-50"
-                      >
-                        <RefreshCw size={13} className={isGoogleSyncing ? 'animate-spin text-[#0e9f8e]' : ''} />
-                        <span>
-                          {lang === 'fr' ? 'Importer de Google' : lang === 'es' ? 'Importar de Google' : 'Import from Google'}
-                        </span>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={handleSyncClinicToGoogleCalendar}
-                        disabled={isGoogleSyncing}
-                        className="flex items-center gap-1.5 px-3.5 py-2 bg-[#009cb2] hover:bg-[#008699] text-white rounded-xl text-xs font-semibold shadow-2xs transition-all cursor-pointer disabled:opacity-50"
-                      >
-                        <RefreshCw size={13} className={isGoogleSyncing ? 'animate-spin' : ''} />
-                        <span>
-                          {lang === 'fr'
-                            ? 'Synchroniser (2 sens)'
-                            : lang === 'es'
-                            ? 'Sincronizar (2 vías)'
-                            : 'Two-Way Sync'}
-                        </span>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={handleGoogleLogout}
-                        className="flex items-center gap-1.5 px-3 py-2 bg-white hover:bg-rose-50 border border-slate-200 hover:border-rose-200 rounded-xl text-xs font-medium text-slate-600 hover:text-rose-600 transition-all cursor-pointer"
-                      >
-                        <LogOut size={13} />
-                        <span>{lang === 'fr' ? 'Déconnecter' : lang === 'es' ? 'Desconectar' : 'Disconnect'}</span>
-                      </button>
-                    </>
-                  )}
-
-                  {gcalIcsUrl && (needsGoogleAuth || !gcalToken) && (
-                    <button
-                      type="button"
-                      onClick={() => importEventsFromGoogleCalendar(null, false, gcalIcsUrl)}
-                      disabled={isGoogleSyncing}
-                      className="flex items-center gap-1.5 px-3.5 py-2 bg-cyan-50 hover:bg-cyan-100 border border-cyan-200 rounded-xl text-xs font-semibold text-cyan-900 transition-all cursor-pointer disabled:opacity-50"
-                    >
-                      <RefreshCw size={13} className={isGoogleSyncing ? 'animate-spin text-[#009cb2]' : ''} />
-                      <span>{lang === 'fr' ? 'Forcer synchro iCal' : 'Sync iCal now'}</span>
-                    </button>
-                  )}
-
-                  <button
-                    type="button"
-                    onClick={() => setIsGcalSettingsOpen(prev => !prev)}
-                    className={`flex items-center gap-1.5 px-3 py-2 rounded-xl border text-xs font-semibold transition-all cursor-pointer ${
-                      isGcalSettingsOpen || gcalAuthDomainError
-                        ? 'bg-slate-900 text-white border-slate-900'
-                        : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-200'
-                    }`}
-                  >
-                    <Cloud size={13} />
-                    <span>{lang === 'fr' ? 'Config Vercel / 24h/24' : 'Vercel / 24-7 Setup'}</span>
-                  </button>
-                </div>
-              </div>
-
-              {/* COLLAPSIBLE VERCEL & 24/7 ICAL CONFIGURATION PANEL */}
-              {(isGcalSettingsOpen || gcalAuthDomainError) && (
-                <div className="pt-3 border-t border-slate-200/80 grid grid-cols-1 lg:grid-cols-2 gap-4">
-                  {/* Left: 24/7 iCal Secret URL (Works on Vercel without any popup or domain setup) */}
-                  <div className="p-4 rounded-2xl bg-slate-50/90 border border-slate-200/80 space-y-2.5">
-                    <div className="flex items-center justify-between gap-2">
-                      <h5 className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
-                        <Sparkles size={14} className="text-[#0e9f8e]" />
-                        {lang === 'fr'
-                          ? '1. Synchronisation automatique 24h/24 sur Vercel (Lien secret iCal .ics)'
-                          : '1. 24/7 Automatic Sync on Vercel (Secret iCal .ics URL)'}
-                      </h5>
-                    </div>
-                    <p className="text-[11px] text-slate-600 leading-relaxed">
-                      {lang === 'fr'
-                        ? 'Pour que les événements ajoutés dans Google Calendar apparaissent automatiquement sur Vercel (www.osteovalencia.com) 24h/24 sans même avoir à vous reconnecter : ouvrez Google Calendar sur ordinateur → Paramètres de votre agenda → "Adresse secrète au format iCal" et collez le lien .ics ci-dessous :'
-                        : 'To automatically import events added in Google Calendar on Vercel 24/7 without needing to re-authenticate: open Google Calendar Settings → "Secret address in iCal format" and paste the .ics link below:'}
-                    </p>
-                    <div className="flex flex-col sm:flex-row gap-2">
-                      <input
-                        type="url"
-                        value={gcalIcsInput}
-                        onChange={(e) => setGcalIcsInput(e.target.value)}
-                        placeholder="https://calendar.google.com/calendar/ical/.../basic.ics"
-                        className="flex-1 px-3 py-2 bg-white rounded-xl border border-slate-300 text-xs font-mono text-slate-800 focus:outline-none focus:border-[#009cb2]"
-                      />
-                      <button
-                        type="button"
-                        onClick={handleSaveGcalIcsUrl}
-                        disabled={isSavingIcsUrl}
-                        className="px-4 py-2 bg-[#0e9f8e] hover:bg-[#0c8a7b] text-white rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap disabled:opacity-50"
-                      >
-                        {isSavingIcsUrl
-                          ? lang === 'fr'
-                            ? 'Enregistrement...'
-                            : 'Saving...'
-                          : lang === 'fr'
-                          ? 'Enregistrer & Synchroniser'
-                          : 'Save & Sync'}
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Right: Authorizing custom domain on Vercel for the "Sign in with Google" 2-way popup */}
-                  <div className="p-4 rounded-2xl bg-slate-50/90 border border-slate-200/80 space-y-2.5">
-                    <h5 className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
-                      <Shield size={14} className="text-[#009cb2]" />
-                      {lang === 'fr'
-                        ? '2. Autoriser le bouton "Sign in with Google" sur www.osteovalencia.com (Vercel)'
-                        : '2. Authorize "Sign in with Google" button on www.osteovalencia.com (Vercel)'}
-                    </h5>
-                    <p className="text-[11px] text-slate-600 leading-relaxed">
-                      {lang === 'fr'
-                        ? 'Pour utiliser aussi le bouton "Sign in with Google" (écriture vers Google Calendar) sur votre domaine Vercel, ajoutez une seule fois vos domaines dans Firebase Authentication → Settings → Authorized domains :'
-                        : 'To also use the "Sign in with Google" popup on your custom Vercel domain, add your domains once in Firebase Authentication → Settings → Authorized domains:'}
-                    </p>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <code className="px-2.5 py-1 bg-white border border-slate-200 rounded-lg text-[11px] font-mono text-slate-800">
-                        www.osteovalencia.com
-                      </code>
-                      <code className="px-2.5 py-1 bg-white border border-slate-200 rounded-lg text-[11px] font-mono text-slate-800">
-                        osteovalencia.com
-                      </code>
-                      <a
-                        href={`https://console.firebase.google.com/project/${getFirebaseProjectId()}/authentication/settings`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-slate-100 border border-slate-300 rounded-xl text-[11px] font-semibold text-slate-800 transition-all"
-                      >
-                        <span>{lang === 'fr' ? 'Ouvrir Firebase Authorized Domains' : 'Open Firebase Authorized Domains'}</span>
-                        <ExternalLink size={12} />
-                      </a>
-                    </div>
-                  </div>
-                </div>
-              )}
             </div>
 
             {/* SHARED JANE.APP CALENDAR LOGIC & RENDER */}
@@ -7663,6 +7413,263 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                 </div>
               );
             })()}
+
+            {/* GOOGLE CALENDAR SYNCHRONIZATION BAR (placed below the calendar) */}
+            <div className="bg-white p-4 sm:p-5 rounded-3xl border border-slate-200/90 shadow-xs space-y-4">
+              <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+                <div className="flex items-start sm:items-center gap-3.5">
+                  <div className="w-10 h-10 rounded-2xl bg-slate-50 border border-slate-200/80 flex items-center justify-center shrink-0 shadow-2xs">
+                    <svg className="w-5 h-5" viewBox="0 0 48 48">
+                      <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z" />
+                      <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z" />
+                      <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z" />
+                      <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z" />
+                    </svg>
+                  </div>
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h4 className="text-sm font-bold text-slate-900">
+                        Google Calendar
+                      </h4>
+                      {!needsGoogleAuth && gcalToken ? (
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md text-[11px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                          {lang === 'fr' ? 'Connecté (2 sens)' : lang === 'es' ? 'Conectado (2 vías)' : 'Connected (2-way)'}
+                          {gcalUser?.email ? ` · ${gcalUser.email}` : ''}
+                        </span>
+                      ) : gcalIcsUrl ? (
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md text-[11px] font-semibold bg-cyan-50 text-cyan-800 border border-cyan-200">
+                          <span className="w-1.5 h-1.5 rounded-full bg-cyan-500 animate-pulse" />
+                          {lang === 'fr' ? 'Synchro auto iCal 24h/24 active' : '24/7 Auto iCal Sync active'}
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md text-[11px] font-medium bg-slate-100 text-slate-600">
+                          {lang === 'fr' ? 'Non connecté' : lang === 'es' ? 'No conectado' : 'Not connected'}
+                        </span>
+                      )}
+                      {lastGoogleSyncAt && ((!needsGoogleAuth && gcalToken) || gcalIcsUrl) && (
+                        <span className="text-[11px] text-slate-400">
+                          {lang === 'fr' ? `Synchro auto : ${lastGoogleSyncAt}` : `Auto sync: ${lastGoogleSyncAt}`}
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      {lang === 'fr'
+                        ? 'Synchronisation automatique toutes les 20s et dès que vous revenez sur l’application après un ajout dans Google Calendar.'
+                        : lang === 'es'
+                        ? 'Sincronización automática cada 20s y al volver a la aplicación tras añadir un evento en Google Calendar.'
+                        : 'Automatic sync every 20s and whenever you switch back to the app after adding an event in Google Calendar.'}
+                    </p>
+                    {gcalStatusMsg && (
+                      <div className="flex flex-wrap items-center gap-2 mt-1.5">
+                        <p
+                          className={`text-xs font-medium ${
+                            gcalStatusMsg.type === 'success'
+                              ? 'text-emerald-600'
+                              : gcalStatusMsg.type === 'error'
+                              ? 'text-rose-600'
+                              : 'text-slate-600'
+                          }`}
+                        >
+                          {gcalStatusMsg.text}
+                        </p>
+                        {gcalStatusMsg.jumpDate && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const [y, m, d] = gcalStatusMsg.jumpDate!.split('-').map(Number);
+                              if (y && m && d) {
+                                setCurrentCalendarDate(new Date(y, m - 1, d));
+                              }
+                            }}
+                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 text-[11px] font-semibold cursor-pointer"
+                          >
+                            <CalendarIcon size={11} />
+                            <span>{lang === 'fr' ? 'Aller à cette date' : 'Go to date'}</span>
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2 w-full md:w-auto justify-end">
+                  {needsGoogleAuth || !gcalToken ? (
+                    <button
+                      type="button"
+                      onClick={handleGoogleLogin}
+                      disabled={isGoogleLoggingIn}
+                      className="gsi-material-button inline-flex items-center gap-3 px-4 py-2.5 bg-white hover:bg-slate-50 text-slate-800 border border-slate-300 rounded-xl text-xs font-semibold shadow-2xs transition-all cursor-pointer disabled:opacity-60"
+                    >
+                      <div className="gsi-material-button-state" />
+                      <div className="gsi-material-button-content-wrapper flex items-center gap-2.5">
+                        <div className="gsi-material-button-icon w-4 h-4 shrink-0">
+                          <svg version="1.1" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" className="w-4 h-4 block">
+                            <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z" />
+                            <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z" />
+                            <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z" />
+                            <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z" />
+                            <path fill="none" d="M0 0h48v48H0z" />
+                          </svg>
+                        </div>
+                        <span className="gsi-material-button-contents">
+                          {isGoogleLoggingIn
+                            ? lang === 'fr'
+                              ? 'Connexion...'
+                              : 'Signing in...'
+                            : lang === 'fr'
+                            ? 'Sign in with Google · Relier Google Calendar'
+                            : lang === 'es'
+                            ? 'Sign in with Google · Conectar Google Calendar'
+                            : 'Sign in with Google'}
+                        </span>
+                      </div>
+                    </button>
+                  ) : (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => importEventsFromGoogleCalendar(gcalToken, false)}
+                        disabled={isGoogleSyncing}
+                        className="flex items-center gap-1.5 px-3.5 py-2 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 transition-all cursor-pointer disabled:opacity-50"
+                      >
+                        <RefreshCw size={13} className={isGoogleSyncing ? 'animate-spin text-[#0e9f8e]' : ''} />
+                        <span>
+                          {lang === 'fr' ? 'Importer de Google' : lang === 'es' ? 'Importar de Google' : 'Import from Google'}
+                        </span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={handleSyncClinicToGoogleCalendar}
+                        disabled={isGoogleSyncing}
+                        className="flex items-center gap-1.5 px-3.5 py-2 bg-[#009cb2] hover:bg-[#008699] text-white rounded-xl text-xs font-semibold shadow-2xs transition-all cursor-pointer disabled:opacity-50"
+                      >
+                        <RefreshCw size={13} className={isGoogleSyncing ? 'animate-spin' : ''} />
+                        <span>
+                          {lang === 'fr'
+                            ? 'Synchroniser (2 sens)'
+                            : lang === 'es'
+                            ? 'Sincronizar (2 vías)'
+                            : 'Two-Way Sync'}
+                        </span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={handleGoogleLogout}
+                        className="flex items-center gap-1.5 px-3 py-2 bg-white hover:bg-rose-50 border border-slate-200 hover:border-rose-200 rounded-xl text-xs font-medium text-slate-600 hover:text-rose-600 transition-all cursor-pointer"
+                      >
+                        <LogOut size={13} />
+                        <span>{lang === 'fr' ? 'Déconnecter' : lang === 'es' ? 'Desconectar' : 'Disconnect'}</span>
+                      </button>
+                    </>
+                  )}
+
+                  {gcalIcsUrl && (needsGoogleAuth || !gcalToken) && (
+                    <button
+                      type="button"
+                      onClick={() => importEventsFromGoogleCalendar(null, false, gcalIcsUrl)}
+                      disabled={isGoogleSyncing}
+                      className="flex items-center gap-1.5 px-3.5 py-2 bg-cyan-50 hover:bg-cyan-100 border border-cyan-200 rounded-xl text-xs font-semibold text-cyan-900 transition-all cursor-pointer disabled:opacity-50"
+                    >
+                      <RefreshCw size={13} className={isGoogleSyncing ? 'animate-spin text-[#009cb2]' : ''} />
+                      <span>{lang === 'fr' ? 'Forcer synchro iCal' : 'Sync iCal now'}</span>
+                    </button>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={() => setIsGcalSettingsOpen(prev => !prev)}
+                    className={`flex items-center gap-1.5 px-3 py-2 rounded-xl border text-xs font-semibold transition-all cursor-pointer ${
+                      isGcalSettingsOpen || gcalAuthDomainError
+                        ? 'bg-slate-900 text-white border-slate-900'
+                        : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-200'
+                    }`}
+                  >
+                    <Cloud size={13} />
+                    <span>{lang === 'fr' ? 'Config Vercel / 24h/24' : 'Vercel / 24-7 Setup'}</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* COLLAPSIBLE VERCEL & 24/7 ICAL CONFIGURATION PANEL */}
+              {(isGcalSettingsOpen || gcalAuthDomainError) && (
+                <div className="pt-3 border-t border-slate-200/80 grid grid-cols-1 lg:grid-cols-2 gap-4">
+                  {/* Left: 24/7 iCal Secret URL (Works on Vercel without any popup or domain setup) */}
+                  <div className="p-4 rounded-2xl bg-slate-50/90 border border-slate-200/80 space-y-2.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <h5 className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
+                        <Sparkles size={14} className="text-[#0e9f8e]" />
+                        {lang === 'fr'
+                          ? '1. Synchronisation automatique 24h/24 sur Vercel (Lien secret iCal .ics)'
+                          : '1. 24/7 Automatic Sync on Vercel (Secret iCal .ics URL)'}
+                      </h5>
+                    </div>
+                    <p className="text-[11px] text-slate-600 leading-relaxed">
+                      {lang === 'fr'
+                        ? 'Pour que les événements ajoutés dans Google Calendar apparaissent automatiquement sur Vercel (www.osteovalencia.com) 24h/24 sans même avoir à vous reconnecter : ouvrez Google Calendar sur ordinateur → Paramètres de votre agenda → "Adresse secrète au format iCal" et collez le lien .ics ci-dessous :'
+                        : 'To automatically import events added in Google Calendar on Vercel 24/7 without needing to re-authenticate: open Google Calendar Settings → "Secret address in iCal format" and paste the .ics link below:'}
+                    </p>
+                    <div className="flex flex-col sm:flex-row gap-2">
+                      <input
+                        type="url"
+                        value={gcalIcsInput}
+                        onChange={(e) => setGcalIcsInput(e.target.value)}
+                        placeholder="https://calendar.google.com/calendar/ical/.../basic.ics"
+                        className="flex-1 px-3 py-2 bg-white rounded-xl border border-slate-300 text-xs font-mono text-slate-800 focus:outline-none focus:border-[#009cb2]"
+                      />
+                      <button
+                        type="button"
+                        onClick={handleSaveGcalIcsUrl}
+                        disabled={isSavingIcsUrl}
+                        className="px-4 py-2 bg-[#0e9f8e] hover:bg-[#0c8a7b] text-white rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap disabled:opacity-50"
+                      >
+                        {isSavingIcsUrl
+                          ? lang === 'fr'
+                            ? 'Enregistrement...'
+                            : 'Saving...'
+                          : lang === 'fr'
+                          ? 'Enregistrer & Synchroniser'
+                          : 'Save & Sync'}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Right: Authorizing custom domain on Vercel for the "Sign in with Google" 2-way popup */}
+                  <div className="p-4 rounded-2xl bg-slate-50/90 border border-slate-200/80 space-y-2.5">
+                    <h5 className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
+                      <Shield size={14} className="text-[#009cb2]" />
+                      {lang === 'fr'
+                        ? '2. Autoriser le bouton "Sign in with Google" sur www.osteovalencia.com (Vercel)'
+                        : '2. Authorize "Sign in with Google" button on www.osteovalencia.com (Vercel)'}
+                    </h5>
+                    <p className="text-[11px] text-slate-600 leading-relaxed">
+                      {lang === 'fr'
+                        ? 'Pour utiliser aussi le bouton "Sign in with Google" (écriture vers Google Calendar) sur votre domaine Vercel, ajoutez une seule fois vos domaines dans Firebase Authentication → Settings → Authorized domains :'
+                        : 'To also use the "Sign in with Google" popup on your custom Vercel domain, add your domains once in Firebase Authentication → Settings → Authorized domains:'}
+                    </p>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <code className="px-2.5 py-1 bg-white border border-slate-200 rounded-lg text-[11px] font-mono text-slate-800">
+                        www.osteovalencia.com
+                      </code>
+                      <code className="px-2.5 py-1 bg-white border border-slate-200 rounded-lg text-[11px] font-mono text-slate-800">
+                        osteovalencia.com
+                      </code>
+                      <a
+                        href={`https://console.firebase.google.com/project/${getFirebaseProjectId()}/authentication/settings`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-slate-100 border border-slate-300 rounded-xl text-[11px] font-semibold text-slate-800 transition-all"
+                      >
+                        <span>{lang === 'fr' ? 'Ouvrir Firebase Authorized Domains' : 'Open Firebase Authorized Domains'}</span>
+                        <ExternalLink size={12} />
+                      </a>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
 
           </div>
         )}
@@ -9398,7 +9405,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
             associatedNotes.some(n => n.isBonoRedeemed) ||
             (client?.bonoRedeemedDates && targetDateStr && client.bonoRedeemedDates.includes(targetDateStr)) ||
             associatedInvoices.some(inv => inv.isBonoRedemption || (inv.amount === 0 && inv.discountType === 'bono')) ||
-            Boolean(bonoPurchaseInvoice && client?.hasBono)
+            Boolean(bonoPurchaseInvoice)
           );
 
           return (
@@ -9432,6 +9439,12 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                       <h3 className="text-lg sm:text-xl font-bold font-serif text-slate-900 leading-tight">
                         {isOther ? eventDisplayName : (lang === 'fr' ? "Détails de la consultation" : lang === 'es' ? "Detalles de la consulta" : "Consultation details")}
                       </h3>
+                      {!isOther && (
+                        <p className="mt-1 text-sm sm:text-base font-bold text-[#00838f] flex items-center gap-1.5">
+                          <User size={14} className="shrink-0 text-[#009cb2]" />
+                          <span>{client?.name || eventDisplayName}</span>
+                        </p>
+                      )}
                     </div>
                   </div>
 
@@ -10611,7 +10624,126 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                   />
                 </div>
 
+                {/* Bono Package Management in Edit Patient Modal */}
+                <div className="p-3.5 rounded-2xl bg-emerald-50/60 border border-emerald-200/80 space-y-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-xs font-bold text-emerald-950 flex items-center gap-1.5">
+                      <BadgePercent size={14} className="text-emerald-600" />
+                      {lang === 'fr' ? 'Forfait Bono Patient' : lang === 'es' ? 'Bono del Paciente' : 'Patient Bono Package'}
+                    </span>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setEditingClient(prev =>
+                            prev
+                              ? {
+                                  ...prev,
+                                  hasBono: true,
+                                  bonoType: 'Bono 3 séances',
+                                  bonoTotalSessions: 3,
+                                  bonoSessionsRemaining: 3,
+                                }
+                              : null
+                          )
+                        }
+                        className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${
+                          editingClient.hasBono &&
+                          (editingClient.bonoSessionsRemaining ?? 0) > 0 &&
+                          (editingClient.bonoType || '').includes('3')
+                            ? 'bg-emerald-600 text-white shadow-2xs'
+                            : 'bg-white text-emerald-800 border border-emerald-200 hover:bg-emerald-100/60'
+                        }`}
+                      >
+                        + Bono 3
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setEditingClient(prev =>
+                            prev
+                              ? {
+                                  ...prev,
+                                  hasBono: true,
+                                  bonoType: 'Bono 5 séances',
+                                  bonoTotalSessions: 5,
+                                  bonoSessionsRemaining: 5,
+                                }
+                              : null
+                          )
+                        }
+                        className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${
+                          editingClient.hasBono &&
+                          (editingClient.bonoSessionsRemaining ?? 0) > 0 &&
+                          (editingClient.bonoType || '').includes('5')
+                            ? 'bg-emerald-600 text-white shadow-2xs'
+                            : 'bg-white text-emerald-800 border border-emerald-200 hover:bg-emerald-100/60'
+                        }`}
+                      >
+                        + Bono 5
+                      </button>
+                    </div>
+                  </div>
 
+                  {editingClient.hasBono && (editingClient.bonoSessionsRemaining ?? 0) > 0 ? (
+                    <div className="flex items-center justify-between gap-3 pt-1">
+                      <span className="text-[11px] text-emerald-900 font-medium">
+                        {lang === 'fr'
+                          ? 'Séances restantes (0 = masque le Bono) :'
+                          : lang === 'es'
+                          ? 'Sesiones restantes (0 = oculta el Bono):'
+                          : 'Remaining sessions (0 = hides Bono):'}
+                      </span>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setEditingClient(prev => {
+                              if (!prev) return null;
+                              const nextRem = Math.max(0, (prev.bonoSessionsRemaining ?? 0) - 1);
+                              return {
+                                ...prev,
+                                hasBono: nextRem > 0,
+                                bonoSessionsRemaining: nextRem,
+                              };
+                            })
+                          }
+                          className="w-7 h-7 rounded-lg bg-white border border-emerald-200 text-emerald-900 font-bold text-xs hover:bg-emerald-100 cursor-pointer"
+                        >
+                          -
+                        </button>
+                        <span className="w-7 text-center font-mono text-xs font-bold text-emerald-950">
+                          {editingClient.bonoSessionsRemaining ?? 0}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setEditingClient(prev => {
+                              if (!prev) return null;
+                              const nextRem = (prev.bonoSessionsRemaining ?? 0) + 1;
+                              return {
+                                ...prev,
+                                hasBono: true,
+                                bonoSessionsRemaining: nextRem,
+                              };
+                            })
+                          }
+                          className="w-7 h-7 rounded-lg bg-white border border-emerald-200 text-emerald-900 font-bold text-xs hover:bg-emerald-100 cursor-pointer"
+                        >
+                          +
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="text-[11px] text-emerald-800/80">
+                      {lang === 'fr'
+                        ? 'Aucun Bono actif (0 séance restante). Le Bono réapparaîtra dès l’achat d’un Bono 3 ou 5 séances.'
+                        : lang === 'es'
+                        ? 'Sin Bono activo (0 sesiones restantes). El Bono reaparecerá al adquirir un Bono de 3 o 5 sesiones.'
+                        : 'No active Bono (0 remaining sessions). Bono will reappear when purchasing a 3 or 5 session package.'}
+                    </p>
+                  )}
+                </div>
 
                 <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between pt-4 gap-2.5">
                   <button
