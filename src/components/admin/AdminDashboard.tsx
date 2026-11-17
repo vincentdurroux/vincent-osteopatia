@@ -232,8 +232,16 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
         setGcalToken(token);
         setNeedsGoogleAuth(false);
       },
-      () => {
-        setGcalUser(null);
+      (rememberedUser) => {
+        if (rememberedUser) {
+          setGcalUser({
+            email: rememberedUser.email,
+            displayName: rememberedUser.displayName,
+            photoURL: rememberedUser.photoURL,
+          });
+        } else {
+          setGcalUser(null);
+        }
         setGcalToken(null);
         setNeedsGoogleAuth(true);
       }
@@ -2410,7 +2418,12 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
   // Event Helper Functions for display & styling
   const getEventDisplayName = (ev: { clientName?: string; clientId?: string; summary?: string; description?: string; eventType?: EventType }) => {
     if (ev.eventType && ev.eventType !== 'appointment') {
-      const remark = ev.description?.replace(/\[eventType:[a-z]+\]/gi, '').replace(/\[type:[a-z]+\]/gi, '').trim();
+      const remark = ev.description
+        ?.replace(/\[eventType:[a-z]+\]/gi, '')
+        .replace(/\[type:[a-z]+\]/gi, '')
+        .replace(/\[gcalId:[^\]]+\]/gi, '')
+        .replace(/\[clientName:[^\]]+\]/gi, '')
+        .trim();
       if (remark) return remark;
       return ev.summary || (lang === 'fr' ? 'Créneau indisponible' : lang === 'es' ? 'Horario bloqueado' : 'Blocked slot');
     }
@@ -2894,54 +2907,101 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
         }
       }).catch(() => {});
 
-      // If connected to Google Calendar, offer to also create it on Google Calendar
+      // If connected to Google Calendar, automatically create it on Google Calendar
       const activeToken = (await getGoogleAccessToken()) || gcalToken;
+      const displayTitle = created.clientName || created.summary;
       if (activeToken && !needsGoogleAuth) {
-        const displayTitle = created.clientName || created.summary;
+        try {
+          const gcalCreated = await calendarApi.createEvent(activeToken, created);
+          const linked = await api.updateLocalEvent({
+            ...created,
+            googleEventId: gcalCreated.googleEventId,
+            isGoogleEvent: true,
+          });
+          setEvents(prev =>
+            prev
+              .map(ev => (ev.id === linked.id ? linked : ev))
+              .sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime())
+          );
+          setGcalStatusMsg({
+            type: 'success',
+            text:
+              lang === 'fr'
+                ? `"${displayTitle}" ajouté automatiquement à Google Calendar.`
+                : lang === 'es'
+                ? `"${displayTitle}" añadido automáticamente a Google Calendar.`
+                : `"${displayTitle}" automatically added to Google Calendar.`,
+          });
+        } catch (err: any) {
+          if (err?.message === 'TOKEN_EXPIRED') {
+            setNeedsGoogleAuth(true);
+            setGcalToken(null);
+          }
+          setGcalStatusMsg({
+            type: 'error',
+            text:
+              lang === 'fr'
+                ? 'Session Google expirée : cliquez sur "Sign in with Google" pour synchroniser ce RDV vers Google Calendar.'
+                : 'Google session expired: click "Sign in with Google" to push this event to Google Calendar.',
+          });
+        }
+      } else if (gcalUser?.email || gcalIcsUrl) {
+        // User had Google Calendar configured, but page reload cleared the in-memory OAuth write token
         setConfirmDialog({
           isOpen: true,
-          title: lang === 'fr' ? 'Ajouter à Google Calendar ?' : lang === 'es' ? '¿Añadir a Google Calendar?' : 'Add to Google Calendar?',
+          title:
+            lang === 'fr'
+              ? 'Synchroniser vers Google Calendar ?'
+              : lang === 'es'
+              ? '¿Sincronizar con Google Calendar?'
+              : 'Sync to Google Calendar?',
           message:
             lang === 'fr'
-              ? `Souhaitez-vous également ajouter "${displayTitle}" (${new Date(created.start).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' })}) dans votre Google Calendar ?`
+              ? `Pour envoyer "${displayTitle}" vers votre Google Calendar${gcalUser?.email ? ` (${gcalUser.email})` : ''}, cliquez sur confirmer pour réactiver l’écriture Google en 1 clic.`
               : lang === 'es'
-              ? `¿Desea añadir también "${displayTitle}" a su Google Calendar?`
-              : `Would you also like to add "${displayTitle}" to your Google Calendar?`,
-          confirmText: lang === 'fr' ? 'Ajouter à Google Calendar' : lang === 'es' ? 'Añadir a Google Calendar' : 'Add to Google Calendar',
-          cancelText: lang === 'fr' ? 'Garder uniquement dans le cabinet' : lang === 'es' ? 'Solo en la clínica' : 'Clinic only',
+              ? `Para enviar "${displayTitle}" a su Google Calendar, confirme para reactivar la conexión con 1 clic.`
+              : `To send "${displayTitle}" to your Google Calendar, confirm to reconnect in 1 click.`,
+          confirmText:
+            lang === 'fr'
+              ? 'Envoyer vers Google Calendar'
+              : lang === 'es'
+              ? 'Enviar a Google Calendar'
+              : 'Send to Google Calendar',
+          cancelText: lang === 'fr' ? 'Plus tard' : lang === 'es' ? 'Más tarde' : 'Later',
           isDangerous: false,
           onConfirm: async () => {
             try {
-              const gcalCreated = await calendarApi.createEvent(activeToken, created);
-              const linked = await api.updateLocalEvent({
-                ...created,
-                googleEventId: gcalCreated.googleEventId,
-                isGoogleEvent: true,
-              });
-              setEvents(prev =>
-                prev.map(ev => (ev.id === linked.id ? linked : ev)).sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime())
-              );
-              setGcalStatusMsg({
-                type: 'success',
-                text:
-                  lang === 'fr'
-                    ? `"${displayTitle}" ajouté à Google Calendar.`
-                    : lang === 'es'
-                    ? `"${displayTitle}" añadido a Google Calendar.`
-                    : `"${displayTitle}" added to Google Calendar.`,
-              });
-            } catch (err: any) {
-              if (err?.message === 'TOKEN_EXPIRED') {
-                setNeedsGoogleAuth(true);
-                setGcalToken(null);
+              const authRes = await googleSignIn(gcalUser?.email);
+              if (authRes?.accessToken) {
+                setGcalToken(authRes.accessToken);
+                setGcalUser({
+                  email: authRes.user.email,
+                  displayName: authRes.user.displayName,
+                  photoURL: authRes.user.photoURL,
+                });
+                setNeedsGoogleAuth(false);
+                const gcalCreated = await calendarApi.createEvent(authRes.accessToken, created);
+                const linked = await api.updateLocalEvent({
+                  ...created,
+                  googleEventId: gcalCreated.googleEventId,
+                  isGoogleEvent: true,
+                });
+                setEvents(prev =>
+                  prev
+                    .map(ev => (ev.id === linked.id ? linked : ev))
+                    .sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime())
+                );
+                await importEventsFromGoogleCalendar(authRes.accessToken, true);
+                setGcalStatusMsg({
+                  type: 'success',
+                  text:
+                    lang === 'fr'
+                      ? `"${displayTitle}" ajouté à Google Calendar.`
+                      : `"${displayTitle}" added to Google Calendar.`,
+                });
               }
-              setGcalStatusMsg({
-                type: 'error',
-                text:
-                  lang === 'fr'
-                    ? 'Impossible d’ajouter l’événement sur Google Calendar. Veuillez vous reconnecter.'
-                    : 'Failed to add event to Google Calendar.',
-              });
+            } catch (err: any) {
+              console.warn('Google Calendar re-auth on create failed:', err);
             }
           },
         });
@@ -2988,9 +3048,9 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
       setIsEditEventOpen(false);
       setEditingEvent(null);
 
-      // If connected to Google Calendar, ask user confirmation before mutating Google Calendar
+      // If connected to Google Calendar (or previously linked), ask user confirmation before mutating Google Calendar
       const activeToken = (await getGoogleAccessToken()) || gcalToken;
-      if (activeToken && !needsGoogleAuth) {
+      if ((activeToken && !needsGoogleAuth) || updated.googleEventId || gcalUser?.email) {
         const displayTitle = updated.clientName || updated.summary;
         setConfirmDialog({
           isOpen: true,
@@ -3006,9 +3066,24 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
           isDangerous: false,
           onConfirm: async () => {
             try {
+              let tokenToUse = (await getGoogleAccessToken()) || gcalToken;
+              if (!tokenToUse || needsGoogleAuth) {
+                const authRes = await googleSignIn(gcalUser?.email);
+                if (authRes?.accessToken) {
+                  tokenToUse = authRes.accessToken;
+                  setGcalToken(authRes.accessToken);
+                  setGcalUser({
+                    email: authRes.user.email,
+                    displayName: authRes.user.displayName,
+                    photoURL: authRes.user.photoURL,
+                  });
+                  setNeedsGoogleAuth(false);
+                }
+              }
+              if (!tokenToUse) return;
               const gcalUpdated = updated.googleEventId
-                ? await calendarApi.updateEvent(activeToken, updated.googleEventId, updated)
-                : await calendarApi.createEvent(activeToken, updated);
+                ? await calendarApi.updateEvent(tokenToUse, updated.googleEventId, updated)
+                : await calendarApi.createEvent(tokenToUse, updated);
               const linked = await api.updateLocalEvent({
                 ...updated,
                 googleEventId: gcalUpdated.googleEventId,
@@ -3043,7 +3118,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
   const handleDeleteEvent = (eventId: string) => {
     const eventToDelete = events.find(ev => ev.id === eventId);
     const eventTitle = eventToDelete ? (eventToDelete.clientName || eventToDelete.summary) : '';
-    const hasGoogleLink = Boolean(eventToDelete?.googleEventId && !needsGoogleAuth && gcalToken);
+    const hasGoogleLink = Boolean(eventToDelete?.googleEventId && ((!needsGoogleAuth && gcalToken) || gcalUser?.email));
 
     setConfirmDialog({
       isOpen: true,
@@ -3058,7 +3133,17 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
       isDangerous: true,
       onConfirm: async () => {
         try {
-          const activeToken = (await getGoogleAccessToken()) || gcalToken;
+          let activeToken = (await getGoogleAccessToken()) || gcalToken;
+          if (!activeToken && eventToDelete?.googleEventId && gcalUser?.email) {
+            try {
+              const authRes = await googleSignIn(gcalUser.email);
+              if (authRes?.accessToken) {
+                activeToken = authRes.accessToken;
+                setGcalToken(authRes.accessToken);
+                setNeedsGoogleAuth(false);
+              }
+            } catch {}
+          }
           if (activeToken && eventToDelete?.googleEventId) {
             try {
               await calendarApi.deleteEvent(activeToken, eventToDelete.googleEventId);
@@ -3082,7 +3167,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
     });
   };
 
-  // Import events from Google Calendar (via OAuth token and/or 24/7 Vercel iCal feed)
+  // Bidirectional synchronization with Google Calendar (via OAuth token and/or 24/7 Vercel iCal feed)
   const importEventsFromGoogleCalendar = useCallback(
     async (accessToken?: string | null, silent = false, customIcsUrl?: string) => {
       if (isGoogleImportingRef.current) return;
@@ -3098,17 +3183,20 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
       }
 
       try {
-        const timeMinDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+        const timeMinDate = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
         const timeMaxDate = new Date(Date.now() + 180 * 24 * 60 * 60 * 1000);
         const timeMin = timeMinDate.toISOString();
         const timeMax = timeMaxDate.toISOString();
 
-        let gcalEvents: CalendarEvent[] = [];
+        let gcalEvents: (CalendarEvent & { iCalUID?: string })[] = [];
+        let cancelledGoogleIds: string[] = [];
         let fetchedFromOAuth = false;
 
         if (activeToken) {
           try {
-            gcalEvents = await calendarApi.fetchEvents(activeToken, timeMin, timeMax);
+            const syncRes = await calendarApi.fetchEventsWithChanges(activeToken, timeMin, timeMax);
+            gcalEvents = syncRes.events;
+            cancelledGoogleIds = syncRes.cancelledGoogleIds;
             fetchedFromOAuth = true;
           } catch (oauthErr: any) {
             if (oauthErr?.message === 'TOKEN_EXPIRED') {
@@ -3120,7 +3208,9 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
         }
 
         if (!fetchedFromOAuth && activeIcsUrl) {
-          gcalEvents = await calendarApi.fetchIcsFeedEvents(activeIcsUrl);
+          const icsRes = await calendarApi.fetchIcsFeedEventsWithChanges(activeIcsUrl);
+          gcalEvents = icsRes.events;
+          cancelledGoogleIds = icsRes.cancelledGoogleIds;
         }
 
         // Read fresh events and clients directly from Supabase/local storage to avoid stale closure state
@@ -3135,24 +3225,35 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
         let importedCount = 0;
         let updatedFromGcalCount = 0;
         let deletedFromGcalCount = 0;
+        let exportedToGcalCount = 0;
         let lastImportedDateStr: string | undefined;
         let lastImportedLabel: string | undefined;
 
-        const seenGoogleIds = new Set<string>();
+        const cancelledSet = new Set<string>(cancelledGoogleIds);
 
-        for (const gEv of gcalEvents) {
-          if (gEv.googleEventId) {
-            seenGoogleIds.add(gEv.googleEventId);
+        // 1. Delete local events that were explicitly cancelled/deleted in Google Calendar
+        const activeLocalEvents: CalendarEvent[] = [];
+        for (const loc of currentEvents) {
+          if (loc.googleEventId && cancelledSet.has(loc.googleEventId)) {
+            await api.deleteLocalEvent(loc.id);
+            deletedFromGcalCount += 1;
+          } else {
+            activeLocalEvents.push(loc);
           }
+        }
 
-          const existingIdx = currentEvents.findIndex(
+        // 2. Import new events and apply updates from Google Calendar -> Clinic App
+        for (const gEv of gcalEvents) {
+          const existingIdx = activeLocalEvents.findIndex(
             loc =>
               (gEv.googleEventId && loc.googleEventId === gEv.googleEventId) ||
+              (gEv.iCalUID && loc.googleEventId === gEv.iCalUID) ||
               loc.id === gEv.id ||
               (Math.abs(new Date(loc.start).getTime() - new Date(gEv.start).getTime()) < 60000 &&
                 (loc.summary?.trim().toLowerCase() === gEv.summary?.trim().toLowerCase() ||
                   loc.clientName?.trim().toLowerCase() === gEv.summary?.trim().toLowerCase() ||
-                  loc.summary?.trim().toLowerCase() === gEv.clientName?.trim().toLowerCase()))
+                  loc.summary?.trim().toLowerCase() === gEv.clientName?.trim().toLowerCase() ||
+                  loc.clientName?.trim().toLowerCase() === gEv.clientName?.trim().toLowerCase()))
           );
 
           const matchingClient = clientList.find(
@@ -3162,7 +3263,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
           );
 
           if (existingIdx !== -1) {
-            const existingMatch = currentEvents[existingIdx];
+            const existingMatch = activeLocalEvents[existingIdx];
             const startChanged =
               Math.abs(new Date(existingMatch.start).getTime() - new Date(gEv.start).getTime()) > 1000;
             const endChanged =
@@ -3170,9 +3271,16 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
             const summaryChanged =
               existingMatch.summary?.trim() !== gEv.summary?.trim() &&
               `${existingMatch.clientName || ''} — ${existingMatch.summary || ''}`.trim() !== gEv.summary?.trim();
-            const needsGoogleIdLink = !existingMatch.googleEventId && Boolean(gEv.googleEventId);
+            const needsGoogleIdLink =
+              !existingMatch.googleEventId && Boolean(gEv.googleEventId);
+            const preferOAuthId =
+              fetchedFromOAuth &&
+              gEv.googleEventId &&
+              existingMatch.googleEventId !== gEv.googleEventId;
 
-            if (startChanged || endChanged || summaryChanged || needsGoogleIdLink) {
+            if (startChanged || endChanged || summaryChanged || needsGoogleIdLink || preferOAuthId) {
+              const resolvedType: EventType =
+                existingMatch.eventType || (matchingClient ? 'appointment' : gEv.eventType || 'appointment');
               const updatedLoc = await api.updateLocalEvent({
                 ...existingMatch,
                 summary: gEv.summary || existingMatch.summary,
@@ -3181,14 +3289,17 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                 end: gEv.end,
                 clientId: existingMatch.clientId || matchingClient?.id || gEv.clientId,
                 clientName:
-                  existingMatch.clientName ||
-                  matchingClient?.name ||
-                  (gEv.eventType !== 'blocked' ? gEv.clientName || gEv.summary : undefined),
-                eventType: existingMatch.eventType || (matchingClient ? 'appointment' : gEv.eventType || 'appointment'),
+                  resolvedType === 'blocked'
+                    ? undefined
+                    : existingMatch.clientName ||
+                      matchingClient?.name ||
+                      gEv.clientName ||
+                      gEv.summary,
+                eventType: resolvedType,
                 googleEventId: gEv.googleEventId || existingMatch.googleEventId,
                 isGoogleEvent: true,
               });
-              currentEvents[existingIdx] = updatedLoc;
+              activeLocalEvents[existingIdx] = updatedLoc;
               if (startChanged || endChanged || summaryChanged) {
                 updatedFromGcalCount += 1;
               }
@@ -3214,7 +3325,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
               googleEventId: gEv.googleEventId,
               isGoogleEvent: true,
             });
-            currentEvents.push(createdLoc);
+            activeLocalEvents.push(createdLoc);
             importedCount += 1;
             const dt = new Date(createdLoc.start);
             if (!isNaN(dt.getTime())) {
@@ -3227,32 +3338,53 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
           }
         }
 
-        // Remove events that had a googleEventId in the fetched time window but were deleted in Google Calendar
-        const minWindowMs = timeMinDate.getTime();
-        const maxWindowMs = timeMaxDate.getTime();
-        const remainingEvents: CalendarEvent[] = [];
-
-        for (const loc of currentEvents) {
-          const evMs = new Date(loc.start).getTime();
-          const inWindow = !isNaN(evMs) && evMs >= minWindowMs && evMs <= maxWindowMs;
-          if (inWindow && loc.googleEventId && !seenGoogleIds.has(loc.googleEventId)) {
-            await api.deleteLocalEvent(loc.id);
-            deletedFromGcalCount += 1;
-          } else {
-            remainingEvents.push(loc);
+        // 3. Automatic Export: Push any unsynced clinic events (App -> Google Calendar) when OAuth token is active
+        if (fetchedFromOAuth && activeToken) {
+          const exportMinMs = Date.now() - 24 * 60 * 60 * 1000;
+          const exportMaxMs = timeMaxDate.getTime();
+          for (let i = 0; i < activeLocalEvents.length; i++) {
+            const loc = activeLocalEvents[i];
+            if (loc.googleEventId) continue;
+            const evMs = new Date(loc.start).getTime();
+            if (isNaN(evMs) || evMs < exportMinMs || evMs > exportMaxMs) continue;
+            try {
+              const createdOnGcal = await calendarApi.createEvent(activeToken, loc);
+              const linkedLoc = await api.updateLocalEvent({
+                ...loc,
+                googleEventId: createdOnGcal.googleEventId,
+                isGoogleEvent: true,
+              });
+              activeLocalEvents[i] = linkedLoc;
+              exportedToGcalCount += 1;
+            } catch (exportErr: any) {
+              if (exportErr?.message === 'TOKEN_EXPIRED') {
+                setNeedsGoogleAuth(true);
+                setGcalToken(null);
+                break;
+              }
+            }
           }
         }
 
-        remainingEvents.sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
-        setEvents(remainingEvents);
+        activeLocalEvents.sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
+        setEvents(activeLocalEvents);
         setLastGoogleSyncAt(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
 
-        if (!silent || importedCount > 0 || updatedFromGcalCount > 0 || deletedFromGcalCount > 0) {
+        if (
+          !silent ||
+          importedCount > 0 ||
+          updatedFromGcalCount > 0 ||
+          deletedFromGcalCount > 0 ||
+          exportedToGcalCount > 0
+        ) {
           const partsFr: string[] = [];
           if (importedCount > 0) {
             partsFr.push(
-              `${importedCount} nouvel(aux) événement(s) importé(s)${lastImportedLabel ? ` : ${lastImportedLabel}` : ''}`
+              `${importedCount} nouvel(aux) événement(s) importé(s) de Google${lastImportedLabel ? ` (${lastImportedLabel})` : ''}`
             );
+          }
+          if (exportedToGcalCount > 0) {
+            partsFr.push(`${exportedToGcalCount} ajouté(s) vers Google Calendar`);
           }
           if (updatedFromGcalCount > 0) partsFr.push(`${updatedFromGcalCount} mis à jour`);
           if (deletedFromGcalCount > 0) partsFr.push(`${deletedFromGcalCount} supprimé(s)`);
@@ -3354,7 +3486,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
     setGcalStatusMsg(null);
     setGcalAuthDomainError(null);
     try {
-      const result = await googleSignIn();
+      const result = await googleSignIn(gcalUser?.email);
       if (result) {
         setGcalToken(result.accessToken);
         setGcalUser({
@@ -6789,7 +6921,12 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                 const isSettled = !isOther && isAppointmentSettledOrRedeemed(ev);
                 const client = !isOther ? getEventClient(ev) : null;
                 const profileNote = client?.profileNote?.trim();
-                const cleanRemark = ev.description?.replace(/\[eventType:[a-z]+\]/gi, '').replace(/\[type:[a-z]+\]/gi, '').trim();
+                const cleanRemark = ev.description
+                  ?.replace(/\[eventType:[a-z]+\]/gi, '')
+                  .replace(/\[type:[a-z]+\]/gi, '')
+                  .replace(/\[gcalId:[^\]]+\]/gi, '')
+                  .replace(/\[clientName:[^\]]+\]/gi, '')
+                  .trim();
                 const isFullyCompleted = !isOther && hasNote && isSettled;
 
                 if (isOther) {
@@ -9196,7 +9333,12 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
           const ev = selectedAppointmentForDetails;
           const isOther = ev.eventType && ev.eventType !== 'appointment';
           const client = !isOther ? getEventClient(ev) : null;
-          const cleanRemark = ev.description?.replace(/\[eventType:[a-z]+\]/gi, '').replace(/\[type:[a-z]+\]/gi, '').trim();
+          const cleanRemark = ev.description
+            ?.replace(/\[eventType:[a-z]+\]/gi, '')
+            .replace(/\[type:[a-z]+\]/gi, '')
+            .replace(/\[gcalId:[^\]]+\]/gi, '')
+            .replace(/\[clientName:[^\]]+\]/gi, '')
+            .trim();
           const profileNote = client?.profileNote?.trim();
           
           const startDate = new Date(ev.start);

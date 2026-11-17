@@ -413,10 +413,14 @@ async function getTodayAppointments(cfg: StoredNotificationConfig): Promise<{
         }
       }
 
+      const metaClientNameMatch = rawDesc.match(/\[clientName:([^\]]+)\]/i);
+      const metaClientName = metaClientNameMatch?.[1]?.trim();
+
       const cleanDesc = rawDesc
         .replace(/\[eventType:[a-z]+\]/gi, '')
         .replace(/\[type:[a-z]+\]/gi, '')
         .replace(/\[gcalId:[^\]]+\]/gi, '')
+        .replace(/\[clientName:[^\]]+\]/gi, '')
         .trim();
 
       const startFmt = formatTimeInZone(startRaw, timeZone);
@@ -455,6 +459,7 @@ async function getTodayAppointments(cfg: StoredNotificationConfig): Promise<{
         (rawClientId && clientsById.get(String(rawClientId))) ||
         (row.clientName && clientsByName.get(String(row.clientName).trim().toLowerCase())) ||
         (row.client_name && clientsByName.get(String(row.client_name).trim().toLowerCase())) ||
+        (metaClientName && clientsByName.get(metaClientName.toLowerCase())) ||
         (summaryStr && clientsByName.get(summaryStr.toLowerCase())) ||
         null;
 
@@ -463,6 +468,7 @@ async function getTodayAppointments(cfg: StoredNotificationConfig): Promise<{
         row.clientName ||
         row.client_name ||
         row.patient_name ||
+        metaClientName ||
         summaryStr ||
         'Patient';
 
@@ -1056,10 +1062,15 @@ async function startServer() {
         return;
       }
 
-      const response = await fetch(icsUrl, {
+      const separator = icsUrl.includes('?') ? '&' : '?';
+      const bustUrl = `${icsUrl}${separator}_t=${Date.now()}`;
+
+      const response = await fetch(bustUrl, {
         headers: {
           'User-Agent': 'VincentOsteo-CalendarSync/1.0',
           Accept: 'text/calendar, text/plain, */*',
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          Pragma: 'no-cache',
         },
       });
 
@@ -1085,22 +1096,74 @@ async function startServer() {
       const blockedRegex =
         /(?:^🔒|\b(?:bloqu[eé]|bloqueado|blocked|pause|d[eé]jeuner|almuerzo|lunch|perso|personnel|vacances|vacaciones|ferm[eé]|cerrado|indisponible|cong[eé])\b)/i;
 
-      const parseDate = (rawVal: string, isEnd = false) => {
+      let calendarTz = 'Europe/Madrid';
+      for (const line of lines) {
+        if (line.toUpperCase().startsWith('X-WR-TIMEZONE:')) {
+          const tz = line.slice('X-WR-TIMEZONE:'.length).trim();
+          if (tz) calendarTz = tz;
+          break;
+        }
+      }
+
+      const zonedWallTimeToUtcIso = (
+        year: number,
+        month: number,
+        day: number,
+        hour: number,
+        minute: number,
+        second: number,
+        timeZone: string
+      ) => {
+        const tz = timeZone || 'Europe/Madrid';
+        try {
+          const approxUtcMs = Date.UTC(year, month - 1, day, hour, minute, second);
+          const dtf = new Intl.DateTimeFormat('en-US', {
+            timeZone: tz,
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+            hour12: false,
+          });
+          const parts = dtf.formatToParts(new Date(approxUtcMs));
+          const map: Record<string, number> = {};
+          for (const p of parts) {
+            if (p.type !== 'literal') map[p.type] = Number(p.value);
+          }
+          const tzHour = map.hour === 24 ? 0 : map.hour;
+          const asIfUtcMs = Date.UTC(map.year, map.month - 1, map.day, tzHour, map.minute, map.second);
+          const offsetMs = asIfUtcMs - approxUtcMs;
+          return new Date(approxUtcMs - offsetMs).toISOString();
+        } catch {
+          return new Date(Date.UTC(year, month - 1, day, hour, minute, second)).toISOString();
+        }
+      };
+
+      const parseDate = (rawVal: string, tzid: string, isEnd = false) => {
         const val = String(rawVal || '').trim();
         if (/^\d{8}$/.test(val)) {
           const y = Number(val.slice(0, 4));
           const m = Number(val.slice(4, 6));
           const d = Number(val.slice(6, 8));
-          return (isEnd ? new Date(y, m - 1, d, 9, 55, 0) : new Date(y, m - 1, d, 9, 0, 0)).toISOString();
+          return isEnd
+            ? zonedWallTimeToUtcIso(y, m, d, 9, 55, 0, tzid)
+            : zonedWallTimeToUtcIso(y, m, d, 9, 0, 0, tzid);
         }
         const m = val.match(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})(Z)?$/);
         if (m) {
           const [, yr, mo, da, hh, mm, ss, z] = m;
           if (z === 'Z') return new Date(`${yr}-${mo}-${da}T${hh}:${mm}:${ss}Z`).toISOString();
-          return new Date(Number(yr), Number(mo) - 1, Number(da), Number(hh), Number(mm), Number(ss)).toISOString();
+          return zonedWallTimeToUtcIso(Number(yr), Number(mo), Number(da), Number(hh), Number(mm), Number(ss), tzid);
         }
         const parsed = new Date(val);
         return isNaN(parsed.getTime()) ? '' : parsed.toISOString();
+      };
+
+      const extractTzid = (rawKey: string, defTz: string) => {
+        const m = String(rawKey || '').match(/TZID=([^;:]+)/i);
+        return m && m[1] ? m[1].trim() : defTz;
       };
 
       const unescapeIcs = (s: string) =>
@@ -1109,9 +1172,15 @@ async function startServer() {
           .replace(/\\,/g, ',')
           .replace(/\\;/g, ';')
           .replace(/\\\\/g, '\\')
+          .replace(/\[eventType:[a-z]+\]/gi, '')
+          .replace(/\[type:[a-z]+\]/gi, '')
+          .replace(/\[gcalId:[^\]]+\]/gi, '')
+          .replace(/\[clientName:[^\]]+\]/gi, '')
           .trim();
 
       const parsedEvents: any[] = [];
+      const cancelledSet = new Set<string>();
+      const activeSet = new Set<string>();
       let cur: any = null;
       for (const line of lines) {
         if (line === 'BEGIN:VEVENT') {
@@ -1119,38 +1188,44 @@ async function startServer() {
           continue;
         }
         if (line === 'END:VEVENT') {
-          if (cur && cur.uid && cur.dtstart && cur.status !== 'CANCELLED') {
-            const isAllDay = /^\d{8}$/.test(cur.dtstart);
-            const startIso = parseDate(cur.dtstart, false);
-            const endIso = isAllDay
-              ? parseDate(cur.dtstart, true)
-              : parseDate(cur.dtend || cur.dtstart, true) || startIso;
-            if (startIso) {
-              const rawSummary = unescapeIcs(cur.summary || 'Rendez-vous Google');
-              const cleanSummary = rawSummary.replace(/^🔒\s*/, '').trim();
-              const rawDesc = unescapeIcs(cur.description || '');
-              const isBlocked =
-                rawSummary.startsWith('🔒') ||
-                blockedRegex.test(cleanSummary) ||
-                /\[eventType:blocked\]/i.test(rawDesc) ||
-                cur.transp === 'TRANSPARENT';
+          if (cur && cur.uid) {
+            const cleanUid = String(cur.uid).replace(/@google\.com$/i, '');
+            if (cur.status === 'CANCELLED') {
+              cancelledSet.add(cleanUid);
+            } else if (cur.dtstart) {
+              activeSet.add(cleanUid);
+              const isAllDay = /^\d{8}$/.test(cur.dtstart);
+              const startIso = parseDate(cur.dtstart, cur.dtstartTz || calendarTz, false);
+              const endIso = isAllDay
+                ? parseDate(cur.dtstart, cur.dtstartTz || calendarTz, true)
+                : parseDate(cur.dtend || cur.dtstart, cur.dtendTz || cur.dtstartTz || calendarTz, true) || startIso;
+              if (startIso) {
+                const rawSummary = unescapeIcs(cur.summary || 'Rendez-vous Google');
+                const cleanSummary = rawSummary.replace(/^🔒\s*/, '').trim();
+                const rawDesc = unescapeIcs(cur.description || '');
+                const isBlocked =
+                  rawSummary.startsWith('🔒') ||
+                  blockedRegex.test(cleanSummary) ||
+                  /\[eventType:blocked\]/i.test(cur.description || '') ||
+                  cur.transp === 'TRANSPARENT';
 
-              let clientName = cleanSummary;
-              if (cleanSummary.includes(' — ')) clientName = cleanSummary.split(' — ')[0].trim();
-              else if (cleanSummary.includes(' - ')) clientName = cleanSummary.split(' - ')[0].trim();
+                let clientName = cleanSummary;
+                if (cleanSummary.includes(' — ')) clientName = cleanSummary.split(' — ')[0].trim();
+                else if (cleanSummary.includes(' - ')) clientName = cleanSummary.split(' - ')[0].trim();
 
-              const cleanUid = String(cur.uid).replace(/@google\.com$/i, '');
-              parsedEvents.push({
-                id: `gcal_${cleanUid}`,
-                googleEventId: cleanUid,
-                summary: cleanSummary,
-                description: rawDesc,
-                start: startIso,
-                end: endIso,
-                clientName: isBlocked ? undefined : clientName,
-                eventType: isBlocked ? 'blocked' : 'appointment',
-                isGoogleEvent: true,
-              });
+                parsedEvents.push({
+                  id: `gcal_${cleanUid}`,
+                  googleEventId: cleanUid,
+                  iCalUID: cleanUid,
+                  summary: cleanSummary,
+                  description: rawDesc,
+                  start: startIso,
+                  end: endIso,
+                  clientName: isBlocked ? undefined : clientName,
+                  eventType: isBlocked ? 'blocked' : 'appointment',
+                  isGoogleEvent: true,
+                });
+              }
             }
           }
           cur = null;
@@ -1159,15 +1234,24 @@ async function startServer() {
         if (!cur) continue;
         const idx = line.indexOf(':');
         if (idx === -1) continue;
-        const prop = line.slice(0, idx).split(';')[0].toUpperCase();
+        const rawKey = line.slice(0, idx);
+        const prop = rawKey.split(';')[0].toUpperCase();
         const val = line.slice(idx + 1);
         if (prop === 'UID') cur.uid = val.trim();
         else if (prop === 'SUMMARY') cur.summary = val;
         else if (prop === 'DESCRIPTION') cur.description = val;
-        else if (prop === 'DTSTART') cur.dtstart = val.trim();
-        else if (prop === 'DTEND') cur.dtend = val.trim();
-        else if (prop === 'STATUS') cur.status = val.trim().toUpperCase();
+        else if (prop === 'DTSTART') {
+          cur.dtstart = val.trim();
+          cur.dtstartTz = extractTzid(rawKey, calendarTz);
+        } else if (prop === 'DTEND') {
+          cur.dtend = val.trim();
+          cur.dtendTz = extractTzid(rawKey, calendarTz);
+        } else if (prop === 'STATUS') cur.status = val.trim().toUpperCase();
         else if (prop === 'TRANSP') cur.transp = val.trim().toUpperCase();
+      }
+
+      for (const activeId of activeSet) {
+        cancelledSet.delete(activeId);
       }
 
       const minT = Date.now() - 35 * 24 * 60 * 60 * 1000;
@@ -1177,7 +1261,12 @@ async function startServer() {
         return !isNaN(t) && t >= minT && t <= maxT;
       });
 
-      res.json({ ok: true, count: filtered.length, events: filtered });
+      res.json({
+        ok: true,
+        count: filtered.length,
+        events: filtered,
+        cancelledGoogleIds: Array.from(cancelledSet),
+      });
     } catch (err: any) {
       res.status(500).json({ ok: false, error: err?.message || 'Erreur lecture iCal' });
     }

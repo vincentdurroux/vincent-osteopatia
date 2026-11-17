@@ -197,9 +197,13 @@ export default async function handler(req, res) {
           eventType = 'blocked';
         }
       }
+      const metaClientNameMatch = rawDesc.match(/\[clientName:([^\]]+)\]/i);
+      const metaClientName = metaClientNameMatch?.[1]?.trim();
       const cleanDesc = rawDesc
         .replace(/\[eventType:[a-z]+\]/gi, '')
         .replace(/\[type:[a-z]+\]/gi, '')
+        .replace(/\[gcalId:[^\]]+\]/gi, '')
+        .replace(/\[clientName:[^\]]+\]/gi, '')
         .trim();
 
       const startFmt = formatTimeInZone(startRaw, timeZone);
@@ -229,6 +233,7 @@ export default async function handler(req, res) {
         (rawClientId && clientsById.get(String(rawClientId))) ||
         (row.clientName && clientsByName.get(String(row.clientName).trim().toLowerCase())) ||
         (row.client_name && clientsByName.get(String(row.client_name).trim().toLowerCase())) ||
+        (metaClientName && clientsByName.get(metaClientName.toLowerCase())) ||
         (summaryStr && clientsByName.get(summaryStr.toLowerCase())) ||
         null;
 
@@ -237,6 +242,7 @@ export default async function handler(req, res) {
         row.clientName ||
         row.client_name ||
         row.patient_name ||
+        metaClientName ||
         summaryStr ||
         'Patient';
 

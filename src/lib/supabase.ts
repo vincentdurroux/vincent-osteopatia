@@ -293,18 +293,29 @@ export function sortInvoicesByDate(invoicesList: Invoice[], ascending: boolean =
   });
 }
 
-function prepareDescriptionWithMeta(description?: string, eventType?: EventType, googleEventId?: string): string {
+function prepareDescriptionWithMeta(
+  description?: string,
+  eventType?: EventType,
+  googleEventId?: string,
+  clientName?: string
+): string {
   const clean = (description || '')
     .replace(/\[eventType:[a-z]+\]/gi, '')
     .replace(/\[type:[a-z]+\]/gi, '')
     .replace(/\[gcalId:[^\]]+\]/gi, '')
+    .replace(/\[clientName:[^\]]+\]/gi, '')
     .trim();
   const tags: string[] = [];
-  if (eventType && eventType !== 'appointment') {
-    tags.push('[eventType:blocked]');
-  }
+  const resolvedType: EventType = eventType === 'blocked' ? 'blocked' : 'appointment';
+  tags.push(`[eventType:${resolvedType}]`);
   if (googleEventId) {
     tags.push(`[gcalId:${googleEventId}]`);
+  }
+  if (clientName && resolvedType === 'appointment') {
+    const safeClientName = clientName.replace(/[\[\]\r\n]/g, ' ').trim();
+    if (safeClientName) {
+      tags.push(`[clientName:${safeClientName}]`);
+    }
   }
   if (tags.length > 0) {
     return clean ? `${clean}\n${tags.join(' ')}` : tags.join(' ');
@@ -316,13 +327,14 @@ export function mapEventFromDB(e: any): CalendarEvent {
   const rawDesc = e.description || e.notes || e.note || '';
   let eventType: EventType | undefined = e.eventType || e.event_type || e.type;
   let googleEventId: string | undefined = e.googleEventId || e.google_event_id || undefined;
+  let metaClientName: string | undefined;
 
   if (rawDesc) {
     if (!eventType) {
       const match = rawDesc.match(/\[eventType:([a-z]+)\]/i) || rawDesc.match(/\[type:([a-z]+)\]/i);
       if (match && match[1]) {
         const parsed = match[1].toLowerCase();
-        eventType = (parsed === 'appointment') ? 'appointment' : 'blocked';
+        eventType = parsed === 'appointment' ? 'appointment' : 'blocked';
       }
     }
     if (!googleEventId) {
@@ -331,21 +343,45 @@ export function mapEventFromDB(e: any): CalendarEvent {
         googleEventId = gcalMatch[1].trim();
       }
     }
+    const clientNameMatch = rawDesc.match(/\[clientName:([^\]]+)\]/i);
+    if (clientNameMatch && clientNameMatch[1]) {
+      metaClientName = clientNameMatch[1].trim();
+    }
   }
 
   const cleanDesc = rawDesc
     .replace(/\[eventType:[a-z]+\]/gi, '')
     .replace(/\[type:[a-z]+\]/gi, '')
     .replace(/\[gcalId:[^\]]+\]/gi, '')
+    .replace(/\[clientName:[^\]]+\]/gi, '')
     .trim();
   const summaryStr = e.summary || e.title || e.intitule || '';
 
   if (!eventType) {
-    if (e.clientId || e.client_id || e.clientid || e.patient_id || e.patientId) {
+    if (
+      e.clientId ||
+      e.client_id ||
+      e.clientid ||
+      e.patient_id ||
+      e.patientId ||
+      metaClientName ||
+      googleEventId
+    ) {
       eventType = 'appointment';
     } else {
       const lowerSummary = summaryStr.toLowerCase().trim();
-      if (!summaryStr || ['rdv patient', 'rendez-vous', 'cita', 'appointment', 'sesión de osteopatía', "séance d'ostéopathie", 'osteopathy session'].includes(lowerSummary)) {
+      if (
+        !summaryStr ||
+        [
+          'rdv patient',
+          'rendez-vous',
+          'cita',
+          'appointment',
+          'sesión de osteopatía',
+          "séance d'ostéopathie",
+          'osteopathy session',
+        ].includes(lowerSummary)
+      ) {
         eventType = 'appointment';
       } else {
         eventType = 'blocked';
@@ -356,6 +392,16 @@ export function mapEventFromDB(e: any): CalendarEvent {
   }
 
   const hasClient = Boolean(e.clientId || e.client_id || e.clientid || e.patient_id || e.patientId);
+  const resolvedClientName =
+    eventType === 'blocked'
+      ? undefined
+      : e.clientName ||
+        e.client_name ||
+        e.clientname ||
+        e.patient_name ||
+        e.patientName ||
+        metaClientName ||
+        (hasClient ? undefined : summaryStr || undefined);
 
   return {
     id: String(e.id),
@@ -364,7 +410,7 @@ export function mapEventFromDB(e: any): CalendarEvent {
     start: e.start || e.start_time || e.startTime || '',
     end: e.end || e.end_time || e.endTime || '',
     clientId: hasClient ? (e.clientId || e.client_id || e.clientid || e.patient_id || e.patientId) : undefined,
-    clientName: hasClient ? (e.clientName || e.client_name || e.clientname || e.patient_name || e.patientName) : undefined,
+    clientName: resolvedClientName,
     eventType: eventType || 'appointment',
     googleEventId,
     isGoogleEvent: Boolean(googleEventId || e.isGoogleEvent),
@@ -2311,7 +2357,12 @@ export const api = {
 
     if (isSupabaseConfigured && supabase) {
       try {
-        const descWithMeta = prepareDescriptionWithMeta(newEvent.description, newEvent.eventType, newEvent.googleEventId);
+        const descWithMeta = prepareDescriptionWithMeta(
+          newEvent.description,
+          newEvent.eventType,
+          newEvent.googleEventId,
+          newEvent.clientName
+        );
         const snakePayload: Record<string, any> = {
           id: newEvent.id,
           summary: newEvent.summary,
@@ -2366,11 +2417,11 @@ export const api = {
           const finalEvent: CalendarEvent = {
             ...newEvent,
             ...mapped,
-            clientId: mapped.clientId || newEvent.clientId,
-            clientName: mapped.clientName || newEvent.clientName,
+            clientId: newEvent.clientId || mapped.clientId,
+            clientName: newEvent.clientName || mapped.clientName,
             summary: mapped.summary || newEvent.summary,
-            eventType: mapped.eventType || newEvent.eventType,
-            googleEventId: mapped.googleEventId || newEvent.googleEventId,
+            eventType: newEvent.eventType || mapped.eventType || 'appointment',
+            googleEventId: newEvent.googleEventId || mapped.googleEventId,
             isGoogleEvent: Boolean(mapped.googleEventId || newEvent.googleEventId || newEvent.isGoogleEvent),
           };
           return finalEvent;
@@ -2393,7 +2444,12 @@ export const api = {
   async updateLocalEvent(event: CalendarEvent): Promise<CalendarEvent> {
     if (isSupabaseConfigured && supabase) {
       try {
-        const descWithMeta = prepareDescriptionWithMeta(event.description, event.eventType, event.googleEventId);
+        const descWithMeta = prepareDescriptionWithMeta(
+          event.description,
+          event.eventType,
+          event.googleEventId,
+          event.clientName
+        );
         const snakePayload: Record<string, any> = {
           summary: event.summary,
           description: descWithMeta,
@@ -2423,10 +2479,27 @@ export const api = {
           event_type: event.eventType || 'appointment',
         };
 
-        let result = await executeResilientUpdate('calendar_events', event.id, [snakePayload, camelPayload, timePayload]);
+        const minimalUpdatePayload: Record<string, any> = {
+          summary: event.summary,
+          description: descWithMeta,
+          start: event.start,
+          end: event.end,
+        };
+
+        let result = await executeResilientUpdate('calendar_events', event.id, [
+          snakePayload,
+          camelPayload,
+          timePayload,
+          minimalUpdatePayload,
+        ]);
 
         if (!result.success && result.error && (result.error.message?.includes('relation') || result.error.code === '42P01')) {
-          result = await executeResilientUpdate('events', event.id, [snakePayload, camelPayload, timePayload]);
+          result = await executeResilientUpdate('events', event.id, [
+            snakePayload,
+            camelPayload,
+            timePayload,
+            minimalUpdatePayload,
+          ]);
         }
 
         if (result.success && result.data) {
@@ -2434,11 +2507,11 @@ export const api = {
           const finalEvent: CalendarEvent = {
             ...event,
             ...mapped,
-            clientId: mapped.clientId || event.clientId,
-            clientName: mapped.clientName || event.clientName,
+            clientId: event.clientId || mapped.clientId,
+            clientName: event.clientName || mapped.clientName,
             summary: mapped.summary || event.summary,
-            eventType: mapped.eventType || event.eventType,
-            googleEventId: mapped.googleEventId || event.googleEventId,
+            eventType: event.eventType || mapped.eventType || 'appointment',
+            googleEventId: event.googleEventId || mapped.googleEventId,
             isGoogleEvent: Boolean(mapped.googleEventId || event.googleEventId || event.isGoogleEvent),
           };
           return finalEvent;

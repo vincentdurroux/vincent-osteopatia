@@ -39,7 +39,7 @@ let cachedAccessToken: string | null = null;
 // Initialize auth state listener. Call this on app load.
 export const initAuth = (
   onAuthSuccess?: (user: User, token: string) => void,
-  onAuthFailure?: () => void
+  onAuthFailure?: (rememberedUser?: User | null) => void
 ) => {
   return onAuthStateChanged(auth, async (user: User | null) => {
     if (user) {
@@ -47,19 +47,28 @@ export const initAuth = (
         if (onAuthSuccess) onAuthSuccess(user, cachedAccessToken);
       } else if (!isSigningIn) {
         cachedAccessToken = null;
-        if (onAuthFailure) onAuthFailure();
+        if (onAuthFailure) onAuthFailure(user);
       }
     } else {
       cachedAccessToken = null;
-      if (onAuthFailure) onAuthFailure();
+      if (onAuthFailure) onAuthFailure(null);
     }
   });
 };
 
 // Must be called from a button click or user interaction
-export const googleSignIn = async (): Promise<{ user: User; accessToken: string } | null> => {
+export const googleSignIn = async (loginHintEmail?: string | null): Promise<{ user: User; accessToken: string } | null> => {
   try {
     isSigningIn = true;
+    if (loginHintEmail) {
+      provider.setCustomParameters({
+        login_hint: loginHintEmail,
+      });
+    } else {
+      provider.setCustomParameters({
+        prompt: 'select_account',
+      });
+    }
     const result = await signInWithPopup(auth, provider);
     const credential = GoogleAuthProvider.credentialFromResult(result);
     if (!credential?.accessToken) {
@@ -93,6 +102,15 @@ const GCAL_BASE_URL = 'https://www.googleapis.com/calendar/v3/calendars/primary/
 
 const BLOCKED_KEYWORDS_REGEX =
   /(?:^🔒|\b(?:bloqu[eé]|bloqueado|blocked|pause|d[eé]jeuner|almuerzo|lunch|perso|personnel|vacances|vacaciones|ferm[eé]|cerrado|indisponible|cong[eé])\b)/i;
+
+function stripInternalMetaTags(desc?: string): string {
+  return String(desc || '')
+    .replace(/\[eventType:[a-z]+\]/gi, '')
+    .replace(/\[type:[a-z]+\]/gi, '')
+    .replace(/\[gcalId:[^\]]+\]/gi, '')
+    .replace(/\[clientName:[^\]]+\]/gi, '')
+    .trim();
+}
 
 function normalizeGoogleDateTime(dtObj?: { dateTime?: string; date?: string }, isEnd = false): string {
   if (!dtObj) return '';
@@ -175,70 +193,123 @@ export function classifyExternalCalendarEvent(
   };
 }
 
+export interface GoogleCalendarSyncPayload {
+  events: (CalendarEvent & { iCalUID?: string })[];
+  cancelledGoogleIds: string[];
+}
+
 export const calendarApi = {
-  async fetchEvents(accessToken: string, timeMin?: string, timeMax?: string): Promise<CalendarEvent[]> {
-    let url = `${GCAL_BASE_URL}?singleEvents=true&orderBy=startTime&maxResults=250`;
-    if (timeMin) url += `&timeMin=${encodeURIComponent(timeMin)}`;
-    if (timeMax) url += `&timeMax=${encodeURIComponent(timeMax)}`;
+  async fetchEventsWithChanges(
+    accessToken: string,
+    timeMin?: string,
+    timeMax?: string
+  ): Promise<GoogleCalendarSyncPayload> {
+    const allItems: any[] = [];
+    let pageToken: string | undefined = undefined;
+    let pageCount = 0;
 
-    const res = await fetch(url, {
-      method: 'GET',
-      cache: 'no-store',
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-      },
-    });
+    while (pageCount < 4) {
+      let url = `${GCAL_BASE_URL}?singleEvents=true&orderBy=startTime&maxResults=2500&showDeleted=true`;
+      if (timeMin) url += `&timeMin=${encodeURIComponent(timeMin)}`;
+      if (timeMax) url += `&timeMax=${encodeURIComponent(timeMax)}`;
+      if (pageToken) url += `&pageToken=${encodeURIComponent(pageToken)}`;
 
-    if (!res.ok) {
-      if (res.status === 401 || res.status === 403) {
-        cachedAccessToken = null;
-        throw new Error('TOKEN_EXPIRED');
+      const res = await fetch(url, {
+        method: 'GET',
+        cache: 'no-store',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+      });
+
+      if (!res.ok) {
+        if (res.status === 401 || res.status === 403) {
+          cachedAccessToken = null;
+          throw new Error('TOKEN_EXPIRED');
+        }
+        throw new Error(`Google Calendar API error: ${res.status}`);
       }
-      throw new Error(`Google Calendar API error: ${res.status}`);
+
+      const data = await res.json();
+      if (Array.isArray(data.items)) {
+        allItems.push(...data.items);
+      }
+      pageCount += 1;
+      if (data.nextPageToken) {
+        pageToken = data.nextPageToken;
+      } else {
+        break;
+      }
     }
 
-    const data = await res.json();
-    if (!Array.isArray(data.items)) return [];
+    const cancelledIdSet = new Set<string>();
+    const activeIdSet = new Set<string>();
+    const events: (CalendarEvent & { iCalUID?: string })[] = [];
 
-    return data.items
-      .filter((item: any) => item.status !== 'cancelled')
-      .map((item: any): CalendarEvent => {
-        const isAllDay = Boolean(item.start?.date && !item.start?.dateTime);
-        const startStr = normalizeGoogleDateTime(item.start, false);
-        // For all-day events, Google sets end.date to the next day; keep it on the same day 09:00-09:55
-        const endStr = isAllDay
-          ? normalizeGoogleDateTime(item.start, true)
-          : normalizeGoogleDateTime(item.end, true) || startStr;
+    for (const item of allItems) {
+      const cleanIcalUid = item.iCalUID ? String(item.iCalUID).replace(/@google\.com$/i, '') : undefined;
+      if (item.status === 'cancelled') {
+        if (item.id) cancelledIdSet.add(String(item.id));
+        if (cleanIcalUid) cancelledIdSet.add(cleanIcalUid);
+        continue;
+      }
 
-        const priv = item.extendedProperties?.private || {};
-        const rawSummary = String(item.summary || 'Rendez-vous Google');
-        const rawDesc = String(item.description || '').trim();
+      if (item.id) activeIdSet.add(String(item.id));
+      if (cleanIcalUid) activeIdSet.add(cleanIcalUid);
 
-        const { eventType, clientName, cleanSummary } = classifyExternalCalendarEvent(
-          rawSummary,
-          rawDesc,
-          priv,
-          item.transparency
-        );
+      const isAllDay = Boolean(item.start?.date && !item.start?.dateTime);
+      const startStr = normalizeGoogleDateTime(item.start, false);
+      // For all-day events, Google sets end.date to the next day; keep it on the same day 09:00-09:55
+      const endStr = isAllDay
+        ? normalizeGoogleDateTime(item.start, true)
+        : normalizeGoogleDateTime(item.end, true) || startStr;
 
-        return {
-          id: priv.vincentEventId || `gcal_${item.id}`,
-          googleEventId: item.id,
-          summary: cleanSummary,
-          description: rawDesc,
-          start: startStr,
-          end: endStr,
-          clientId: priv.clientId || undefined,
-          clientName,
-          eventType,
-          isGoogleEvent: true,
-        };
-      })
-      .filter((ev: CalendarEvent) => Boolean(ev.start));
+      if (!startStr) continue;
+
+      const priv = item.extendedProperties?.private || {};
+      const rawSummary = String(item.summary || 'Rendez-vous Google');
+      const rawDesc = stripInternalMetaTags(item.description);
+
+      const { eventType, clientName, cleanSummary } = classifyExternalCalendarEvent(
+        rawSummary,
+        rawDesc,
+        priv,
+        item.transparency
+      );
+
+      events.push({
+        id: priv.vincentEventId || `gcal_${item.id}`,
+        googleEventId: item.id,
+        iCalUID: cleanIcalUid,
+        summary: cleanSummary,
+        description: rawDesc,
+        start: startStr,
+        end: endStr,
+        clientId: priv.clientId || undefined,
+        clientName,
+        eventType,
+        isGoogleEvent: true,
+      });
+    }
+
+    // Any ID that also has an active instance is not considered cancelled
+    for (const activeId of activeIdSet) {
+      cancelledIdSet.delete(activeId);
+    }
+
+    return {
+      events,
+      cancelledGoogleIds: Array.from(cancelledIdSet),
+    };
   },
 
-  async fetchIcsFeedEvents(icsUrl: string): Promise<CalendarEvent[]> {
-    if (!icsUrl || !icsUrl.trim()) return [];
+  async fetchEvents(accessToken: string, timeMin?: string, timeMax?: string): Promise<CalendarEvent[]> {
+    const res = await this.fetchEventsWithChanges(accessToken, timeMin, timeMax);
+    return res.events;
+  },
+
+  async fetchIcsFeedEventsWithChanges(icsUrl: string): Promise<GoogleCalendarSyncPayload> {
+    if (!icsUrl || !icsUrl.trim()) return { events: [], cancelledGoogleIds: [] };
     const res = await fetch('/api/telegram/gcal-ics', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -249,13 +320,21 @@ export const calendarApi = {
       throw new Error(errData.error || `HTTP ${res.status}`);
     }
     const data = await res.json();
-    return Array.isArray(data.events) ? data.events : [];
+    return {
+      events: Array.isArray(data.events) ? data.events : [],
+      cancelledGoogleIds: Array.isArray(data.cancelledGoogleIds) ? data.cancelledGoogleIds : [],
+    };
+  },
+
+  async fetchIcsFeedEvents(icsUrl: string): Promise<CalendarEvent[]> {
+    const res = await this.fetchIcsFeedEventsWithChanges(icsUrl);
+    return res.events;
   },
 
   async createEvent(accessToken: string, event: CalendarEvent): Promise<CalendarEvent> {
     const body = {
       summary: formatGoogleSummaryForClinicEvent(event),
-      description: event.description || '',
+      description: stripInternalMetaTags(event.description),
       start: { dateTime: new Date(event.start).toISOString() },
       end: { dateTime: new Date(event.end).toISOString() },
       extendedProperties: {
@@ -301,7 +380,7 @@ export const calendarApi = {
   ): Promise<CalendarEvent> {
     const body = {
       summary: formatGoogleSummaryForClinicEvent(event),
-      description: event.description || '',
+      description: stripInternalMetaTags(event.description),
       start: { dateTime: new Date(event.start).toISOString() },
       end: { dateTime: new Date(event.end).toISOString() },
       extendedProperties: {
@@ -327,6 +406,10 @@ export const calendarApi = {
       if (res.status === 401 || res.status === 403) {
         cachedAccessToken = null;
         throw new Error('TOKEN_EXPIRED');
+      }
+      if (res.status === 404 || res.status === 410) {
+        // Event was removed or ID was an iCalUID; recreate it cleanly on Google Calendar
+        return this.createEvent(accessToken, event);
       }
       const errText = await res.text();
       throw new Error(`Failed to update Google Calendar event: ${res.status} - ${errText}`);
