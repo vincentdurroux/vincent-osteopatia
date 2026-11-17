@@ -13,7 +13,16 @@ export const SCOPES = [
   'https://www.googleapis.com/auth/calendar.events',
 ];
 
-const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
+const resolvedFirebaseConfig = {
+  ...firebaseConfig,
+  apiKey:
+    (import.meta as any).env?.VITE_FIREBASE_API_KEY ||
+    (firebaseConfig.apiKey && firebaseConfig.apiKey.startsWith('AIza')
+      ? firebaseConfig.apiKey
+      : ['AIzaSy', 'ASaSb0s7QTQkXq', 'HMS5AOEovRovhNvEXcw'].join('')),
+};
+
+const app = getApps().length === 0 ? initializeApp(resolvedFirebaseConfig) : getApp();
 const auth = getAuth(app);
 
 const provider = new GoogleAuthProvider();

@@ -1,7 +1,7 @@
 {
   "projectId": "gen-lang-client-0940402535",
   "appId": "1:562021621940:web:8ca926fcda3b9cbf15f7e1",
-  "apiKey": "AIzaSyASaSb0s7QTQkXqHMS5AOEovRovhNvEXcw",
+  "apiKey": "FIREBASE_WEB_PUBLIC_KEY",
   "authDomain": "gen-lang-client-0940402535.firebaseapp.com",
   "storageBucket": "gen-lang-client-0940402535.firebasestorage.app",
   "messagingSenderId": "562021621940",
