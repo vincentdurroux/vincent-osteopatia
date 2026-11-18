@@ -1835,7 +1835,7 @@ export const api = {
                   ? `${clientId}::evt_${eventId}::date_${draftDate}`
                   : `${clientId}::date_${draftDate}`);
 
-              if (clientId && (row.anamnese?.trim() || row.treatment?.trim() || rawMotif.trim())) {
+              if (clientId && (row.anamnese?.trim() || row.treatment?.trim())) {
                 drafts[key] = {
                   clientId,
                   clientName: parsedMeta.clientName || '',
@@ -1863,6 +1863,7 @@ export const api = {
 
   async saveRemoteDraft(draft: ClinicalNoteDraftItem): Promise<boolean> {
     if (!isSupabaseConfigured || !supabase || !draft.clientId) return false;
+    if (!draft.anamnese?.trim() && !draft.treatment?.trim()) return false;
     try {
       const cleanDate = (draft.date || new Date().toISOString()).split('T')[0];
       const draftId = draft.eventId

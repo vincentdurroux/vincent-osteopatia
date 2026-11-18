@@ -433,11 +433,32 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
     updatedAt: number;
   }
 
+  // A clinical note draft is ONLY active if at least one character is written in the clinical notes (anamnese or treatment)
+  const hasNoteDraftContent = (d?: { anamnese?: string; treatment?: string } | null): boolean => {
+    return Boolean((d?.anamnese && d.anamnese.trim().length > 0) || (d?.treatment && d.treatment.trim().length > 0));
+  };
+
   const getStoredDrafts = (): Record<string, ClinicalNoteDraftItem> => {
     if (typeof window === 'undefined') return {};
     try {
       const raw = localStorage.getItem(NOTE_DRAFTS_STORAGE_KEY);
-      return raw ? JSON.parse(raw) : {};
+      if (!raw) return {};
+      const parsed: Record<string, ClinicalNoteDraftItem> = JSON.parse(raw);
+      const valid: Record<string, ClinicalNoteDraftItem> = {};
+      let hadInvalid = false;
+      Object.entries(parsed).forEach(([k, item]) => {
+        if (hasNoteDraftContent(item)) {
+          valid[k] = item;
+        } else {
+          hadInvalid = true;
+        }
+      });
+      if (hadInvalid) {
+        try {
+          localStorage.setItem(NOTE_DRAFTS_STORAGE_KEY, JSON.stringify(valid));
+        } catch {}
+      }
+      return valid;
     } catch {
       return {};
     }
@@ -458,8 +479,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
     const clientEntries = Object.entries(stored).filter(([k, d]) => {
       const matchesClient =
         d.clientId === clientId || k.startsWith(`${clientId}::`) || k.startsWith(`${clientId}_`);
-      const hasContent = Boolean(d.anamnese?.trim() || d.treatment?.trim() || d.motif?.trim());
-      return matchesClient && hasContent;
+      return matchesClient && hasNoteDraftContent(d);
     });
 
     if (clientEntries.length === 0) return null;
@@ -525,7 +545,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
         client,
         ...draft
       };
-    }).filter(d => Boolean(d.anamnese?.trim() || d.treatment?.trim() || d.motif?.trim()));
+    }).filter(d => hasNoteDraftContent(d));
   }, [draftsMap, clients]);
 
   const [activeDraftNotice, setActiveDraftNotice] = useState<boolean>(false);
@@ -553,6 +573,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
         let updated = false;
 
         Object.entries(remote).forEach(([key, remoteDraft]) => {
+          if (!hasNoteDraftContent(remoteDraft)) return;
           const localDraft = local[key];
           if (!localDraft || (remoteDraft.updatedAt && remoteDraft.updatedAt > (localDraft.updatedAt || 0))) {
             local[key] = remoteDraft;
@@ -566,7 +587,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
           if (
             localDraft &&
             localDraft.clientId &&
-            (localDraft.anamnese?.trim() || localDraft.treatment?.trim() || localDraft.motif?.trim()) &&
+            hasNoteDraftContent(localDraft) &&
             (!remoteDraft || (localDraft.updatedAt || 0) > (remoteDraft.updatedAt || 0))
           ) {
             api.saveRemoteDraft(localDraft);
@@ -585,13 +606,13 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                 newNoteRef.current.eventId || undefined,
                 newNoteRef.current.date || undefined
               ) || getClientDraft(selectedClient.id);
-            if (currentClientDraft && (!newNoteRef.current.anamnese.trim() && !newNoteRef.current.treatment.trim() && !newNoteRef.current.motif.trim())) {
+            if (currentClientDraft && !hasNoteDraftContent(newNoteRef.current)) {
               const restored = {
                 anamnese: currentClientDraft.draft.anamnese || '',
                 treatment: currentClientDraft.draft.treatment || '',
                 category: currentClientDraft.draft.category || 'treatment',
                 date: currentClientDraft.draft.date || newNoteRef.current.date || new Date().toISOString().split('T')[0],
-                motif: currentClientDraft.draft.motif || '',
+                motif: currentClientDraft.draft.motif || newNoteRef.current.motif || '',
                 eventId: currentClientDraft.draft.eventId || newNoteRef.current.eventId || '',
               };
               newNoteRef.current = restored;
@@ -628,7 +649,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
       const primaryKey = effectiveEventId
         ? `${clientId}::evt_${effectiveEventId}::date_${cleanDate}`
         : `${clientId}::date_${cleanDate}`;
-      const hasContent = Boolean(draft && (draft.anamnese?.trim() || draft.treatment?.trim() || draft.motif?.trim()));
+      const hasContent = hasNoteDraftContent(draft);
 
       // Helper to check if a stored key/item belongs to this exact (clientId + eventId/date) session
       const matchesTargetSession = (k: string, d: ClinicalNoteDraftItem) => {
@@ -696,8 +717,8 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
       const nextDate = fields.date.split('T')[0];
       const prevNote = newNoteRef.current;
 
-      // 1. Save current draft under its own previous treatment date if it had content
-      if (prevNote.anamnese.trim() || prevNote.treatment.trim() || prevNote.motif.trim()) {
+      // 1. Save current draft under its own previous treatment date if it had content in notes
+      if (hasNoteDraftContent(prevNote)) {
         saveDraftToStorage(selectedClient.id, prevNote.eventId, prevNote.date, prevNote);
       }
 
@@ -726,7 +747,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
           treatment: existingForDate.draft.treatment || '',
           category: existingForDate.draft.category || 'treatment',
           date: nextDate,
-          motif: existingForDate.draft.motif || matchingAppt?.summary || '',
+          motif: '',
           eventId: existingForDate.draft.eventId || nextEventId,
         };
         newNoteRef.current = nextState;
@@ -738,7 +759,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
           treatment: '',
           category: prevNote.category || 'treatment',
           date: nextDate,
-          motif: matchingAppt?.summary || '',
+          motif: '',
           eventId: nextEventId,
         };
         newNoteRef.current = nextState;
@@ -752,10 +773,14 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
       const updated = { ...prev, ...fields };
       newNoteRef.current = updated;
       if (selectedClient?.id) {
-        saveDraftToStorage(selectedClient.id, updated.eventId, updated.date, updated);
-        if (updated.anamnese.trim() || updated.treatment.trim() || updated.motif.trim()) {
+        if (hasNoteDraftContent(updated)) {
+          saveDraftToStorage(selectedClient.id, updated.eventId, updated.date, updated);
           setActiveDraftNotice(true);
         } else {
+          // Only clear stored draft if one actually existed for this session, without activating any draft
+          if (hasClientDraft(selectedClient.id, updated.eventId, updated.date)) {
+            saveDraftToStorage(selectedClient.id, updated.eventId, updated.date, null);
+          }
           setActiveDraftNotice(false);
         }
       }
@@ -783,7 +808,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
   // Save draft on window beforeunload or pagehide
   useEffect(() => {
     const handleBeforeUnload = () => {
-      if (selectedClient?.id && (newNoteRef.current.anamnese.trim() || newNoteRef.current.treatment.trim() || newNoteRef.current.motif.trim())) {
+      if (selectedClient?.id && hasNoteDraftContent(newNoteRef.current)) {
         saveDraftToStorage(selectedClient.id, newNoteRef.current.eventId, newNoteRef.current.date, newNoteRef.current);
       }
     };
@@ -792,7 +817,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
     return () => {
       window.removeEventListener('beforeunload', handleBeforeUnload);
       window.removeEventListener('pagehide', handleBeforeUnload);
-      if (selectedClient?.id && (newNoteRef.current.anamnese.trim() || newNoteRef.current.treatment.trim() || newNoteRef.current.motif.trim())) {
+      if (selectedClient?.id && hasNoteDraftContent(newNoteRef.current)) {
         saveDraftToStorage(selectedClient.id, newNoteRef.current.eventId, newNoteRef.current.date, newNoteRef.current);
       }
     };
@@ -803,9 +828,9 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
     const prev = prevSessionRef.current;
     const currClientId = selectedClient?.id || null;
 
-    // 1. Save draft of previous client if it had uncommitted text
+    // 1. Save draft of previous client if it had uncommitted text in notes
     if (prev.clientId && prev.clientId !== currClientId) {
-      if (newNoteRef.current.anamnese.trim() || newNoteRef.current.treatment.trim() || newNoteRef.current.motif.trim()) {
+      if (hasNoteDraftContent(newNoteRef.current)) {
         saveDraftToStorage(prev.clientId, prev.eventId, prev.date, newNoteRef.current);
       }
     }
@@ -1483,13 +1508,13 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
   // Create client Note
   const handleAddNote = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedClient || (!newNote.anamnese.trim() && !newNote.treatment.trim() && !newNote.motif?.trim())) return;
+    if (!selectedClient || (!newNote.anamnese.trim() && !newNote.treatment.trim())) return;
     
     try {
       const parts: string[] = [];
       if (newNote.anamnese.trim()) parts.push(newNote.anamnese.trim());
       if (newNote.treatment.trim()) parts.push(newNote.treatment.trim());
-      const combinedContent = parts.join('\n\n') || newNote.motif?.trim() || '';
+      const combinedContent = parts.join('\n\n') || '';
 
       const noteDateOnly = new Date(newNote.date).toISOString().split('T')[0];
       const isAlreadyRedeemed = Boolean(
@@ -1502,7 +1527,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
         treatment: newNote.treatment.trim(),
         content: combinedContent,
         category: newNote.category,
-        motif: newNote.motif?.trim() || undefined,
+        motif: undefined,
         date: new Date(newNote.date).toISOString(),
         eventId: newNote.eventId || undefined,
         isBonoRedeemed: isAlreadyRedeemed,
@@ -2300,7 +2325,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
 
   // Update Client Note Handler
   const handleUpdateNote = async (noteId: string) => {
-    if (!editingNoteAnamnese.trim() && !editingNoteTreatment.trim() && !editingNoteMotif.trim()) return;
+    if (!editingNoteAnamnese.trim() && !editingNoteTreatment.trim()) return;
     try {
       const noteToUpdate = clientNotes.find(n => n.id === noteId);
       if (!noteToUpdate) return;
@@ -2308,7 +2333,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
       const parts: string[] = [];
       if (editingNoteAnamnese.trim()) parts.push(editingNoteAnamnese.trim());
       if (editingNoteTreatment.trim()) parts.push(editingNoteTreatment.trim());
-      const combinedContent = parts.join('\n\n') || editingNoteMotif.trim() || '';
+      const combinedContent = parts.join('\n\n') || '';
 
       let noteDate = noteToUpdate.date;
       if (editingNoteDate) {
@@ -2325,7 +2350,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
         treatment: editingNoteTreatment.trim(),
         content: combinedContent,
         category: editingNoteCategory,
-        motif: editingNoteMotif.trim() || undefined,
+        motif: undefined,
         date: noteDate,
       });
 
@@ -2651,7 +2676,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
     setIsAddClientOpen(false);
 
     // Save any active uncommitted draft of the currently open patient/date before switching
-    if (selectedClient?.id && (newNoteRef.current.anamnese.trim() || newNoteRef.current.treatment.trim() || newNoteRef.current.motif.trim())) {
+    if (selectedClient?.id && hasNoteDraftContent(newNoteRef.current)) {
       saveDraftToStorage(selectedClient.id, newNoteRef.current.eventId, newNoteRef.current.date, newNoteRef.current);
     }
 
@@ -2698,7 +2723,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
           treatment: existingDraft.draft.treatment || '',
           category: existingDraft.draft.category || 'treatment',
           date: existingDraft.draft.date || dateStr,
-          motif: existingDraft.draft.motif || event.summary || '',
+          motif: '',
           eventId: event.id || existingDraft.draft.eventId || '',
         };
         newNoteRef.current = nextNote;
@@ -2710,7 +2735,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
           treatment: '',
           category: 'treatment' as ClientNote['category'],
           date: dateStr,
-          motif: event.summary || '',
+          motif: '',
           eventId: event.id || '',
         };
         newNoteRef.current = nextNote;
@@ -4556,9 +4581,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                               (selectedClient.id !== d.clientId ||
                                 newNoteRef.current.date !== d.date ||
                                 (newNoteRef.current.eventId || '') !== (d.eventId || '')) &&
-                              (newNoteRef.current.anamnese.trim() ||
-                                newNoteRef.current.treatment.trim() ||
-                                newNoteRef.current.motif.trim())
+                              hasNoteDraftContent(newNoteRef.current)
                             ) {
                               saveDraftToStorage(
                                 selectedClient.id,
@@ -4604,7 +4627,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                           <p className="font-bold text-amber-950 truncate">{d.client?.name || d.clientName || 'Patient'}</p>
                           <p className="text-[10px] text-amber-800/80 truncate">
                             {d.date ? `${new Date(`${d.date.split('T')[0]}T12:00:00`).toLocaleDateString(lang === 'fr' ? 'fr-FR' : lang === 'es' ? 'es-ES' : 'en-GB')} • ` : ''}
-                            {d.motif || d.anamnese.substring(0, 40) || (lang === 'fr' ? 'Brouillon de consultation' : 'Draft note')}
+                            {(d.anamnese || d.treatment || '').substring(0, 40) || (lang === 'fr' ? 'Brouillon de consultation' : 'Draft note')}
                           </p>
                         </button>
                         <button
@@ -5407,7 +5430,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                         ) : (() => {
                                           const isoDate = `${evDate.getFullYear()}-${String(evDate.getMonth() + 1).padStart(2, '0')}-${String(evDate.getDate()).padStart(2, '0')}`;
                                           const apptDraft = getClientDraft(selectedClient.id, ev.id, isoDate);
-                                          const isDraftPending = Boolean(apptDraft && (apptDraft.draft.anamnese?.trim() || apptDraft.draft.treatment?.trim() || apptDraft.draft.motif?.trim()));
+                                          const isDraftPending = Boolean(apptDraft && hasNoteDraftContent(apptDraft.draft));
 
                                           return (
                                             <button
@@ -5417,7 +5440,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                                 if (
                                                   selectedClient?.id &&
                                                   (newNoteRef.current.eventId !== ev.id || newNoteRef.current.date !== isoDate) &&
-                                                  (newNoteRef.current.anamnese.trim() || newNoteRef.current.treatment.trim() || newNoteRef.current.motif.trim())
+                                                  hasNoteDraftContent(newNoteRef.current)
                                                 ) {
                                                   saveDraftToStorage(selectedClient.id, newNoteRef.current.eventId, newNoteRef.current.date, newNoteRef.current);
                                                 }
@@ -5428,7 +5451,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                                     treatment: apptDraft.draft.treatment || '',
                                                     category: apptDraft.draft.category || 'treatment',
                                                     date: apptDraft.draft.date || isoDate,
-                                                    motif: apptDraft.draft.motif || ev.summary || '',
+                                                    motif: '',
                                                     eventId: ev.id || apptDraft.draft.eventId || '',
                                                   };
                                                   newNoteRef.current = loaded;
@@ -5440,7 +5463,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                                     treatment: '',
                                                     category: 'treatment' as ClientNote['category'],
                                                     date: isoDate,
-                                                    motif: ev.summary || '',
+                                                    motif: '',
                                                     eventId: ev.id,
                                                   };
                                                   newNoteRef.current = fresh;
@@ -5543,7 +5566,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                       </h4>
 
                       {/* Draft auto-save indicator & discard button */}
-                      {activeDraftNotice && (newNote.anamnese.trim() || newNote.treatment.trim() || newNote.motif.trim()) && (
+                      {activeDraftNotice && hasNoteDraftContent(newNote) && (
                         <div className="mb-4 p-3 rounded-2xl bg-amber-50/90 border border-amber-200/90 flex items-center justify-between gap-3 text-xs text-amber-900 shadow-2xs">
                           <div className="flex items-center gap-2">
                             <div className="relative shrink-0">
@@ -5630,19 +5653,6 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
 
                         <div>
                           <label className="text-[10px] uppercase tracking-wider font-bold text-gray-400 block mb-1">
-                            {lang === 'fr' ? "Motif / Titre (optionnel)" : lang === 'es' ? "Motivo / Título (opcional)" : "Reason / Title (optional)"}
-                          </label>
-                          <input
-                            type="text"
-                            value={newNote.motif}
-                            onChange={(e) => handleUpdateNoteField({ motif: e.target.value })}
-                            placeholder={lang === 'fr' ? "ex: Lombalgie, Note de suivi, Bilan..." : lang === 'es' ? "ej: Cervicalgia, Nota de seguimiento..." : "e.g., Back pain, Follow-up note..."}
-                            className="w-full p-2.5 bg-[#f4f4ec] rounded-xl border border-black/5 text-xs focus:outline-none focus:ring-1 focus:ring-primary focus:bg-white transition-all"
-                          />
-                        </div>
-
-                        <div>
-                          <label className="text-[10px] uppercase tracking-wider font-bold text-gray-400 block mb-1">
                             {lang === 'fr' ? "Anamnèse & Symptômes / Observation" : lang === 'es' ? "Anamnesis y Síntomas / Observación" : "Anamnesis & Symptoms / Note"}
                           </label>
                           <textarea
@@ -5672,7 +5682,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
 
                         <button
                           type="submit"
-                          disabled={!newNote.anamnese.trim() && !newNote.treatment.trim() && !newNote.motif.trim()}
+                          disabled={!newNote.anamnese.trim() && !newNote.treatment.trim()}
                           className="w-full py-3 bg-primary text-white rounded-2xl text-xs font-bold uppercase tracking-wider hover:bg-primary/95 transition-all shadow-md shadow-primary/10 disabled:opacity-50 flex items-center justify-center gap-2 cursor-pointer"
                         >
                           <Plus size={14} />
@@ -5766,31 +5776,16 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                   </span>
                                 </div>
 
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                                  <div>
-                                    <label className="text-[9px] uppercase tracking-wider font-bold text-gray-400 block mb-1">
-                                      {lang === 'fr' ? "Date" : lang === 'es' ? "Fecha" : "Date"}
-                                    </label>
-                                    <input
-                                      type="date"
-                                      value={editingNoteDate}
-                                      onChange={(e) => setEditingNoteDate(e.target.value)}
-                                      className="w-full p-2 bg-white rounded-xl border border-black/10 text-xs focus:outline-none focus:ring-1 focus:ring-primary transition-all"
-                                    />
-                                  </div>
-
-                                  <div>
-                                    <label className="text-[9px] uppercase tracking-wider font-bold text-gray-400 block mb-1">
-                                      {lang === 'fr' ? "Motif / Titre (optionnel)" : lang === 'es' ? "Motivo / Título (opcional)" : "Reason / Title (optional)"}
-                                    </label>
-                                    <input
-                                      type="text"
-                                      value={editingNoteMotif}
-                                      onChange={(e) => setEditingNoteMotif(e.target.value)}
-                                      placeholder={lang === 'fr' ? "ex: Lombalgie aiguë, Suivi posture..." : "e.g., Back pain..."}
-                                      className="w-full p-2 bg-white rounded-xl border border-black/10 text-xs focus:outline-none focus:ring-1 focus:ring-primary transition-all"
-                                    />
-                                  </div>
+                                <div>
+                                  <label className="text-[9px] uppercase tracking-wider font-bold text-gray-400 block mb-1">
+                                    {lang === 'fr' ? "Date" : lang === 'es' ? "Fecha" : "Date"}
+                                  </label>
+                                  <input
+                                    type="date"
+                                    value={editingNoteDate}
+                                    onChange={(e) => setEditingNoteDate(e.target.value)}
+                                    className="w-full p-2 bg-white rounded-xl border border-black/10 text-xs focus:outline-none focus:ring-1 focus:ring-primary transition-all"
+                                  />
                                 </div>
 
                                 <div className="space-y-2">
@@ -5843,7 +5838,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                     <button
                                       type="button"
                                       onClick={() => handleUpdateNote(note.id)}
-                                      disabled={!editingNoteAnamnese.trim() && !editingNoteTreatment.trim() && !editingNoteMotif.trim()}
+                                      disabled={!editingNoteAnamnese.trim() && !editingNoteTreatment.trim()}
                                       className="px-4 py-1.5 bg-primary hover:bg-primary/95 text-white rounded-xl text-xs font-bold transition-all disabled:opacity-50 cursor-pointer shadow-xs flex items-center gap-1.5"
                                     >
                                       <Check size={13} />
@@ -5885,7 +5880,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                         setEditingNoteAnamnese(note.anamnese || note.content || '');
                                         setEditingNoteTreatment(note.treatment || '');
                                         setEditingNoteCategory(note.category);
-                                        setEditingNoteMotif(note.motif || '');
+                                        setEditingNoteMotif('');
                                         try {
                                           setEditingNoteDate(new Date(note.date).toISOString().split('T')[0]);
                                         } catch {
@@ -5911,15 +5906,6 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                     </button>
                                   </div>
                                 </div>
-
-                                {note.motif && (
-                                  <div className="pt-0.5">
-                                    <h5 className="text-xs font-bold text-gray-900 flex items-center gap-1.5">
-                                      <span className="w-1.5 h-1.5 rounded-full bg-primary inline-block"></span>
-                                      <span>{note.motif}</span>
-                                    </h5>
-                                  </div>
-                                )}
 
                                 {note.anamnese || note.treatment ? (
                                   <div className="space-y-3 pt-1">
@@ -9515,7 +9501,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                             ? `${evDateObj.getFullYear()}-${String(evDateObj.getMonth() + 1).padStart(2, '0')}-${String(evDateObj.getDate()).padStart(2, '0')}`
                             : undefined;
                           const evDraft = clientId ? getClientDraft(clientId, ev.id, evDateStr) : null;
-                          const hasDraft = Boolean(evDraft && (evDraft.draft.anamnese?.trim() || evDraft.draft.treatment?.trim() || evDraft.draft.motif?.trim()));
+                          const hasDraft = Boolean(evDraft && hasNoteDraftContent(evDraft.draft));
 
                           return (
                             <div className={`p-2.5 rounded-xl border flex items-center gap-2 ${
@@ -9636,7 +9622,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                         ? `${evDateObj.getFullYear()}-${String(evDateObj.getMonth() + 1).padStart(2, '0')}-${String(evDateObj.getDate()).padStart(2, '0')}`
                         : undefined;
                       const evDraft = clientId ? getClientDraft(clientId, ev.id, evDateStr) : null;
-                      const hasDraft = Boolean(evDraft && (evDraft.draft.anamnese?.trim() || evDraft.draft.treatment?.trim() || evDraft.draft.motif?.trim()));
+                      const hasDraft = Boolean(evDraft && hasNoteDraftContent(evDraft.draft));
 
                       return (
                         <button
@@ -9753,7 +9739,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                 const associatedInv = invoices.find(i => (i.eventId && i.eventId === editingEvent.id) || (i.noteId && i.noteId === editingEvent.id));
                 const editClient = editingEvent.clientId ? clients.find(c => c.id === editingEvent.clientId) : (editingEvent.clientName ? clients.find(c => c.name.toLowerCase() === editingEvent.clientName?.toLowerCase()) : undefined);
                 const editDraft = editClient ? getClientDraft(editClient.id, editingEvent.id, editingEvent.date) : null;
-                const isDraftPending = Boolean(!associatedNote && editDraft && (editDraft.draft.anamnese?.trim() || editDraft.draft.treatment?.trim() || editDraft.draft.motif?.trim()));
+                const isDraftPending = Boolean(!associatedNote && editDraft && hasNoteDraftContent(editDraft.draft));
 
                 return (
                   <div className={`mb-4 rounded-2xl p-3.5 space-y-2.5 border ${
